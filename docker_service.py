@@ -35,8 +35,7 @@ def generate_compose_yaml_content(instance_id: int, ports: Dict[str, int]) -> st
     """
     根据用户需求生成 docker-compose.yml 内容
     """
-    content = f"""version: '3.8'
-services:
+    content = f"""services:
   teamspeak{instance_id}:
     image: {TS_DOCKER_IMAGE}
     container_name: ts-teamspeak-{instance_id}
