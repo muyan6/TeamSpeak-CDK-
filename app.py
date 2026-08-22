@@ -47,6 +47,7 @@ from docker_service import (
     fetch_container_logs
 )
 from music_bot_service import music_bot_client
+from firewall_service import auto_open_firewall_ports, open_single_instance_ports
 
 from contextlib import asynccontextmanager
 
@@ -73,6 +74,13 @@ async def lifespan(app: FastAPI):
         os.makedirs(config.DATA_BASE_DIR, exist_ok=True)
     except Exception as e:
         print(f"[Warning] 无法创建数据根目录: {config.DATA_BASE_DIR}, 错误: {e}")
+
+    # 自动放行服务器本地防火墙端口
+    try:
+        auto_open_firewall_ports()
+    except Exception as e:
+        print(f"[Warning] 自动配置本地防火墙异常: {e}")
+
     print(f"[*] TeamSpeak 管理服务已启动，监听端口: {config.SERVER_PORT}")
     print(f"[*] 数据存储根目录: {config.DATA_BASE_DIR}")
     print(f"[*] 音乐机器人对接中心: {config.BOT_PANEL_URL}")
@@ -259,6 +267,12 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     # 绑定 CDK
     bind_cdk_instance(code, instance_id)
     instance["public_host"] = client_host
+
+    # 针对新创建的实例端口进行本地防火墙即时放行
+    try:
+        open_single_instance_ports(ports["voice"], ports["file"], ports["query"], ports["tsdns"])
+    except Exception:
+        pass
 
     return {
         "success": True,

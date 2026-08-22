@@ -26,5 +26,21 @@ pip install -r requirements.txt
 # 创建数据目录
 mkdir -p /data/teamspeak
 
+# 自动放行 Linux 本地防火墙端口（如果已开启 firewalld / ufw）
+if command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld; then
+    echo "[*] 检测到 firewalld，正在放行端口段..."
+    firewall-cmd --permanent --add-port=12345/tcp &>/dev/null || true
+    firewall-cmd --permanent --add-port=60000-60100/udp &>/dev/null || true
+    firewall-cmd --permanent --add-port=20000-20100/tcp &>/dev/null || true
+    firewall-cmd --permanent --add-port=30000-30100/tcp &>/dev/null || true
+    firewall-cmd --reload &>/dev/null || true
+elif command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
+    echo "[*] 检测到 ufw，正在放行端口段..."
+    ufw allow 12345/tcp &>/dev/null || true
+    ufw allow 60000:60100/udp &>/dev/null || true
+    ufw allow 20000:20100/tcp &>/dev/null || true
+    ufw allow 30000:30100/tcp &>/dev/null || true
+fi
+
 echo "[*] 正在启动管理服务，监听端口 12345..."
 python app.py
