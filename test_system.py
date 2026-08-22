@@ -53,10 +53,10 @@ class TestTeamSpeakManager(unittest.TestCase):
         # 第一次分配（对应 ts1）
         id1, ports1 = port_manager.allocate_ports_for_instance()
         self.assertEqual(id1, 1)
-        self.assertEqual(ports1["voice"], 9988)
-        self.assertEqual(ports1["file"], 30034)
-        self.assertEqual(ports1["query"], 10012)
-        self.assertEqual(ports1["tsdns"], 41145)
+        self.assertEqual(ports1["voice"], 60001)
+        self.assertEqual(ports1["file"], 20001)
+        self.assertEqual(ports1["query"], 30001)
+        self.assertEqual(ports1["tsdns"], 40001)
 
         # 模拟 ts1 已写入数据库
         database.create_instance(
@@ -73,20 +73,20 @@ class TestTeamSpeakManager(unittest.TestCase):
         # 第二次分配（对应 ts2）
         id2, ports2 = port_manager.allocate_ports_for_instance()
         self.assertEqual(id2, 2)
-        self.assertEqual(ports2["voice"], 9989)
-        self.assertEqual(ports2["file"], 30035)
-        self.assertEqual(ports2["query"], 10013)
-        self.assertEqual(ports2["tsdns"], 41146)
+        self.assertEqual(ports2["voice"], 60002)
+        self.assertEqual(ports2["file"], 20002)
+        self.assertEqual(ports2["query"], 30002)
+        self.assertEqual(ports2["tsdns"], 40002)
 
     def test_compose_yaml_generation(self):
-        ports = {"voice": 9988, "file": 30034, "query": 10012, "tsdns": 41145}
+        ports = {"voice": 60001, "file": 20001, "query": 30001, "tsdns": 40001}
         yaml_str = docker_service.generate_compose_yaml_content(1, ports)
         self.assertIn("teamspeak1:", yaml_str)
         self.assertIn("container_name: ts-teamspeak-1", yaml_str)
-        self.assertIn('"9988:9987/udp"', yaml_str)
-        self.assertIn('"30034:30033"', yaml_str)
-        self.assertIn('"10012:10011"', yaml_str)
-        self.assertIn('"41145:41144"', yaml_str)
+        self.assertIn('"60001:9987/udp"', yaml_str)
+        self.assertIn('"20001:30033"', yaml_str)
+        self.assertIn('"30001:10011"', yaml_str)
+        self.assertIn('"40001:41144"', yaml_str)
         self.assertIn("./data:/var/ts3server", yaml_str)
 
     def test_token_extraction(self):
@@ -111,10 +111,10 @@ class TestTeamSpeakManager(unittest.TestCase):
             name="ts1",
             container_name="ts-teamspeak-1",
             dir_path="/data/teamspeak/ts1",
-            voice_port=9988,
-            file_port=30034,
-            query_port=10012,
-            tsdns_port=41145,
+            voice_port=60001,
+            file_port=20001,
+            query_port=30001,
+            tsdns_port=40001,
             admin_token="my-token-123"
         )
         database.bind_cdk_instance(code, 1)
@@ -134,10 +134,10 @@ class TestTeamSpeakManager(unittest.TestCase):
             name="ts1",
             container_name="ts-teamspeak-1",
             dir_path="/data/teamspeak/ts1",
-            voice_port=9988,
-            file_port=30034,
-            query_port=10012,
-            tsdns_port=41145
+            voice_port=60001,
+            file_port=20001,
+            query_port=30001,
+            tsdns_port=40001
         )
         # 预先占用 ts2 的端口
         database.create_instance(
@@ -145,19 +145,19 @@ class TestTeamSpeakManager(unittest.TestCase):
             name="ts2",
             container_name="ts-teamspeak-2",
             dir_path="/data/teamspeak/ts2",
-            voice_port=9989,
-            file_port=30035,
-            query_port=10013,
-            tsdns_port=41146
+            voice_port=60002,
+            file_port=20002,
+            query_port=30002,
+            tsdns_port=40002
         )
 
         # 此时新分配应该直接拿到 ts3 和对应端口
         next_id, next_ports = port_manager.allocate_ports_for_instance()
         self.assertEqual(next_id, 3)
-        self.assertEqual(next_ports["voice"], 9990)
-        self.assertEqual(next_ports["file"], 30036)
-        self.assertEqual(next_ports["query"], 10014)
-        self.assertEqual(next_ports["tsdns"], 41147)
+        self.assertEqual(next_ports["voice"], 60003)
+        self.assertEqual(next_ports["file"], 20003)
+        self.assertEqual(next_ports["query"], 30003)
+        self.assertEqual(next_ports["tsdns"], 40003)
 
 if __name__ == "__main__":
     unittest.main()

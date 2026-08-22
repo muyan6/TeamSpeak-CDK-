@@ -27,11 +27,11 @@ DATA_BASE_DIR = os.getenv("TS_DATA_DIR", _DEFAULT_DATA_DIR)
 # SQLite 数据库文件路径
 DB_PATH = os.getenv("DB_PATH", str(Path(__file__).parent.resolve() / "teamspeak_manager.db"))
 
-# 端口基础偏移配置 (官方默认被占用的端口，分配时基础偏移从 +1 开始，即 ts1 -> base+1)
-BASE_VOICE_PORT = int(os.getenv("BASE_VOICE_PORT", "9987"))      # ts1 -> 9988
-BASE_FILE_PORT = int(os.getenv("BASE_FILE_PORT", "30033"))        # ts1 -> 30034
-BASE_QUERY_PORT = int(os.getenv("BASE_QUERY_PORT", "10011"))      # ts1 -> 10012
-BASE_TSDNS_PORT = int(os.getenv("BASE_TSDNS_PORT", "41144"))      # ts1 -> 41145
+# 端口基础分段配置 (分段前缀规律分配: ts1 -> base+1)
+BASE_VOICE_PORT = int(os.getenv("BASE_VOICE_PORT", "60000"))      # ts1 -> 60001 (UDP)
+BASE_FILE_PORT = int(os.getenv("BASE_FILE_PORT", "20000"))        # ts1 -> 20001 (TCP)
+BASE_QUERY_PORT = int(os.getenv("BASE_QUERY_PORT", "30000"))      # ts1 -> 30001 (TCP)
+BASE_TSDNS_PORT = int(os.getenv("BASE_TSDNS_PORT", "40000"))      # ts1 -> 40001 (TCP)
 
 # Docker 镜像名称
 TS_DOCKER_IMAGE = os.getenv("TS_DOCKER_IMAGE", "teamspeak:latest")
