@@ -7,126 +7,413 @@
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
-    .tab-nav {
+    :root {
+      --admin-max-width: 1360px;
+    }
+    .container-admin {
+      max-width: var(--admin-max-width);
+      margin: 0 auto;
+      padding: 1.5rem 2rem;
+      width: 100%;
+    }
+    .navbar {
       display: flex;
-      gap: 1rem;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.85rem 0;
+      margin-bottom: 1.75rem;
       border-bottom: 1px solid var(--border-color);
-      margin-bottom: 1.5rem;
     }
-    .tab-btn {
-      background: none;
-      border: none;
-      color: var(--text-muted);
-      font-size: 1rem;
-      font-weight: 600;
-      padding: 0.75rem 1rem;
-      cursor: pointer;
-      border-bottom: 2px solid transparent;
-      transition: all 0.2s;
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.85rem;
+      font-size: 1.35rem;
+      font-weight: 700;
+      color: #fff;
+      text-decoration: none;
     }
-    .tab-btn.active {
-      color: var(--accent-primary);
-      border-bottom-color: var(--accent-primary);
+    .brand-icon {
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, #ec4899, #8b5cf6);
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.25rem;
+      box-shadow: 0 4px 14px rgba(236, 72, 153, 0.35);
+    }
+    .nav-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
     }
     .stats-row {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem;
-      margin-bottom: 1.5rem;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+      gap: 1.25rem;
+      margin-bottom: 1.75rem;
     }
     .stat-card {
-      background: rgba(15, 23, 42, 0.6);
+      background: rgba(15, 23, 42, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
       border: 1px solid var(--border-color);
-      border-radius: 12px;
-      padding: 1.25rem;
+      border-radius: 14px;
+      padding: 1.25rem 1.5rem;
+      position: relative;
+      overflow: hidden;
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    .stat-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+    }
+    .stat-card::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 4px;
+      height: 100%;
+      background: var(--card-accent, #3b82f6);
+    }
+    .stat-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      font-weight: 600;
+    }
+    .stat-icon {
+      font-size: 1.35rem;
+      opacity: 0.85;
     }
     .stat-val {
-      font-size: 1.8rem;
-      font-weight: 700;
+      font-size: 2rem;
+      font-weight: 800;
       color: #fff;
+      margin-top: 0.4rem;
+      letter-spacing: -0.5px;
+    }
+    .stat-desc {
+      font-size: 0.75rem;
+      color: var(--text-muted);
       margin-top: 0.25rem;
     }
+
+    /* Tab Navigation */
+    .tab-nav {
+      display: flex;
+      gap: 0.5rem;
+      background: rgba(15, 23, 42, 0.5);
+      padding: 0.35rem;
+      border-radius: 12px;
+      border: 1px solid var(--border-color);
+      margin-bottom: 1.5rem;
+      overflow-x: auto;
+    }
+    .tab-btn {
+      flex: 1;
+      min-width: 140px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      font-weight: 600;
+      padding: 0.75rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+    .tab-btn:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .tab-btn.active {
+      background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(139, 92, 246, 0.25));
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
+    }
+
+    /* Buttons & Controls */
     .btn-action {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
       background: rgba(255, 255, 255, 0.08);
       border: 1px solid var(--border-color);
-      color: #fff;
-      padding: 0.35rem 0.65rem;
-      border-radius: 6px;
+      color: #e2e8f0;
+      padding: 0.4rem 0.75rem;
+      border-radius: 7px;
       cursor: pointer;
-      font-size: 0.8rem;
-      transition: background 0.2s;
+      font-size: 0.85rem;
+      font-weight: 500;
+      transition: all 0.15s ease;
+      text-decoration: none;
     }
     .btn-action:hover {
       background: rgba(255, 255, 255, 0.18);
+      color: #fff;
+      transform: translateY(-1px);
+    }
+    .btn-action-sm {
+      padding: 0.25rem 0.5rem;
+      font-size: 0.78rem;
+    }
+    .btn-primary {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      background: linear-gradient(135deg, #3b82f6, #6366f1);
+      color: white;
+      border: none;
+      padding: 0.55rem 1.25rem;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s;
+      box-shadow: 0 4px 12px var(--accent-glow);
+    }
+    .btn-primary:hover {
+      box-shadow: 0 6px 18px rgba(59, 130, 246, 0.5);
+      transform: translateY(-1px);
     }
     .btn-danger {
-      background: rgba(239, 68, 68, 0.2);
+      background: rgba(239, 68, 68, 0.18);
       border-color: rgba(239, 68, 68, 0.4);
       color: #f87171;
     }
     .btn-danger:hover {
-      background: rgba(239, 68, 68, 0.4);
+      background: rgba(239, 68, 68, 0.35);
+      color: #fff;
     }
-    pre.log-viewer {
-      background: #000;
-      color: #38bdf8;
-      padding: 1rem;
+    .btn-purple {
+      background: rgba(168, 85, 247, 0.18);
+      border-color: rgba(168, 85, 247, 0.4);
+      color: #c084fc;
+    }
+    .btn-purple:hover {
+      background: rgba(168, 85, 247, 0.35);
+      color: #fff;
+    }
+
+    /* Table Styles */
+    .table-responsive {
+      overflow-x: auto;
+      border-radius: 10px;
+      border: 1px solid var(--border-color);
+    }
+    .data-table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.88rem;
+      text-align: left;
+    }
+    .data-table thead {
+      background: rgba(15, 23, 42, 0.85);
+      border-bottom: 1px solid var(--border-color);
+    }
+    .data-table th {
+      padding: 0.85rem 1rem;
+      font-weight: 600;
+      color: #94a3b8;
+      white-space: nowrap;
+    }
+    .data-table tbody tr {
+      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+      transition: background 0.15s;
+    }
+    .data-table tbody tr:hover {
+      background: rgba(255, 255, 255, 0.035);
+    }
+    .data-table td {
+      padding: 0.85rem 1rem;
+      vertical-align: middle;
+    }
+
+    /* Badges */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.3rem;
+      padding: 0.25rem 0.55rem;
+      border-radius: 6px;
+      font-size: 0.75rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+    .badge-success {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.35);
+    }
+    .badge-info {
+      background: rgba(59, 130, 246, 0.15);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.35);
+    }
+    .badge-warning {
+      background: rgba(245, 158, 11, 0.15);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.35);
+    }
+    .badge-danger {
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+    }
+    .badge-purple {
+      background: rgba(168, 85, 247, 0.15);
+      color: #c084fc;
+      border: 1px solid rgba(168, 85, 247, 0.35);
+    }
+
+    /* Inputs */
+    .form-control {
+      padding: 0.5rem 0.8rem;
       border-radius: 8px;
-      font-family: monospace;
+      border: 1px solid var(--border-color);
+      background: rgba(0, 0, 0, 0.35);
+      color: #fff;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    .form-control:focus {
+      border-color: #60a5fa;
+    }
+
+    /* Floating Toast */
+    #toastContainer {
+      position: fixed;
+      top: 1.5rem;
+      right: 1.5rem;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      pointer-events: none;
+    }
+    .toast-msg {
+      background: rgba(15, 23, 42, 0.95);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--border-color);
+      color: #fff;
+      padding: 0.75rem 1.25rem;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+      display: flex;
+      align-items: center;
+      gap: 0.6rem;
+      pointer-events: auto;
+      animation: toastSlideIn 0.3s ease-out;
+    }
+    @keyframes toastSlideIn {
+      from { transform: translateX(100%); opacity: 0; }
+      to { transform: translateX(0); opacity: 1; }
+    }
+
+    pre.log-viewer {
+      background: #020617;
+      color: #38bdf8;
+      padding: 1.25rem;
+      border-radius: 8px;
+      font-family: 'Consolas', 'Courier New', monospace;
       font-size: 0.85rem;
-      height: 400px;
+      height: 440px;
       overflow-y: auto;
       white-space: pre-wrap;
       word-break: break-all;
+      border: 1px solid rgba(56, 189, 248, 0.2);
     }
   </style>
 </head>
 <body>
-  <div class="container">
+  <!-- 浮动通知容器 -->
+  <div id="toastContainer"></div>
+
+  <div class="container-admin">
     <header class="navbar">
       <a href="/admin" class="brand">
-        <div class="brand-icon" style="background: linear-gradient(135deg, #ec4899, #8b5cf6);">
+        <div class="brand-icon">
           <i class="fa-solid fa-server"></i>
         </div>
-      <nav class="nav-links">
-        <a href="/"><i class="fa-solid fa-arrow-left"></i> 返回前台</a>
-        <button class="btn-action" id="headerChangePwdBtn" style="display: none;" onclick="openPwdModal()"><i class="fa-solid fa-key"></i> 修改后台密码</button>
-        <button class="btn-action btn-danger" id="headerLogoutBtn" style="display: none;" onclick="logout()"><i class="fa-solid fa-right-from-bracket"></i> 退出登录</button>
-      </nav>
+        <span>TS3 Admin Console</span>
+      </a>
+      <div class="nav-actions">
+        <a href="/" class="btn-action"><i class="fa-solid fa-arrow-left"></i> 前台兑换</a>
+        <button class="btn-action" id="headerChangePwdBtn" style="display: none;" onclick="openPwdModal()"><i class="fa-solid fa-key"></i> 修改密码</button>
+        <button class="btn-action btn-danger" id="headerLogoutBtn" style="display: none;" onclick="logout()"><i class="fa-solid fa-right-from-bracket"></i> 退出</button>
+      </div>
     </header>
 
     <!-- 登录区域（若未登录） -->
-    <div id="loginSection" class="card" style="max-width: 450px; margin: 3rem auto; display: none;">
-      <h2 style="margin-bottom: 1rem; text-align: center;"><i class="fa-solid fa-lock"></i> 管理员身份认证</h2>
-      <div style="margin-bottom: 1.25rem;">
-        <label class="info-label">请输入管理员密钥 (ADMIN_PASSWORD)</label>
-        <input type="password" id="adminPwdInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.75rem;" placeholder="默认: admin123456">
+    <div id="loginSection" class="card" style="max-width: 440px; margin: 4rem auto; display: none;">
+      <div style="text-align: center; margin-bottom: 1.5rem;">
+        <div style="width: 54px; height: 54px; background: linear-gradient(135deg, #3b82f6, #8b5cf6); border-radius: 14px; display: inline-flex; align-items: center; justify-content: center; font-size: 1.6rem; margin-bottom: 0.75rem;">
+          <i class="fa-solid fa-lock"></i>
+        </div>
+        <h2 style="font-size: 1.35rem; font-weight: 700;">管理员身份认证</h2>
+        <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;">请输入控制台管理员密钥以继续</p>
       </div>
-      <button class="btn-primary" style="width: 100%; justify-content: center;" onclick="performLogin()">
-        <i class="fa-solid fa-right-to-bracket"></i> 进入后台
-      </button>
-      <p id="loginError" style="color: #f87171; font-size: 0.85rem; margin-top: 0.75rem; text-align: center; display: none;"></p>
+      <form onsubmit="handleLoginSubmit(event)">
+        <div style="margin-bottom: 1.25rem;">
+          <label class="info-label" style="margin-bottom: 0.4rem; display: block;">管理员密码 (ADMIN_PASSWORD)</label>
+          <input type="password" id="adminPwdInput" class="form-control" style="width: 100%; padding: 0.75rem 1rem;" placeholder="默认: admin123456" required autofocus>
+        </div>
+        <button type="submit" class="btn-primary" style="width: 100%; justify-content: center; padding: 0.75rem;">
+          <i class="fa-solid fa-right-to-bracket"></i> 进入管理后台
+        </button>
+      </form>
+      <p id="loginError" style="color: #f87171; font-size: 0.85rem; margin-top: 0.85rem; text-align: center; display: none;"></p>
     </div>
 
     <!-- 主控板（已登录） -->
     <div id="dashboardSection" style="display: none;">
       <!-- 统计指标 -->
       <div class="stats-row">
-        <div class="stat-card">
-          <div class="info-label">总 TS 服务器</div>
+        <div class="stat-card" style="--card-accent: #3b82f6;">
+          <div class="stat-header">
+            <span>TS 服务器容器数</span>
+            <i class="fa-solid fa-cubes stat-icon" style="color: #60a5fa;"></i>
+          </div>
           <div class="stat-val" id="statTotalInstances">0</div>
+          <div class="stat-desc">独立虚拟化运行中</div>
         </div>
-        <div class="stat-card">
-          <div class="info-label">总音乐机器人</div>
+        <div class="stat-card" style="--card-accent: #a855f7;">
+          <div class="stat-header">
+            <span>音乐机器人实例</span>
+            <i class="fa-solid fa-robot stat-icon" style="color: #c084fc;"></i>
+          </div>
           <div class="stat-val" style="color: #c084fc;" id="statTotalBots">0</div>
+          <div class="stat-desc">远程平台已对接</div>
         </div>
-        <div class="stat-card">
-          <div class="info-label">已生成 CDK / 未使用</div>
-          <div class="stat-val" id="statCdkCounts">0 / 0</div>
+        <div class="stat-card" style="--card-accent: #10b981;">
+          <div class="stat-header">
+            <span>总生成 / 未使用 CDK</span>
+            <i class="fa-solid fa-ticket stat-icon" style="color: #34d399;"></i>
+          </div>
+          <div class="stat-val" style="color: #34d399;" id="statCdkCounts">0 / 0</div>
+          <div class="stat-desc">全类型卡密统计</div>
         </div>
-        <div class="stat-card">
-          <div class="info-label">已分配语音端口范围</div>
-          <div class="stat-val" style="font-size: 1.2rem; color: #60a5fa;" id="statPortRange">-</div>
+        <div class="stat-card" style="--card-accent: #f59e0b;">
+          <div class="stat-header">
+            <span>分配语音端口范围</span>
+            <i class="fa-solid fa-network-wired stat-icon" style="color: #fbbf24;"></i>
+          </div>
+          <div class="stat-val" style="font-size: 1.4rem; color: #fbbf24; margin-top: 0.65rem;" id="statPortRange">-</div>
+          <div class="stat-desc">自动防冲突分段规律</div>
         </div>
       </div>
 
@@ -145,8 +432,11 @@
 
       <!-- Tab 1: TS 实例列表 -->
       <div id="tabContentInstances" class="card">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-          <h3 style="font-size: 1.15rem;">运行中的 TeamSpeak 容器集群</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+          <div>
+            <h3 style="font-size: 1.15rem; font-weight: 700;"><i class="fa-solid fa-cubes" style="color: #60a5fa;"></i> TeamSpeak 虚拟服务器集群</h3>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">每个实例对应独立的 Docker 容器、规律端口段与独立数据存储目录</p>
+          </div>
           <button class="btn-action" onclick="loadInstances()"><i class="fa-solid fa-rotate"></i> 刷新列表</button>
         </div>
 
@@ -154,18 +444,18 @@
           <table class="data-table">
             <thead>
               <tr>
-                <th>编号</th>
-                <th>实例目录 / 容器名</th>
+                <th>编号 / 实例名</th>
+                <th>存储目录 / 容器名</th>
                 <th>语音端口 (UDP)</th>
-                <th>文件 / 查询端口</th>
-                <th>管理员 Token / 密码</th>
+                <th>文件 / 查询端口 (TCP)</th>
+                <th>管理员 Token & Query 凭据</th>
                 <th>容器状态</th>
                 <th>创建时间</th>
-                <th>管理操作</th>
+                <th style="text-align: right;">管理操作</th>
               </tr>
             </thead>
             <tbody id="instancesTableBody">
-              <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">暂无实例</td></tr>
+              <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
             </tbody>
           </table>
         </div>
@@ -173,13 +463,15 @@
 
       <!-- Tab 2: 音乐机器人管理 -->
       <div id="tabContentBots" class="card" style="display: none;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
           <div>
-            <h3 style="font-size: 1.15rem;"><i class="fa-solid fa-robot"></i> 音乐机器人实例列表</h3>
-            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">对接平台: <a id="botPanelTopLink" href="http://103.71.69.156:23467/" target="_blank" style="color: #a78bfa; text-decoration: none;">http://103.71.69.156:23467/</a> (账号: huasjj)</p>
+            <h3 style="font-size: 1.15rem; font-weight: 700; color: #c084fc;"><i class="fa-solid fa-robot"></i> 音乐机器人实例列表</h3>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">
+              控制中心: <a id="botPanelTopLink" href="http://103.71.69.156:23467/" target="_blank" style="color: #c084fc; text-decoration: none;">http://103.71.69.156:23467/</a>
+            </p>
           </div>
           <div style="display: flex; gap: 0.5rem;">
-            <a href="http://103.71.69.156:23467/" target="_blank" class="btn-action" style="background: rgba(168, 85, 247, 0.2); border-color: rgba(168, 85, 247, 0.4); color: #c084fc; text-decoration: none;">
+            <a href="http://103.71.69.156:23467/" target="_blank" class="btn-action btn-purple">
               <i class="fa-solid fa-arrow-up-right-from-square"></i> 打开点歌网页后台
             </a>
             <button class="btn-action" onclick="loadBots()"><i class="fa-solid fa-rotate"></i> 刷新</button>
@@ -196,12 +488,12 @@
                 <th>绑定 CDK</th>
                 <th>到期时间</th>
                 <th>剩余时长</th>
-                <th>连接状态</th>
-                <th>操作</th>
+                <th>运行状态</th>
+                <th style="text-align: right;">管理操作</th>
               </tr>
             </thead>
             <tbody id="botsTableBody">
-              <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">暂无音乐机器人实例</td></tr>
+              <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
             </tbody>
           </table>
         </div>
@@ -210,19 +502,19 @@
       <!-- Tab 3: CDK 管理 -->
       <div id="tabContentCdks" class="card" style="display: none;">
         <!-- 生成 CDK 工具栏 -->
-        <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); padding: 1.25rem; border-radius: 10px; margin-bottom: 1.5rem;">
-          <h4 style="margin-bottom: 0.75rem;"><i class="fa-solid fa-plus-circle"></i> 批量生成 CDK</h4>
-          <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); padding: 1.25rem 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;">
+          <h4 style="margin-bottom: 1rem; font-size: 1rem; color: #60a5fa;"><i class="fa-solid fa-wand-magic-sparkles"></i> 批量生成与发放 CDK</h4>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; align-items: flex-end;">
             <div>
-              <label class="info-label">CDK 类型</label>
-              <select id="genType" onchange="onCdkTypeChange()" style="padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff;">
+              <label class="info-label" style="display: block; margin-bottom: 0.35rem;">CDK 类型</label>
+              <select id="genType" class="form-control" onchange="onCdkTypeChange()" style="width: 100%;">
                 <option value="teamspeak">TeamSpeak 语音服务器</option>
                 <option value="music_bot">TeamSpeak 音乐机器人</option>
               </select>
             </div>
             <div id="durationSelectGroup" style="display: none;">
-              <label class="info-label">卡密有效时长</label>
-              <select id="genDuration" style="padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #facc15;">
+              <label class="info-label" style="display: block; margin-bottom: 0.35rem;">卡密有效时长</label>
+              <select id="genDuration" class="form-control" style="width: 100%; color: #facc15;">
                 <option value="1">1 个月 (月卡)</option>
                 <option value="3">3 个月 (季卡)</option>
                 <option value="6">6 个月 (半年卡)</option>
@@ -231,21 +523,23 @@
               </select>
             </div>
             <div>
-              <label class="info-label">生成数量</label>
-              <input type="number" id="genCount" value="5" min="1" max="100" style="width: 80px; padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff;">
+              <label class="info-label" style="display: block; margin-bottom: 0.35rem;">生成数量 (张)</label>
+              <input type="number" id="genCount" class="form-control" value="5" min="1" max="200" style="width: 100%;">
             </div>
-            <div style="flex: 1; min-width: 180px;">
-              <label class="info-label">备注信息</label>
-              <input type="text" id="genRemark" placeholder="如：音乐机器人月卡 / 战队专享" style="width: 100%; padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff;">
+            <div style="grid-column: span 1;">
+              <label class="info-label" style="display: block; margin-bottom: 0.35rem;">备注说明 (选填)</label>
+              <input type="text" id="genRemark" class="form-control" placeholder="如：活动发放 / 战队月卡" style="width: 100%;">
             </div>
-            <div style="align-self: flex-end;">
-              <button class="btn-primary" onclick="generateCdks()"><i class="fa-solid fa-wand-magic-sparkles"></i> 立即生成</button>
+            <div>
+              <button class="btn-primary" style="width: 100%; justify-content: center; height: 38px;" onclick="generateCdks()">
+                <i class="fa-solid fa-plus-circle"></i> 立即批量生成
+              </button>
             </div>
           </div>
         </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
-          <h3 style="font-size: 1.15rem;">CDK 列表与状态</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
+          <h3 style="font-size: 1.15rem; font-weight: 700;"><i class="fa-solid fa-list-check"></i> CDK 激活码清单</h3>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
             <button class="btn-action" style="background: rgba(59, 130, 246, 0.2); border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;" onclick="downloadCdksTxt('unused')">
               <i class="fa-solid fa-file-arrow-down"></i> 导出未使用 (.txt)
@@ -254,7 +548,7 @@
               <i class="fa-solid fa-file-lines"></i> 导出全部 (.txt)
             </button>
             <button class="btn-action" onclick="copyUnusedCdks()">
-              <i class="fa-regular fa-copy"></i> 批量复制未使用
+              <i class="fa-regular fa-copy"></i> 复制未使用
             </button>
             <button class="btn-action" onclick="loadCdks()">
               <i class="fa-solid fa-rotate"></i> 刷新
@@ -270,13 +564,13 @@
                 <th>类型 / 时长</th>
                 <th>使用状态</th>
                 <th>绑定对象</th>
-                <th>备注</th>
+                <th>备注信息</th>
                 <th>生成时间</th>
-                <th>操作</th>
+                <th style="text-align: right;">操作</th>
               </tr>
             </thead>
             <tbody id="cdksTableBody">
-              <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">暂无 CDK 数据</td></tr>
+              <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
             </tbody>
           </table>
         </div>
@@ -286,10 +580,14 @@
 
   <!-- 日志模态框 -->
   <div id="logsModal" class="modal-overlay">
-    <div class="modal-content" style="max-width: 800px;">
+    <div class="modal-content" style="max-width: 860px;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <h3 id="logsModalTitle"><i class="fa-solid fa-terminal"></i> 容器实时日志</h3>
-        <button class="btn-action" onclick="closeLogsModal()"><i class="fa-solid fa-xmark"></i> 关闭</button>
+        <h3 id="logsModalTitle" style="font-size: 1.15rem; color: #38bdf8;"><i class="fa-solid fa-terminal"></i> 容器实时日志</h3>
+        <div style="display: flex; gap: 0.5rem;">
+          <button class="btn-action btn-action-sm" onclick="copyLogsContent()"><i class="fa-regular fa-copy"></i> 复制日志</button>
+          <button class="btn-action btn-action-sm" onclick="refreshCurrentLogs()"><i class="fa-solid fa-rotate"></i> 刷新</button>
+          <button class="btn-action btn-action-sm" onclick="closeLogsModal()"><i class="fa-solid fa-xmark"></i></button>
+        </div>
       </div>
       <pre id="logsContent" class="log-viewer">加载日志中...</pre>
     </div>
@@ -297,27 +595,27 @@
 
   <!-- 修改密码模态框 -->
   <div id="changePwdModal" class="modal-overlay">
-    <div class="modal-content" style="max-width: 450px;">
+    <div class="modal-content" style="max-width: 440px;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
         <h3 style="font-size: 1.15rem; color: #60a5fa;"><i class="fa-solid fa-key"></i> 修改管理员后台密码</h3>
         <button class="btn-action" onclick="closePwdModal()"><i class="fa-solid fa-xmark"></i></button>
       </div>
       <form onsubmit="submitChangePwd(event)">
         <div style="margin-bottom: 1rem;">
-          <label class="info-label">当前旧密码</label>
-          <input type="password" id="oldPwdInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="输入当前使用的密码" required>
+          <label class="info-label" style="display: block; margin-bottom: 0.35rem;">当前旧密码</label>
+          <input type="password" id="oldPwdInput" class="form-control" style="width: 100%;" placeholder="输入当前使用的密码" required>
         </div>
         <div style="margin-bottom: 1rem;">
-          <label class="info-label">新密码 (至少 6 位)</label>
-          <input type="password" id="newPwdInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="输入新密码" minlength="6" required>
+          <label class="info-label" style="display: block; margin-bottom: 0.35rem;">新密码 (至少 6 位)</label>
+          <input type="password" id="newPwdInput" class="form-control" style="width: 100%;" placeholder="输入新密码" minlength="6" required>
         </div>
-        <div style="margin-bottom: 1.25rem;">
-          <label class="info-label">确认新密码</label>
-          <input type="password" id="confirmNewPwdInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="再次输入新密码" minlength="6" required>
+        <div style="margin-bottom: 1.5rem;">
+          <label class="info-label" style="display: block; margin-bottom: 0.35rem;">确认新密码</label>
+          <input type="password" id="confirmNewPwdInput" class="form-control" style="width: 100%;" placeholder="再次输入新密码" minlength="6" required>
         </div>
         <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
           <button type="button" class="btn-action" onclick="closePwdModal()">取消</button>
-          <button type="submit" class="btn-primary" style="background: linear-gradient(135deg, #3b82f6, #6366f1);"><i class="fa-solid fa-check"></i> 确认保存新密码</button>
+          <button type="submit" class="btn-primary"><i class="fa-solid fa-check"></i> 确认保存新密码</button>
         </div>
       </form>
     </div>
@@ -326,6 +624,23 @@
   <script>
     let adminToken = localStorage.getItem('ts_admin_pwd') || '';
     let currentLogInstanceId = null;
+
+    // Toast 浮动提示
+    function showToast(msg, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      const toast = document.createElement('div');
+      toast.className = 'toast-msg';
+      const icon = type === 'success' ? 'fa-circle-check' : (type === 'error' ? 'fa-circle-xmark' : 'fa-circle-info');
+      const iconColor = type === 'success' ? '#34d399' : (type === 'error' ? '#f87171' : '#60a5fa');
+      toast.innerHTML = `<i class="fa-solid ${icon}" style="color: ${iconColor};"></i> <span>${msg}</span>`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-10px)';
+        toast.style.transition = 'all 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
 
     window.addEventListener('DOMContentLoaded', () => {
       if (adminToken) {
@@ -342,6 +657,11 @@
       document.getElementById('headerLogoutBtn').style.display = 'none';
     }
 
+    function handleLoginSubmit(e) {
+      e.preventDefault();
+      performLogin();
+    }
+
     async function performLogin() {
       const pwd = document.getElementById('adminPwdInput').value.trim();
       if (!pwd) return;
@@ -355,6 +675,7 @@
       adminToken = '';
       localStorage.removeItem('ts_admin_pwd');
       showLogin();
+      showToast('已安全退出后台', 'info');
     }
 
     function openPwdModal() {
@@ -375,12 +696,11 @@
       const confirmPwd = document.getElementById('confirmNewPwdInput').value.trim();
 
       if (newPwd !== confirmPwd) {
-        alert('两次输入的新密码不一致，请重新输入');
+        showToast('两次输入的新密码不一致', 'error');
         return;
       }
-
       if (newPwd.length < 6) {
-        alert('新密码长度不能少于 6 位');
+        showToast('新密码长度不能少于 6 位', 'error');
         return;
       }
 
@@ -391,23 +711,19 @@
             'Content-Type': 'application/json',
             'X-Admin-Password': adminToken
           },
-          body: JSON.stringify({
-            old_password: oldPwd,
-            new_password: newPwd
-          })
+          body: JSON.stringify({ old_password: oldPwd, new_password: newPwd })
         });
-
         const data = await res.json();
         if (data.success) {
-          alert('🎉 ' + data.message);
+          showToast(data.message, 'success');
           adminToken = newPwd;
           localStorage.setItem('ts_admin_pwd', newPwd);
           closePwdModal();
         } else {
-          alert('❌ ' + (data.message || '修改失败'));
+          showToast(data.message || '修改失败', 'error');
         }
       } catch (err) {
-        alert('修改请求异常');
+        showToast('请求异常', 'error');
       }
     }
 
@@ -486,80 +802,87 @@
 
     async function loadInstances() {
       const tbody = document.getElementById('instancesTableBody');
-      tbody.innerHTML = '<tr><td colspan="8" style="text-align: center;">加载中...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
       try {
         const res = await fetch('/api/admin/instances', {
           headers: { 'X-Admin-Password': adminToken }
         });
         const data = await res.json();
         if (!data.success || data.instances.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">暂无实例</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无 TeamSpeak 实例</td></tr>';
           return;
         }
 
         tbody.innerHTML = data.instances.map(inst => `
           <tr>
-            <td><strong style="color: #60a5fa;">${inst.name}</strong> (ID: ${inst.id})</td>
             <td>
-              <div><code style="color: #a78bfa;">${inst.dir_path}</code></div>
+              <div style="font-weight: 700; color: #60a5fa; font-size: 1rem;">${inst.name}</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">ID: ${inst.id}</div>
+            </td>
+            <td>
+              <div style="font-family: monospace; font-size: 0.8rem; color: #a78bfa;">${inst.dir_path}</div>
               <div style="font-size: 0.75rem; color: var(--text-muted);">${inst.container_name}</div>
             </td>
-            <td><span class="badge badge-info">${inst.voice_port} / UDP</span></td>
+            <td><span class="badge badge-info"><i class="fa-solid fa-microphone"></i> ${inst.voice_port} / UDP</span></td>
             <td>
-              <div style="font-size: 0.8rem;">文件: ${inst.file_port}</div>
-              <div style="font-size: 0.8rem; color: var(--text-muted);">查询: ${inst.query_port}</div>
+              <div style="font-size: 0.8rem;">文件: <code style="color:#38bdf8">${inst.file_port}</code></div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">查询: <code style="color:#facc15">${inst.query_port}</code></div>
             </td>
             <td>
-              <div style="font-size: 0.8rem; color: #fca5a5;">
+              <div style="font-size: 0.8rem; color: #fca5a5; display: flex; align-items: center; gap: 0.3rem;">
                 <span title="${inst.admin_token || ''}">Token: ${inst.admin_token ? inst.admin_token.slice(0, 10) + '...' : '无'}</span>
-                ${inst.admin_token ? `<button class="btn-copy" style="padding: 1px 4px; font-size: 0.7rem;" onclick="navigator.clipboard.writeText('${inst.admin_token}'); alert('已复制管理员 Token')"><i class="fa-regular fa-copy"></i></button>` : ''}
+                ${inst.admin_token ? `<button class="btn-action btn-action-sm" onclick="navigator.clipboard.writeText('${inst.admin_token}'); showToast('已复制管理员 Token', 'success')"><i class="fa-regular fa-copy"></i></button>` : ''}
               </div>
-              <div style="font-size: 0.75rem; color: #facc15; margin-top: 2px;">
+              <div style="font-size: 0.78rem; color: #facc15; margin-top: 3px; display: flex; align-items: center; gap: 0.3rem;">
                 <span title="${inst.query_password || ''}">密码: ${inst.query_password ? inst.query_password.slice(0, 10) + '...' : '无'}</span>
-                ${inst.query_password ? `<button class="btn-copy" style="padding: 1px 4px; font-size: 0.7rem;" onclick="navigator.clipboard.writeText('${inst.query_password}'); alert('已复制 serveradmin 密码')"><i class="fa-regular fa-copy"></i></button>` : ''}
+                ${inst.query_password ? `<button class="btn-action btn-action-sm" onclick="navigator.clipboard.writeText('${inst.query_password}'); showToast('已复制 Query 密码', 'success')"><i class="fa-regular fa-copy"></i></button>` : ''}
               </div>
             </td>
             <td>
               <span class="badge ${inst.live_status === 'running' ? 'badge-success' : 'badge-warning'}">
+                <i class="fa-solid ${inst.live_status === 'running' ? 'fa-circle-play' : 'fa-circle-pause'}"></i>
                 ${inst.live_status || inst.status}
               </span>
             </td>
             <td style="font-size: 0.8rem; color: var(--text-muted);">${inst.created_at}</td>
-            <td>
-              <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
-                <button class="btn-action" title="查看日志" onclick="showLogs(${inst.id})"><i class="fa-solid fa-terminal"></i></button>
-                <button class="btn-action" title="重启容器" onclick="instanceAction(${inst.id}, 'restart')"><i class="fa-solid fa-rotate-right"></i></button>
-                <button class="btn-action" title="停止容器" onclick="instanceAction(${inst.id}, 'stop')"><i class="fa-solid fa-stop"></i></button>
-                <button class="btn-action" title="启动容器" onclick="instanceAction(${inst.id}, 'start')"><i class="fa-solid fa-play"></i></button>
-                <button class="btn-action btn-danger" title="销毁实例" onclick="destroyInstance(${inst.id})"><i class="fa-solid fa-trash"></i></button>
+            <td style="text-align: right;">
+              <div style="display: inline-flex; gap: 0.35rem;">
+                <button class="btn-action btn-action-sm" title="实时日志" onclick="showLogs(${inst.id})"><i class="fa-solid fa-terminal"></i></button>
+                <button class="btn-action btn-action-sm" title="重启" onclick="instanceAction(${inst.id}, 'restart')"><i class="fa-solid fa-rotate-right"></i></button>
+                <button class="btn-action btn-action-sm" title="停止" onclick="instanceAction(${inst.id}, 'stop')"><i class="fa-solid fa-stop"></i></button>
+                <button class="btn-action btn-action-sm" title="启动" onclick="instanceAction(${inst.id}, 'start')"><i class="fa-solid fa-play"></i></button>
+                <button class="btn-action btn-action-sm btn-danger" title="彻底销毁" onclick="destroyInstance(${inst.id})"><i class="fa-solid fa-trash"></i></button>
               </div>
             </td>
           </tr>
         `).join('');
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #f87171;">加载失败</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
       }
     }
 
     async function loadBots() {
       const tbody = document.getElementById('botsTableBody');
-      tbody.innerHTML = '<tr><td colspan="8" style="text-align: center;">加载中...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
       try {
         const res = await fetch('/api/admin/bots', {
           headers: { 'X-Admin-Password': adminToken }
         });
         const data = await res.json();
         if (!data.success || data.bots.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">暂无音乐机器人实例</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无音乐机器人实例</td></tr>';
           return;
         }
 
         tbody.innerHTML = data.bots.map(b => `
           <tr>
-            <td><strong style="color: #c084fc;">${b.name}</strong></td>
-            <td><code style="color: #60a5fa;">${b.server_address}:${b.server_port}</code></td>
-            <td>${b.nickname}</td>
-            <td><code style="color: #38bdf8;">${b.cdk_code}</code></td>
+            <td>
+              <strong style="color: #c084fc; font-size: 0.95rem;">${b.name}</strong>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">${b.default_channel || '默认大厅'}</div>
+            </td>
+            <td><code style="color: #60a5fa; font-size: 0.85rem;">${b.server_address}:${b.server_port}</code></td>
+            <td><span style="color: #e2e8f0; font-weight: 500;">${b.nickname}</span></td>
+            <td><code style="color: #38bdf8; font-size: 0.85rem;">${b.cdk_code}</code></td>
             <td style="font-size: 0.85rem; color: #facc15;">${b.expire_at || '永久有效'}</td>
             <td>
               <span class="badge ${b.is_expired ? 'badge-danger' : 'badge-success'}">
@@ -571,24 +894,24 @@
                 ${b.connected ? (b.playing ? '▶ 播放中' : '🟢 已连接') : '⚪ 未连接'}
               </span>
             </td>
-            <td>
-              <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
-                <a href="${data.bot_panel_url || 'http://103.71.69.156:23467/'}" target="_blank" class="btn-action" style="color: #c084fc; text-decoration: none;" title="进入网页控制台"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
-                <button class="btn-action" title="重启机器人" onclick="botAdminAction('${b.bot_id}', 'restart')"><i class="fa-solid fa-rotate-right"></i></button>
-                <button class="btn-action" title="停止机器人" onclick="botAdminAction('${b.bot_id}', 'stop')"><i class="fa-solid fa-stop"></i></button>
-                <button class="btn-action" title="启动机器人" onclick="botAdminAction('${b.bot_id}', 'start')"><i class="fa-solid fa-play"></i></button>
-                <button class="btn-action btn-danger" title="删除机器人" onclick="botAdminAction('${b.bot_id}', 'delete')"><i class="fa-solid fa-trash"></i></button>
+            <td style="text-align: right;">
+              <div style="display: inline-flex; gap: 0.35rem;">
+                <a href="${data.bot_panel_url || 'http://103.71.69.156:23467/'}" target="_blank" class="btn-action btn-action-sm btn-purple" title="进入点歌后台"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                <button class="btn-action btn-action-sm" title="重启机器人" onclick="botAdminAction('${b.bot_id}', 'restart')"><i class="fa-solid fa-rotate-right"></i></button>
+                <button class="btn-action btn-action-sm" title="停止机器人" onclick="botAdminAction('${b.bot_id}', 'stop')"><i class="fa-solid fa-stop"></i></button>
+                <button class="btn-action btn-action-sm" title="启动机器人" onclick="botAdminAction('${b.bot_id}', 'start')"><i class="fa-solid fa-play"></i></button>
+                <button class="btn-action btn-action-sm btn-danger" title="删除机器人" onclick="botAdminAction('${b.bot_id}', 'delete')"><i class="fa-solid fa-trash"></i></button>
               </div>
             </td>
           </tr>
         `).join('');
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #f87171;">加载失败</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
       }
     }
 
     async function botAdminAction(botId, action) {
-      if (action === 'delete' && !confirm('确定要删除该音乐机器人吗？')) return;
+      if (action === 'delete' && !confirm('⚠️ 确定要删除该音乐机器人实例吗？此操作不可逆！')) return;
       try {
         const res = await fetch(`/api/admin/bots/${botId}/action`, {
           method: 'POST',
@@ -599,24 +922,24 @@
           body: JSON.stringify({ action })
         });
         const data = await res.json();
-        alert(data.message || '操作完成');
+        showToast(data.message || '操作完成', data.success ? 'success' : 'error');
         loadBots();
         loadStats();
       } catch (e) {
-        alert('操作失败');
+        showToast('操作失败', 'error');
       }
     }
 
     async function loadCdks() {
       const tbody = document.getElementById('cdksTableBody');
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">加载中...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
       try {
         const res = await fetch('/api/admin/cdks', {
           headers: { 'X-Admin-Password': adminToken }
         });
         const data = await res.json();
         if (!data.success || data.cdks.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">暂无 CDK 数据</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无 CDK 数据</td></tr>';
           return;
         }
 
@@ -624,28 +947,30 @@
 
         tbody.innerHTML = data.cdks.map(c => `
           <tr>
-            <td><code style="font-size: 0.95rem; font-weight: 600; color: #38bdf8;">${c.code}</code></td>
             <td>
-              <span class="badge ${c.cdk_type === 'music_bot' ? 'badge-warning' : 'badge-info'}">
+              <code style="font-size: 0.95rem; font-weight: 700; color: #38bdf8;">${c.code}</code>
+              <button class="btn-action btn-action-sm" style="margin-left: 0.4rem;" onclick="navigator.clipboard.writeText('${c.code}'); showToast('已复制 CDK', 'success')"><i class="fa-regular fa-copy"></i></button>
+            </td>
+            <td>
+              <span class="badge ${c.cdk_type === 'music_bot' ? 'badge-purple' : 'badge-info'}">
                 ${c.cdk_type === 'music_bot' ? ('音乐机器人 · ' + (c.duration_months ? c.duration_months + '个月' : '永久')) : 'TS服务器'}
               </span>
             </td>
             <td>
               <span class="badge ${c.status === 'unused' ? 'badge-success' : (c.status === 'used' ? 'badge-warning' : 'badge-danger')}">
-                ${c.status === 'unused' ? '未使用' : (c.status === 'used' ? '已使用' : '已禁用')}
+                ${c.status === 'unused' ? '未使用' : (c.status === 'used' ? '已激活使用' : '已禁用')}
               </span>
             </td>
-            <td>${c.instance_id ? `<strong style="color:#60a5fa">ts${c.instance_id}</strong>` : (c.bot_id ? `<strong style="color:#c084fc">机器人</strong>` : '-')}</td>
-            <td>${c.remark || '-'}</td>
+            <td>${c.instance_id ? `<strong style="color:#60a5fa">ts${c.instance_id}</strong>` : (c.bot_id ? `<strong style="color:#c084fc">机器人</strong>` : '<span style="color:var(--text-muted)">-</span>')}</td>
+            <td style="color: #cbd5e1;">${c.remark || '<span style="color:var(--text-muted)">无</span>'}</td>
             <td style="font-size: 0.8rem; color: var(--text-muted);">${c.created_at}</td>
-            <td>
-              <button class="btn-action" onclick="navigator.clipboard.writeText('${c.code}'); alert('已复制: ${c.code}')"><i class="fa-regular fa-copy"></i></button>
-              <button class="btn-action btn-danger" onclick="deleteCdk('${c.code}')"><i class="fa-solid fa-trash"></i></button>
+            <td style="text-align: right;">
+              <button class="btn-action btn-action-sm btn-danger" onclick="deleteCdk('${c.code}')"><i class="fa-solid fa-trash"></i> 删除</button>
             </td>
           </tr>
         `).join('');
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #f87171;">加载失败</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
       }
     }
 
@@ -671,15 +996,17 @@
           loadCdks();
           loadStats();
 
+          showToast(`🎉 成功生成 ${data.created.length} 个 CDK！`, 'success');
+
           if (confirm(`🎉 成功生成 ${data.created.length} 个 ${cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器'} CDK！\n\n是否立即下载为 .txt 文本文件？`)) {
             const dateStr = new Date().toISOString().slice(0, 10);
             downloadTextFile(`cdk_batch_${cdk_type}_${dateStr}.txt`, listText);
           }
         } else {
-          alert(data.message || '生成失败');
+          showToast(data.message || '生成失败', 'error');
         }
       } catch (e) {
-        alert('请求异常');
+        showToast('请求异常', 'error');
       }
     }
 
@@ -697,7 +1024,7 @@
 
     function downloadCdksTxt(type) {
       if (!window._allCdks || window._allCdks.length === 0) {
-        alert('当前没有可导出的 CDK 数据');
+        showToast('当前没有可导出的 CDK 数据', 'error');
         return;
       }
       let filtered = [];
@@ -713,16 +1040,17 @@
       }
 
       if (filtered.length === 0) {
-        alert('没有符合条件的 CDK 数据');
+        showToast('没有符合条件的 CDK 数据', 'error');
         return;
       }
 
       const text = filtered.map(c => {
         if (type === 'unused') return c.code;
-        return `${c.code}\t状态: ${c.status === 'unused' ? '未使用' : (c.status === 'used' ? '已绑定ts' + c.instance_id : '已禁用')}\t备注: ${c.remark || '无'}`;
+        return `${c.code}\t类型: ${c.cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器'}\t状态: ${c.status === 'unused' ? '未使用' : '已使用'}\t备注: ${c.remark || '无'}`;
       }).join('\n');
 
       downloadTextFile(filename, text);
+      showToast(`已成功导出 ${filtered.length} 个 CDK 文本文件！`, 'success');
     }
 
     async function deleteCdk(code) {
@@ -734,11 +1062,12 @@
         });
         const data = await res.json();
         if (data.success) {
+          showToast('CDK 已删除', 'success');
           loadCdks();
           loadStats();
         }
       } catch (e) {
-        alert('删除失败');
+        showToast('删除失败', 'error');
       }
     }
 
@@ -746,12 +1075,12 @@
       if (!window._allCdks) return;
       const unused = window._allCdks.filter(c => c.status === 'unused').map(c => c.code);
       if (unused.length === 0) {
-        alert('没有未使用的 CDK 可复制');
+        showToast('没有未使用的 CDK 可复制', 'error');
         return;
       }
       const text = unused.join('\n');
       navigator.clipboard.writeText(text).then(() => {
-        alert(`已复制 ${unused.length} 个未使用的 CDK 到剪贴板！\n\n` + text);
+        showToast(`已复制 ${unused.length} 个未使用的 CDK 到剪贴板！`, 'success');
       });
     }
 
@@ -766,10 +1095,10 @@
           body: JSON.stringify({ action })
         });
         const data = await res.json();
-        alert(data.message || '操作完成');
+        showToast(data.message || '操作完成', data.success ? 'success' : 'error');
         loadInstances();
       } catch (e) {
-        alert('操作失败');
+        showToast('操作失败', 'error');
       }
     }
 
@@ -780,7 +1109,7 @@
 
     async function showLogs(id) {
       currentLogInstanceId = id;
-      document.getElementById('logsModalTitle').innerHTML = `<i class="fa-solid fa-terminal"></i> 实例 ts${id} 容器日志`;
+      document.getElementById('logsModalTitle').innerHTML = `<i class="fa-solid fa-terminal"></i> 实例 ts${id} 容器实时日志`;
       document.getElementById('logsContent').innerText = '正在读取 Docker 日志...';
       document.getElementById('logsModal').style.display = 'flex';
 
@@ -793,6 +1122,17 @@
       } catch (e) {
         document.getElementById('logsContent').innerText = '读取日志失败';
       }
+    }
+
+    function refreshCurrentLogs() {
+      if (currentLogInstanceId) showLogs(currentLogInstanceId);
+    }
+
+    function copyLogsContent() {
+      const text = document.getElementById('logsContent').innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        showToast('日志已复制到剪贴板', 'success');
+      });
     }
 
     function closeLogsModal() {
