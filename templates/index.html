@@ -141,7 +141,7 @@
         </div>
 
         <!-- 快捷连接按钮 -->
-        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+        <div class="action-btn-group" style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
           <a id="tsClientLink" href="#" class="btn-primary" style="background: linear-gradient(135deg, #10b981, #059669); text-decoration: none;">
             <i class="fa-solid fa-arrow-up-right-from-square"></i> 一键唤起 TeamSpeak 客户端连接
           </a>
@@ -177,15 +177,18 @@
             </div>
             <div>
               <label class="info-label">目标 TS 语音端口 (Port)</label>
-              <input type="number" id="botServerPortInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" value="60001" required>
+              <input type="number" id="botServerPortInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" value="9987" placeholder="9987" required>
+              <div style="font-size: 0.76rem; color: #94a3b8; margin-top: 0.35rem; line-height: 1.4;">
+                <i class="fa-solid fa-circle-info" style="color: #60a5fa;"></i> 推荐官方默认端口 <code>9987</code>；若对接本平台自建服务器请输入分配端口 (如 <code>60001</code>)
+              </div>
             </div>
             <div>
               <label class="info-label">默认加入频道名称 (可选)</label>
-              <input type="text" id="botDefaultChannelInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="如 音乐频道">
+              <input type="text" id="botDefaultChannelInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="如 音乐大厅 (留空加入根频道)">
             </div>
             <div>
               <label class="info-label">TS 服务器连接密码 (可选)</label>
-              <input type="password" id="botServerPassInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="若服务器有密码请填写">
+              <input type="password" id="botServerPassInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="无密码请留空">
             </div>
           </div>
 
@@ -234,47 +237,103 @@
         </div>
 
         <!-- 机器人操作控制栏 -->
-        <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1rem;">
+        <div class="action-btn-group" style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem;">
           <a id="botWebPanelLink" href="http://103.71.69.156:23467/" target="_blank" class="btn-primary" style="background: linear-gradient(135deg, #ec4899, #8b5cf6); text-decoration: none;">
-            <i class="fa-solid fa-music"></i> 进入网页音乐点歌/播放控制台
+            <i class="fa-solid fa-music"></i> 进入网页点歌 / 播放控制台
           </a>
           <button class="btn-primary" style="background: var(--bg-secondary); border: 1px solid var(--border-color);" onclick="botAction('restart')">
-            <i class="fa-solid fa-rotate"></i> 重启机器人
+            <i class="fa-solid fa-rotate"></i> 重启
           </button>
           <button class="btn-primary" style="background: var(--bg-secondary); border: 1px solid var(--border-color);" onclick="botAction('stop')">
-            <i class="fa-solid fa-stop"></i> 停止机器人
+            <i class="fa-solid fa-stop"></i> 停止
           </button>
           <button class="btn-primary" style="background: var(--bg-secondary); border: 1px solid var(--border-color);" onclick="botAction('start')">
-            <i class="fa-solid fa-play"></i> 启动机器人
+            <i class="fa-solid fa-play"></i> 启动
           </button>
         </div>
 
         <!-- 机器人快捷续费卡片 -->
-        <div style="margin-top: 1.5rem; padding: 1rem; background: rgba(139, 92, 246, 0.1); border: 1px dashed rgba(139, 92, 246, 0.4); border-radius: 10px;">
-          <div style="font-size: 0.95rem; font-weight: 600; color: #c084fc; margin-bottom: 0.5rem;">
-            <i class="fa-solid fa-clock-rotate-left"></i> 机器人续费延期
+        <div style="margin-top: 1.5rem; padding: 1.25rem; background: rgba(139, 92, 246, 0.08); border: 1px dashed rgba(139, 92, 246, 0.4); border-radius: 12px;">
+          <div style="font-size: 0.95rem; font-weight: 600; color: #c084fc; margin-bottom: 0.35rem;">
+            <i class="fa-solid fa-clock-rotate-left"></i> 机器人卡密续费延期
           </div>
-          <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">
-            持有新的音乐机器人 CDK（月卡/季卡/年卡/永久卡）？输入卡密即可直接为当前机器人累加有效时长并自动恢复运行：
+          <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.85rem;">
+            持有新的音乐机器人 CDK？输入新卡密可直接在原有到期时间上累加时长，并自动恢复连线播放：
           </p>
           <form onsubmit="handleRenewBot(event)" style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
-            <input type="text" id="renewCdkInput" placeholder="输入新的音乐机器人 CDK (BOT-xxxx-...)" style="flex: 1; min-width: 220px; padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff; text-transform: uppercase;" required>
-            <button type="submit" class="btn-primary" style="background: linear-gradient(135deg, #a855f7, #6366f1); padding: 0.5rem 1.25rem;">
+            <input type="text" id="renewCdkInput" placeholder="输入新 CDK (BOT-xxxx-...)" style="flex: 1; min-width: 220px; padding: 0.6rem 0.85rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff; text-transform: uppercase;" required>
+            <button type="submit" class="btn-primary" style="background: linear-gradient(135deg, #a855f7, #6366f1); padding: 0.6rem 1.25rem;">
               <i class="fa-solid fa-bolt"></i> 立即续费
             </button>
           </form>
         </div>
       </div>
 
-      <!-- 说明与指南 -->
-      <div class="card" style="margin-top: 1rem;">
-        <h3 style="font-size: 1.1rem; margin-bottom: 1rem;"><i class="fa-solid fa-circle-question"></i> 使用帮助与说明</h3>
-        <ol style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.8; padding-left: 1.25rem;">
-          <li>每个 CDK 对应一个独立的 Docker 虚拟化 TeamSpeak 服务器，享有独享的端口与独立存储目录。</li>
-          <li>开通后系统自动分配未占用的语音端口（例如 9988、9989 等，已规避官方冲突端口）。</li>
-          <li>若不慎刷新页面，只需再次输入相同的 CDK 即可重新查询并获取连接地址与管理员秘钥。</li>
-          <li>使用 TeamSpeak 客户端连接时，在服务器地址栏输入 <code style="color: #60a5fa;" id="guideExampleAddr">IP:端口</code> 即可加入。</li>
-        </ol>
+      <!-- 新手入门与使用教程指南 -->
+      <div class="card" style="margin-top: 1.5rem;">
+        <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.25rem;">
+          <div style="width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1rem;">
+            <i class="fa-solid fa-book-open"></i>
+          </div>
+          <h3 style="font-size: 1.15rem; font-weight: 700;">使用帮助与基础教程指南</h3>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+          <!-- 教程卡片 1 -->
+          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; color: #60a5fa; font-weight: 700;">
+              <i class="fa-solid fa-1" style="background: rgba(59, 130, 246, 0.2); padding: 4px 8px; border-radius: 6px;"></i>
+              <span>开通专属 TS 语音服务器</span>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.7;">
+              输入 <code>TS-</code> 开头的卡密点击开通，系统会自动在服务器后台通过独立 Docker 容器秒级部署，并分配独立的专属语音与查询端口。
+            </p>
+          </div>
+
+          <!-- 教程卡片 2 -->
+          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; color: #34d399; font-weight: 700;">
+              <i class="fa-solid fa-2" style="background: rgba(16, 185, 129, 0.2); padding: 4px 8px; border-radius: 6px;"></i>
+              <span>连接客户端与获取服主权限</span>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.7;">
+              打开 TeamSpeak 客户端，在地址栏输入 <code style="color:#34d399">IP:端口</code> 连接。首次进入会弹出权限秘钥窗口，粘贴页面给出的 <strong>Token 秘钥</strong> 即可成为超级管理员。
+            </p>
+          </div>
+
+          <!-- 教程卡片 3 -->
+          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; color: #c084fc; font-weight: 700;">
+              <i class="fa-solid fa-3" style="background: rgba(168, 85, 247, 0.2); padding: 4px 8px; border-radius: 6px;"></i>
+              <span>音乐机器人接入与网页点歌</span>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.7;">
+              使用 <code>BOT-</code> 开头的卡密开通。填入 TS 服务器 IP，语音端口推荐官方默认 <strong>9987</strong>（自建服务器填 <strong>60001</strong> 等），开通后点击控制台可在线点歌与播歌。
+            </p>
+          </div>
+
+          <!-- 教程卡片 4 -->
+          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; color: #facc15; font-weight: 700;">
+              <i class="fa-solid fa-4" style="background: rgba(250, 204, 21, 0.2); padding: 4px 8px; border-radius: 6px;"></i>
+              <span>到期保护与快捷续费</span>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.7;">
+              机器人到期后自动停机断开，<strong>绝不会删除您的任何歌单与配置</strong>。随时在控制面板输入新 CDK 即可秒级延期并重新上线。
+            </p>
+          </div>
+        </div>
+
+        <!-- 常见问题提示 -->
+        <div style="background: rgba(59, 130, 246, 0.08); border-left: 4px solid #3b82f6; border-radius: 6px; padding: 0.85rem 1rem;">
+          <div style="font-size: 0.88rem; font-weight: 600; color: #93c5fd; margin-bottom: 0.25rem;">
+            <i class="fa-solid fa-circle-question"></i> 温馨提示与常见问题
+          </div>
+          <ul style="color: var(--text-muted); font-size: 0.82rem; line-height: 1.7; padding-left: 1.2rem; margin-bottom: 0;">
+            <li>如果不慎关闭或刷新网页，只需在首页<strong>再次输入相同的 CDK</strong> 即可随时找回连接地址、Token 密钥与机器人控制面板。</li>
+            <li>手机端用户（iOS / Android）下载 TeamSpeak App 后，点击右上角新建连接，填入相同的 <code style="color:#60a5fa">IP:端口</code> 即可随时上麦交流。</li>
+          </ul>
+        </div>
       </div>
     </main>
 
