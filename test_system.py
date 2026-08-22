@@ -192,5 +192,18 @@ class TestTeamSpeakManager(unittest.TestCase):
         expired_after = database.get_expired_active_bots()
         self.assertFalse(any(b["bot_id"] == "uuid-expire-test" for b in expired_after))
 
+    def test_admin_password_management(self):
+        # 1. 初始读取默认密码
+        default_pwd = database.get_admin_password()
+        self.assertTrue(len(default_pwd) >= 6)
+
+        # 2. 修改为新密码
+        database.set_admin_password("NewSecurePass888!")
+        self.assertEqual(database.get_admin_password(), "NewSecurePass888!")
+
+        # 3. 还原默认密码
+        database.set_admin_password(default_pwd)
+        self.assertEqual(database.get_admin_password(), default_pwd)
+
 if __name__ == "__main__":
     unittest.main()

@@ -32,7 +32,9 @@ from database import (
     update_bot_instance_status,
     delete_bot_instance,
     get_expired_active_bots,
-    renew_bot_instance
+    renew_bot_instance,
+    get_admin_password,
+    set_admin_password
 )
 from port_manager import allocate_ports_for_instance
 from docker_service import (
@@ -128,10 +130,15 @@ class RenewBotRequest(BaseModel):
     cdk: str
     bot_id: str
 
+class ChangePasswordRequest(BaseModel):
+    old_password: str
+    new_password: str
+
 # --- 权限校验依赖 ---
 
 def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
-    if not x_admin_password or x_admin_password != config.ADMIN_PASSWORD:
+    current_pwd = get_admin_password()
+    if not x_admin_password or x_admin_password != current_pwd:
         raise HTTPException(status_code=401, detail="管理员密码错误或未提供")
     return True
 
@@ -583,6 +590,21 @@ def export_cdks_txt(status: Optional[str] = "unused", _: bool = Depends(verify_a
         content=content,
         headers={"Content-Disposition": f"attachment; filename={filename}"}
     )
+
+@app.post("/api/admin/change-password")
+def change_admin_password_api(req: ChangePasswordRequest, _: bool = Depends(verify_admin)):
+    old_pwd = req.old_password.strip()
+    new_pwd = req.new_password.strip()
+    current_pwd = get_admin_password()
+
+    if old_pwd != current_pwd:
+        return JSONResponse(status_code=400, content={"success": False, "message": "原密码不正确，请重新输入"})
+
+    if len(new_pwd) < 6:
+        return JSONResponse(status_code=400, content={"success": False, "message": "新密码长度不能少于 6 位"})
+
+    set_admin_password(new_pwd)
+    return {"success": True, "message": "管理员密码修改成功！请使用新密码重新登录"}
 
 if __name__ == "__main__":
     import uvicorn

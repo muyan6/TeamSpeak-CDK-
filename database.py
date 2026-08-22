@@ -68,6 +68,14 @@ def init_db():
             )
         ''')
         
+        # 创建系统配置表
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS system_settings (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )
+        ''')
+        
         # 兼容旧表升级：检查并添加列
         cursor.execute("PRAGMA table_info(instances)")
         cols = [col["name"] for col in cursor.fetchall()]
@@ -86,6 +94,35 @@ def init_db():
             cursor.execute("ALTER TABLE cdks ADD COLUMN bot_id TEXT")
 
         conn.commit()
+
+# --- 系统配置与密码管理 ---
+
+def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT value FROM system_settings WHERE key = ?", (key,))
+        row = cursor.fetchone()
+        return row["value"] if row else default
+
+def set_setting(key: str, value: str):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO system_settings (key, value) VALUES (?, ?)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value
+        """, (key, str(value)))
+        conn.commit()
+
+def get_admin_password() -> str:
+    from config import ADMIN_PASSWORD
+    pwd = get_setting("admin_password")
+    if pwd is None:
+        pwd = ADMIN_PASSWORD
+        set_setting("admin_password", pwd)
+    return pwd
+
+def set_admin_password(new_password: str):
+    set_setting("admin_password", new_password.strip())
 
 # --- CDK 管理 ---
 

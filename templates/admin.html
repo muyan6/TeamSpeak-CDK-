@@ -88,10 +88,10 @@
         <div class="brand-icon" style="background: linear-gradient(135deg, #ec4899, #8b5cf6);">
           <i class="fa-solid fa-server"></i>
         </div>
-        <span>TS3 Admin Console</span>
-      </a>
       <nav class="nav-links">
         <a href="/"><i class="fa-solid fa-arrow-left"></i> 返回前台</a>
+        <button class="btn-action" id="headerChangePwdBtn" style="display: none;" onclick="openPwdModal()"><i class="fa-solid fa-key"></i> 修改后台密码</button>
+        <button class="btn-action btn-danger" id="headerLogoutBtn" style="display: none;" onclick="logout()"><i class="fa-solid fa-right-from-bracket"></i> 退出登录</button>
       </nav>
     </header>
 
@@ -295,6 +295,34 @@
     </div>
   </div>
 
+  <!-- 修改密码模态框 -->
+  <div id="changePwdModal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 450px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <h3 style="font-size: 1.15rem; color: #60a5fa;"><i class="fa-solid fa-key"></i> 修改管理员后台密码</h3>
+        <button class="btn-action" onclick="closePwdModal()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <form onsubmit="submitChangePwd(event)">
+        <div style="margin-bottom: 1rem;">
+          <label class="info-label">当前旧密码</label>
+          <input type="password" id="oldPwdInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="输入当前使用的密码" required>
+        </div>
+        <div style="margin-bottom: 1rem;">
+          <label class="info-label">新密码 (至少 6 位)</label>
+          <input type="password" id="newPwdInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="输入新密码" minlength="6" required>
+        </div>
+        <div style="margin-bottom: 1.25rem;">
+          <label class="info-label">确认新密码</label>
+          <input type="password" id="confirmNewPwdInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="再次输入新密码" minlength="6" required>
+        </div>
+        <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+          <button type="button" class="btn-action" onclick="closePwdModal()">取消</button>
+          <button type="submit" class="btn-primary" style="background: linear-gradient(135deg, #3b82f6, #6366f1);"><i class="fa-solid fa-check"></i> 确认保存新密码</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <script>
     let adminToken = localStorage.getItem('ts_admin_pwd') || '';
     let currentLogInstanceId = null;
@@ -310,6 +338,8 @@
     function showLogin() {
       document.getElementById('loginSection').style.display = 'block';
       document.getElementById('dashboardSection').style.display = 'none';
+      document.getElementById('headerChangePwdBtn').style.display = 'none';
+      document.getElementById('headerLogoutBtn').style.display = 'none';
     }
 
     async function performLogin() {
@@ -318,6 +348,67 @@
       adminToken = pwd;
       localStorage.setItem('ts_admin_pwd', pwd);
       checkAuth();
+    }
+
+    function logout() {
+      if (!confirm('确定要退出管理后台吗？')) return;
+      adminToken = '';
+      localStorage.removeItem('ts_admin_pwd');
+      showLogin();
+    }
+
+    function openPwdModal() {
+      document.getElementById('oldPwdInput').value = '';
+      document.getElementById('newPwdInput').value = '';
+      document.getElementById('confirmNewPwdInput').value = '';
+      document.getElementById('changePwdModal').style.display = 'flex';
+    }
+
+    function closePwdModal() {
+      document.getElementById('changePwdModal').style.display = 'none';
+    }
+
+    async function submitChangePwd(e) {
+      e.preventDefault();
+      const oldPwd = document.getElementById('oldPwdInput').value.trim();
+      const newPwd = document.getElementById('newPwdInput').value.trim();
+      const confirmPwd = document.getElementById('confirmNewPwdInput').value.trim();
+
+      if (newPwd !== confirmPwd) {
+        alert('两次输入的新密码不一致，请重新输入');
+        return;
+      }
+
+      if (newPwd.length < 6) {
+        alert('新密码长度不能少于 6 位');
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/admin/change-password', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify({
+            old_password: oldPwd,
+            new_password: newPwd
+          })
+        });
+
+        const data = await res.json();
+        if (data.success) {
+          alert('🎉 ' + data.message);
+          adminToken = newPwd;
+          localStorage.setItem('ts_admin_pwd', newPwd);
+          closePwdModal();
+        } else {
+          alert('❌ ' + (data.message || '修改失败'));
+        }
+      } catch (err) {
+        alert('修改请求异常');
+      }
     }
 
     async function checkAuth() {
@@ -333,6 +424,8 @@
         }
         document.getElementById('loginSection').style.display = 'none';
         document.getElementById('dashboardSection').style.display = 'block';
+        document.getElementById('headerChangePwdBtn').style.display = 'inline-flex';
+        document.getElementById('headerLogoutBtn').style.display = 'inline-flex';
         loadDashboard();
       } catch (e) {
         showLogin();
