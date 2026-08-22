@@ -113,8 +113,12 @@
       <!-- 统计指标 -->
       <div class="stats-row">
         <div class="stat-card">
-          <div class="info-label">总 TS 实例数</div>
+          <div class="info-label">总 TS 服务器</div>
           <div class="stat-val" id="statTotalInstances">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="info-label">总音乐机器人</div>
+          <div class="stat-val" style="color: #c084fc;" id="statTotalBots">0</div>
         </div>
         <div class="stat-card">
           <div class="info-label">已生成 CDK / 未使用</div>
@@ -129,14 +133,17 @@
       <!-- 标签页切换 -->
       <div class="tab-nav">
         <button class="tab-btn active" id="tabBtnInstances" onclick="switchTab('instances')">
-          <i class="fa-solid fa-cubes"></i> 实例集群管理
+          <i class="fa-solid fa-cubes"></i> TS 服务器集群
+        </button>
+        <button class="tab-btn" id="tabBtnBots" onclick="switchTab('bots')">
+          <i class="fa-solid fa-music"></i> 音乐机器人管理
         </button>
         <button class="tab-btn" id="tabBtnCdks" onclick="switchTab('cdks')">
           <i class="fa-solid fa-ticket"></i> CDK 激活码管理
         </button>
       </div>
 
-      <!-- Tab 1: 实例集群列表 -->
+      <!-- Tab 1: TS 实例列表 -->
       <div id="tabContentInstances" class="card">
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
           <h3 style="font-size: 1.15rem;">运行中的 TeamSpeak 容器集群</h3>
@@ -151,7 +158,7 @@
                 <th>实例目录 / 容器名</th>
                 <th>语音端口 (UDP)</th>
                 <th>文件 / 查询端口</th>
-                <th>管理员 Token</th>
+                <th>管理员 Token / 密码</th>
                 <th>容器状态</th>
                 <th>创建时间</th>
                 <th>管理操作</th>
@@ -164,19 +171,72 @@
         </div>
       </div>
 
-      <!-- Tab 2: CDK 管理 -->
+      <!-- Tab 2: 音乐机器人管理 -->
+      <div id="tabContentBots" class="card" style="display: none;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div>
+            <h3 style="font-size: 1.15rem;"><i class="fa-solid fa-robot"></i> 音乐机器人实例列表</h3>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">对接平台: <a id="botPanelTopLink" href="http://103.71.69.156:23467/" target="_blank" style="color: #a78bfa; text-decoration: none;">http://103.71.69.156:23467/</a> (账号: huasjj)</p>
+          </div>
+          <div style="display: flex; gap: 0.5rem;">
+            <a href="http://103.71.69.156:23467/" target="_blank" class="btn-action" style="background: rgba(168, 85, 247, 0.2); border-color: rgba(168, 85, 247, 0.4); color: #c084fc; text-decoration: none;">
+              <i class="fa-solid fa-arrow-up-right-from-square"></i> 打开点歌网页后台
+            </a>
+            <button class="btn-action" onclick="loadBots()"><i class="fa-solid fa-rotate"></i> 刷新</button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>机器人名称</th>
+                <th>目标 TS 服务器</th>
+                <th>机器人昵称</th>
+                <th>绑定 CDK</th>
+                <th>到期时间</th>
+                <th>剩余时长</th>
+                <th>连接状态</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="botsTableBody">
+              <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">暂无音乐机器人实例</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab 3: CDK 管理 -->
       <div id="tabContentCdks" class="card" style="display: none;">
         <!-- 生成 CDK 工具栏 -->
         <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); padding: 1.25rem; border-radius: 10px; margin-bottom: 1.5rem;">
           <h4 style="margin-bottom: 0.75rem;"><i class="fa-solid fa-plus-circle"></i> 批量生成 CDK</h4>
           <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
             <div>
-              <label class="info-label">生成数量</label>
-              <input type="number" id="genCount" value="5" min="1" max="100" style="width: 90px; padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff;">
+              <label class="info-label">CDK 类型</label>
+              <select id="genType" onchange="onCdkTypeChange()" style="padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff;">
+                <option value="teamspeak">TeamSpeak 语音服务器</option>
+                <option value="music_bot">TeamSpeak 音乐机器人</option>
+              </select>
             </div>
-            <div style="flex: 1; min-width: 200px;">
+            <div id="durationSelectGroup" style="display: none;">
+              <label class="info-label">卡密有效时长</label>
+              <select id="genDuration" style="padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #facc15;">
+                <option value="1">1 个月 (月卡)</option>
+                <option value="3">3 个月 (季卡)</option>
+                <option value="6">6 个月 (半年卡)</option>
+                <option value="12">12 个月 (年卡)</option>
+                <option value="0">永久有效</option>
+              </select>
+            </div>
+            <div>
+              <label class="info-label">生成数量</label>
+              <input type="number" id="genCount" value="5" min="1" max="100" style="width: 80px; padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff;">
+            </div>
+            <div style="flex: 1; min-width: 180px;">
               <label class="info-label">备注信息</label>
-              <input type="text" id="genRemark" placeholder="如：活动发放 / 玩家定制" style="width: 100%; padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff;">
+              <input type="text" id="genRemark" placeholder="如：音乐机器人月卡 / 战队专享" style="width: 100%; padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff;">
             </div>
             <div style="align-self: flex-end;">
               <button class="btn-primary" onclick="generateCdks()"><i class="fa-solid fa-wand-magic-sparkles"></i> 立即生成</button>
@@ -207,11 +267,11 @@
             <thead>
               <tr>
                 <th>CDK 激活码</th>
+                <th>类型 / 时长</th>
                 <th>使用状态</th>
-                <th>绑定实例</th>
+                <th>绑定对象</th>
                 <th>备注</th>
                 <th>生成时间</th>
-                <th>兑换时间</th>
                 <th>操作</th>
               </tr>
             </thead>
@@ -279,18 +339,30 @@
       }
     }
 
+    function onCdkTypeChange() {
+      const type = document.getElementById('genType').value;
+      document.getElementById('durationSelectGroup').style.display = type === 'music_bot' ? 'block' : 'none';
+    }
+
     function switchTab(tab) {
+      document.getElementById('tabBtnInstances').classList.remove('active');
+      document.getElementById('tabBtnBots').classList.remove('active');
+      document.getElementById('tabBtnCdks').classList.remove('active');
+      document.getElementById('tabContentInstances').style.display = 'none';
+      document.getElementById('tabContentBots').style.display = 'none';
+      document.getElementById('tabContentCdks').style.display = 'none';
+
       if (tab === 'instances') {
         document.getElementById('tabBtnInstances').classList.add('active');
-        document.getElementById('tabBtnCdks').classList.remove('active');
         document.getElementById('tabContentInstances').style.display = 'block';
-        document.getElementById('tabContentCdks').style.display = 'none';
         loadInstances();
+      } else if (tab === 'bots') {
+        document.getElementById('tabBtnBots').classList.add('active');
+        document.getElementById('tabContentBots').style.display = 'block';
+        loadBots();
       } else {
         document.getElementById('tabBtnCdks').classList.add('active');
-        document.getElementById('tabBtnInstances').classList.remove('active');
         document.getElementById('tabContentCdks').style.display = 'block';
-        document.getElementById('tabContentInstances').style.display = 'none';
         loadCdks();
       }
     }
@@ -308,8 +380,13 @@
         const data = await res.json();
         if (data.success) {
           document.getElementById('statTotalInstances').innerText = data.total_instances;
+          document.getElementById('statTotalBots').innerText = data.total_bots || 0;
           document.getElementById('statCdkCounts').innerText = `${data.total_cdks} / ${data.unused_cdks}`;
           document.getElementById('statPortRange').innerText = data.voice_ports_summary || '暂无分配';
+          if (data.bot_panel_url) {
+            document.getElementById('botPanelTopLink').href = data.bot_panel_url;
+            document.getElementById('botPanelTopLink').innerText = data.bot_panel_url;
+          }
         }
       } catch (e) {}
     }
@@ -371,6 +448,72 @@
       }
     }
 
+    async function loadBots() {
+      const tbody = document.getElementById('botsTableBody');
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align: center;">加载中...</td></tr>';
+      try {
+        const res = await fetch('/api/admin/bots', {
+          headers: { 'X-Admin-Password': adminToken }
+        });
+        const data = await res.json();
+        if (!data.success || data.bots.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">暂无音乐机器人实例</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = data.bots.map(b => `
+          <tr>
+            <td><strong style="color: #c084fc;">${b.name}</strong></td>
+            <td><code style="color: #60a5fa;">${b.server_address}:${b.server_port}</code></td>
+            <td>${b.nickname}</td>
+            <td><code style="color: #38bdf8;">${b.cdk_code}</code></td>
+            <td style="font-size: 0.85rem; color: #facc15;">${b.expire_at || '永久有效'}</td>
+            <td>
+              <span class="badge ${b.is_expired ? 'badge-danger' : 'badge-success'}">
+                ${b.is_expired ? '已到期' : (typeof b.days_left === 'number' ? b.days_left + ' 天' : b.days_left)}
+              </span>
+            </td>
+            <td>
+              <span class="badge ${b.connected ? 'badge-success' : 'badge-warning'}">
+                ${b.connected ? (b.playing ? '▶ 播放中' : '🟢 已连接') : '⚪ 未连接'}
+              </span>
+            </td>
+            <td>
+              <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+                <a href="${data.bot_panel_url || 'http://103.71.69.156:23467/'}" target="_blank" class="btn-action" style="color: #c084fc; text-decoration: none;" title="进入网页控制台"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                <button class="btn-action" title="重启机器人" onclick="botAdminAction('${b.bot_id}', 'restart')"><i class="fa-solid fa-rotate-right"></i></button>
+                <button class="btn-action" title="停止机器人" onclick="botAdminAction('${b.bot_id}', 'stop')"><i class="fa-solid fa-stop"></i></button>
+                <button class="btn-action" title="启动机器人" onclick="botAdminAction('${b.bot_id}', 'start')"><i class="fa-solid fa-play"></i></button>
+                <button class="btn-action btn-danger" title="删除机器人" onclick="botAdminAction('${b.bot_id}', 'delete')"><i class="fa-solid fa-trash"></i></button>
+              </div>
+            </td>
+          </tr>
+        `).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #f87171;">加载失败</td></tr>';
+      }
+    }
+
+    async function botAdminAction(botId, action) {
+      if (action === 'delete' && !confirm('确定要删除该音乐机器人吗？')) return;
+      try {
+        const res = await fetch(`/api/admin/bots/${botId}/action`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify({ action })
+        });
+        const data = await res.json();
+        alert(data.message || '操作完成');
+        loadBots();
+        loadStats();
+      } catch (e) {
+        alert('操作失败');
+      }
+    }
+
     async function loadCdks() {
       const tbody = document.getElementById('cdksTableBody');
       tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">加载中...</td></tr>';
@@ -390,14 +533,18 @@
           <tr>
             <td><code style="font-size: 0.95rem; font-weight: 600; color: #38bdf8;">${c.code}</code></td>
             <td>
+              <span class="badge ${c.cdk_type === 'music_bot' ? 'badge-warning' : 'badge-info'}">
+                ${c.cdk_type === 'music_bot' ? ('音乐机器人 · ' + (c.duration_months ? c.duration_months + '个月' : '永久')) : 'TS服务器'}
+              </span>
+            </td>
+            <td>
               <span class="badge ${c.status === 'unused' ? 'badge-success' : (c.status === 'used' ? 'badge-warning' : 'badge-danger')}">
                 ${c.status === 'unused' ? '未使用' : (c.status === 'used' ? '已使用' : '已禁用')}
               </span>
             </td>
-            <td>${c.instance_id ? `<strong style="color:#60a5fa">ts${c.instance_id}</strong>` : '-'}</td>
+            <td>${c.instance_id ? `<strong style="color:#60a5fa">ts${c.instance_id}</strong>` : (c.bot_id ? `<strong style="color:#c084fc">机器人</strong>` : '-')}</td>
             <td>${c.remark || '-'}</td>
             <td style="font-size: 0.8rem; color: var(--text-muted);">${c.created_at}</td>
-            <td style="font-size: 0.8rem; color: var(--text-muted);">${c.used_at || '-'}</td>
             <td>
               <button class="btn-action" onclick="navigator.clipboard.writeText('${c.code}'); alert('已复制: ${c.code}')"><i class="fa-regular fa-copy"></i></button>
               <button class="btn-action btn-danger" onclick="deleteCdk('${c.code}')"><i class="fa-solid fa-trash"></i></button>
@@ -412,6 +559,9 @@
     async function generateCdks() {
       const count = parseInt(document.getElementById('genCount').value) || 1;
       const remark = document.getElementById('genRemark').value.trim();
+      const cdk_type = document.getElementById('genType').value;
+      const duration_months = cdk_type === 'music_bot' ? (parseInt(document.getElementById('genDuration').value) || 0) : 0;
+
       try {
         const res = await fetch('/api/admin/cdks/generate', {
           method: 'POST',
@@ -419,7 +569,7 @@
             'Content-Type': 'application/json',
             'X-Admin-Password': adminToken
           },
-          body: JSON.stringify({ count, remark })
+          body: JSON.stringify({ count, remark, cdk_type, duration_months })
         });
         const data = await res.json();
         if (data.success) {
@@ -428,9 +578,9 @@
           loadCdks();
           loadStats();
 
-          if (confirm(`🎉 成功生成 ${data.created.length} 个 CDK！\n\n是否立即下载为 .txt 文本文件？`)) {
+          if (confirm(`🎉 成功生成 ${data.created.length} 个 ${cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器'} CDK！\n\n是否立即下载为 .txt 文本文件？`)) {
             const dateStr = new Date().toISOString().slice(0, 10);
-            downloadTextFile(`cdk_batch_${dateStr}.txt`, listText);
+            downloadTextFile(`cdk_batch_${cdk_type}_${dateStr}.txt`, listText);
           }
         } else {
           alert(data.message || '生成失败');

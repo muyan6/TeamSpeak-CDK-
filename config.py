@@ -35,3 +35,8 @@ BASE_TSDNS_PORT = int(os.getenv("BASE_TSDNS_PORT", "40000"))      # ts1 -> 40001
 
 # Docker 镜像名称
 TS_DOCKER_IMAGE = os.getenv("TS_DOCKER_IMAGE", "teamspeak:latest")
+
+# 音乐机器人后台服务配置 (远程 API 平台对接)
+BOT_PANEL_URL = os.getenv("BOT_PANEL_URL", "http://103.71.69.156:23467").rstrip("/")
+BOT_PANEL_USER = os.getenv("BOT_PANEL_USER", "huasjj")
+BOT_PANEL_PASS = os.getenv("BOT_PANEL_PASS", "Fanxing6")

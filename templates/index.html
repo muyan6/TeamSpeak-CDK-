@@ -151,6 +151,105 @@
         </div>
       </div>
 
+      <!-- 音乐机器人配置表单卡片 (当输入未使用音乐机器人CDK时展示) -->
+      <div id="botConfigCard" class="card result-card">
+        <div class="result-header">
+          <div>
+            <h2 style="font-size: 1.35rem; font-weight: 700; color: #a78bfa;"><i class="fa-solid fa-music"></i> 开通 TeamSpeak 音乐机器人</h2>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;" id="botDurationTip">卡密有效时长: 1 个月</p>
+          </div>
+          <span class="badge badge-info">CDK 验证成功</span>
+        </div>
+
+        <form id="botCreateForm" onsubmit="handleCreateBot(event)">
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; margin-bottom: 1.25rem;">
+            <div>
+              <label class="info-label">实例名称</label>
+              <input type="text" id="botNameInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" value="我的音乐机器人" required>
+            </div>
+            <div>
+              <label class="info-label">机器人昵称 (Nickname)</label>
+              <input type="text" id="botNickInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" value="MusicBot" required>
+            </div>
+            <div>
+              <label class="info-label">目标 TS 服务器地址 (IP或域名)</label>
+              <input type="text" id="botServerAddrInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="如 123.45.67.89 或 localhost" required>
+            </div>
+            <div>
+              <label class="info-label">目标 TS 语音端口 (Port)</label>
+              <input type="number" id="botServerPortInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" value="60001" required>
+            </div>
+            <div>
+              <label class="info-label">默认加入频道名称 (可选)</label>
+              <input type="text" id="botDefaultChannelInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="如 音乐频道">
+            </div>
+            <div>
+              <label class="info-label">TS 服务器连接密码 (可选)</label>
+              <input type="password" id="botServerPassInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="若服务器有密码请填写">
+            </div>
+          </div>
+
+          <button type="submit" id="botSubmitBtn" class="btn-primary" style="background: linear-gradient(135deg, #8b5cf6, #6366f1); width: 100%; justify-content: center; padding: 0.85rem;">
+            <span class="spinner" id="botLoadingSpinner"></span>
+            <span id="botBtnText"><i class="fa-solid fa-play"></i> 立即创建并连接音乐机器人</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- 音乐机器人运行结果展示卡片 -->
+      <div id="botResultCard" class="card result-card">
+        <div class="result-header">
+          <div>
+            <h2 style="font-size: 1.4rem; font-weight: 700; color: #a78bfa;" id="resBotName">音乐机器人</h2>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;" id="resBotCreatedAt"></p>
+          </div>
+          <span class="badge badge-success" id="resBotStatusBadge">运行中 (Active)</span>
+        </div>
+
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="info-label">所属 TS 语音服务器</div>
+            <div class="info-value">
+              <span id="resBotServerTarget">-</span>
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">机器人昵称</div>
+            <div class="info-value">
+              <span id="resBotNick">-</span>
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">到期时间</div>
+            <div class="info-value" style="color: #facc15;">
+              <span id="resBotExpire">-</span>
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">默认频道</div>
+            <div class="info-value">
+              <span id="resBotChannel">根频道</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 机器人操作控制栏 -->
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1rem;">
+          <a id="botWebPanelLink" href="http://103.71.69.156:23467/" target="_blank" class="btn-primary" style="background: linear-gradient(135deg, #ec4899, #8b5cf6); text-decoration: none;">
+            <i class="fa-solid fa-music"></i> 进入网页音乐点歌/播放控制台
+          </a>
+          <button class="btn-primary" style="background: var(--bg-secondary); border: 1px solid var(--border-color);" onclick="botAction('restart')">
+            <i class="fa-solid fa-rotate"></i> 重启机器人
+          </button>
+          <button class="btn-primary" style="background: var(--bg-secondary); border: 1px solid var(--border-color);" onclick="botAction('stop')">
+            <i class="fa-solid fa-stop"></i> 停止机器人
+          </button>
+          <button class="btn-primary" style="background: var(--bg-secondary); border: 1px solid var(--border-color);" onclick="botAction('start')">
+            <i class="fa-solid fa-play"></i> 启动机器人
+          </button>
+        </div>
+      </div>
+
       <!-- 说明与指南 -->
       <div class="card" style="margin-top: 1rem;">
         <h3 style="font-size: 1.1rem; margin-bottom: 1rem;"><i class="fa-solid fa-circle-question"></i> 使用帮助与说明</h3>
@@ -170,6 +269,8 @@
 
   <script>
     let currentInstance = null;
+    let currentBotInstance = null;
+    let currentPendingBotCdk = '';
 
     async function handleRedeem(e) {
       e.preventDefault();
@@ -182,11 +283,17 @@
       const btnText = document.getElementById('btnText');
       const alertBox = document.getElementById('statusAlert');
       const resultCard = document.getElementById('resultCard');
+      const botConfigCard = document.getElementById('botConfigCard');
+      const botResultCard = document.getElementById('botResultCard');
 
-      // UI 状态进入加载
+      // 隐藏旧卡片
+      resultCard.style.display = 'none';
+      botConfigCard.style.display = 'none';
+      botResultCard.style.display = 'none';
+
       submitBtn.disabled = true;
       spinner.style.display = 'inline-block';
-      btnText.innerText = '正在自动化创建并启动...';
+      btnText.innerText = '正在验证并处理...';
       alertBox.style.display = 'none';
 
       try {
@@ -202,7 +309,34 @@
           throw new Error(res.message || '操作失败，请重试');
         }
 
-        // 成功
+        // === 分支 1: 音乐机器人 ===
+        if (res.type === 'music_bot') {
+          if (res.need_config) {
+            // 需要填写机器人配置
+            currentPendingBotCdk = res.cdk;
+            document.getElementById('botDurationTip').innerText = `卡密类型: 音乐机器人 | 有效时长: ${res.duration_desc || (res.duration_months + '个月')}`;
+            botConfigCard.style.display = 'block';
+            botConfigCard.scrollIntoView({ behavior: 'smooth' });
+
+            alertBox.style.display = 'block';
+            alertBox.style.background = 'rgba(139, 92, 246, 0.15)';
+            alertBox.style.color = '#c084fc';
+            alertBox.style.border = '1px solid #8b5cf6';
+            alertBox.innerText = res.message || '请填写下方机器人的目标服务器连接配置：';
+            return;
+          } else if (res.instance) {
+            // 已有机器人实例，直接展示
+            renderBotResult(res.instance, res.bot_panel_url);
+            alertBox.style.display = 'block';
+            alertBox.style.background = 'rgba(16, 185, 129, 0.15)';
+            alertBox.style.color = '#34d399';
+            alertBox.style.border = '1px solid #10b981';
+            alertBox.innerText = res.message || '已加载音乐机器人实例！';
+            return;
+          }
+        }
+
+        // === 分支 2: TeamSpeak 服务器 ===
         currentInstance = res.instance;
         renderResult(res.instance, res.message);
         
@@ -222,6 +356,97 @@
         submitBtn.disabled = false;
         spinner.style.display = 'none';
         btnText.innerHTML = '<i class="fa-solid fa-bolt"></i> 立即开通 / 查询';
+      }
+    }
+
+    async function handleCreateBot(e) {
+      e.preventDefault();
+      if (!currentPendingBotCdk) {
+        alert('缺少 CDK，请重新输入');
+        return;
+      }
+
+      const botSubmitBtn = document.getElementById('botSubmitBtn');
+      const botSpinner = document.getElementById('botLoadingSpinner');
+      const botBtnText = document.getElementById('botBtnText');
+      const alertBox = document.getElementById('statusAlert');
+
+      const payload = {
+        cdk: currentPendingBotCdk,
+        name: document.getElementById('botNameInput').value.trim(),
+        serverAddress: document.getElementById('botServerAddrInput').value.trim(),
+        serverPort: parseInt(document.getElementById('botServerPortInput').value) || 60001,
+        nickname: document.getElementById('botNickInput').value.trim(),
+        defaultChannel: document.getElementById('botDefaultChannelInput').value.trim() || null,
+        serverPassword: document.getElementById('botServerPassInput').value.trim() || null
+      };
+
+      botSubmitBtn.disabled = true;
+      botSpinner.style.display = 'inline-block';
+      botBtnText.innerText = '正在启动远程机器人并接入 TS 服务器...';
+
+      try {
+        const response = await fetch('/api/redeem-bot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        const res = await response.json();
+        if (!response.ok || !res.success) {
+          throw new Error(res.message || '创建机器人失败');
+        }
+
+        document.getElementById('botConfigCard').style.display = 'none';
+        renderBotResult(res.instance, res.bot_panel_url);
+
+        alertBox.style.display = 'block';
+        alertBox.style.background = 'rgba(16, 185, 129, 0.15)';
+        alertBox.style.color = '#34d399';
+        alertBox.style.border = '1px solid #10b981';
+        alertBox.innerText = res.message || '音乐机器人已就绪！';
+
+      } catch (err) {
+        alert(err.message || '创建异常');
+      } finally {
+        botSubmitBtn.disabled = false;
+        botSpinner.style.display = 'none';
+        botBtnText.innerHTML = '<i class="fa-solid fa-play"></i> 立即创建并连接音乐机器人';
+      }
+    }
+
+    function renderBotResult(bot, panelUrl) {
+      currentBotInstance = bot;
+      const botResultCard = document.getElementById('botResultCard');
+      botResultCard.style.display = 'block';
+
+      document.getElementById('resBotName').innerText = `音乐机器人 (${bot.name})`;
+      document.getElementById('resBotCreatedAt').innerText = `开通时间: ${bot.created_at || '刚刚'}`;
+      document.getElementById('resBotServerTarget').innerText = `${bot.server_address}:${bot.server_port}`;
+      document.getElementById('resBotNick').innerText = bot.nickname || 'MusicBot';
+      document.getElementById('resBotExpire').innerText = bot.expire_at || '永久有效';
+      document.getElementById('resBotChannel').innerText = bot.default_channel || '默认大厅';
+      document.getElementById('resBotStatusBadge').innerText = bot.status === 'active' ? '运行中 (Active)' : (bot.status === 'expired' ? '已到期 (Expired)' : '已停止 (Stopped)');
+
+      if (panelUrl) {
+        document.getElementById('botWebPanelLink').href = panelUrl;
+      }
+
+      botResultCard.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    async function botAction(action) {
+      if (!currentBotInstance || !currentBotInstance.bot_id) return;
+      try {
+        const res = await fetch(`/api/bot-instances/${currentBotInstance.bot_id}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action })
+        });
+        const data = await res.json();
+        alert(data.message || '操作完成');
+      } catch (e) {
+        alert('操作失败');
       }
     }
 

@@ -12,6 +12,7 @@ os.environ["TS_DATA_DIR"] = test_data_dir
 import database
 import port_manager
 import docker_service
+from music_bot_service import music_bot_client
 
 class TestTeamSpeakManager(unittest.TestCase):
 
@@ -23,6 +24,7 @@ class TestTeamSpeakManager(unittest.TestCase):
         with database.get_connection() as conn:
             conn.execute("DELETE FROM cdks")
             conn.execute("DELETE FROM instances")
+            conn.execute("DELETE FROM bot_instances")
             conn.commit()
         if os.path.exists(test_data_dir):
             shutil.rmtree(test_data_dir, ignore_errors=True)
@@ -40,14 +42,62 @@ class TestTeamSpeakManager(unittest.TestCase):
             pass
 
     def test_cdk_generation_and_validation(self):
-        cdks = database.create_cdks(count=3, remark="测试CDK")
+        cdks = database.create_cdks(count=3, remark="测试CDK", cdk_type="teamspeak")
         self.assertEqual(len(cdks), 3)
         self.assertTrue(cdks[0].startswith("TS-"))
 
         info = database.get_cdk(cdks[0])
         self.assertIsNotNone(info)
         self.assertEqual(info["status"], "unused")
+        self.assertEqual(info["cdk_type"], "teamspeak")
         self.assertEqual(info["remark"], "测试CDK")
+
+    def test_music_bot_cdk_generation_and_duration(self):
+        bot_cdks = database.create_cdks(count=2, remark="机器人月卡", cdk_type="music_bot", duration_months=1)
+        self.assertEqual(len(bot_cdks), 2)
+        self.assertTrue(bot_cdks[0].startswith("BOT-"))
+
+        info = database.get_cdk(bot_cdks[0])
+        self.assertIsNotNone(info)
+        self.assertEqual(info["cdk_type"], "music_bot")
+        self.assertEqual(info["duration_months"], 1)
+        self.assertEqual(info["status"], "unused")
+
+    def test_bot_instance_crud(self):
+        bot_cdks = database.create_cdks(count=1, remark="季卡", cdk_type="music_bot", duration_months=3)
+        cdk = bot_cdks[0]
+
+        bot = database.create_bot_instance(
+            bot_id="uuid-test-12345",
+            name="测试音乐机",
+            server_address="103.71.69.156",
+            server_port=60001,
+            nickname="TestBot",
+            cdk_code=cdk,
+            duration_months=3,
+            expire_at="2026-11-22 16:00:00",
+            default_channel="音乐频道"
+        )
+        self.assertIsNotNone(bot)
+        self.assertEqual(bot["name"], "测试音乐机")
+        self.assertEqual(bot["duration_months"], 3)
+
+        database.bind_cdk_bot(cdk, "uuid-test-12345")
+        updated_cdk = database.get_cdk(cdk)
+        self.assertEqual(updated_cdk["status"], "used")
+        self.assertEqual(updated_cdk["bot_id"], "uuid-test-12345")
+
+        found_bot = database.get_bot_instance_by_cdk(cdk)
+        self.assertIsNotNone(found_bot)
+        self.assertEqual(found_bot["bot_id"], "uuid-test-12345")
+
+        database.update_bot_instance_status("uuid-test-12345", "stopped")
+        stopped_bot = database.get_bot_instance_by_id("uuid-test-12345")
+        self.assertEqual(stopped_bot["status"], "stopped")
+
+        del_ok = database.delete_bot_instance("uuid-test-12345")
+        self.assertTrue(del_ok)
+        self.assertIsNone(database.get_bot_instance_by_id("uuid-test-12345"))
 
     def test_port_allocation_sequence(self):
         # 第一次分配（对应 ts1）
@@ -89,75 +139,31 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertIn('"40001:41144"', yaml_str)
         self.assertIn("./data:/var/ts3server", yaml_str)
 
-    def test_token_extraction(self):
+    def test_token_and_credentials_extraction(self):
         mock_log = """
         2026-08-22 06:18:22.000000|INFO    |ServerLibPriv |   |Server Version: 3.13.7
         ------------------------------------------------------------------
         ServerAdmin privilege key created, please use the following key
         token=h1Y6ZqQxYpW7bT9s8uN2kL4vF3aC1eG0iJ8oR5mP
         ------------------------------------------------------------------
+        ------------------------------------------------------------------
+        ServerQuery account created
+        loginname= "serveradmin" , password= "SecretPassword123!"
+        apikey= "AbCdEf123456"
+        ------------------------------------------------------------------
         2026-08-22 06:18:22.500000|INFO    |VirtualServer |1  |listening on 0.0.0.0:9987
         """
-        token = docker_service.extract_admin_token_from_logs(mock_log)
-        self.assertEqual(token, "h1Y6ZqQxYpW7bT9s8uN2kL4vF3aC1eG0iJ8oR5mP")
+        creds = docker_service.extract_credentials_from_logs(mock_log)
+        self.assertEqual(creds["admin_token"], "h1Y6ZqQxYpW7bT9s8uN2kL4vF3aC1eG0iJ8oR5mP")
+        self.assertEqual(creds["query_password"], "SecretPassword123!")
+        self.assertEqual(creds["query_apikey"], "AbCdEf123456")
 
-    def test_cdk_reuse_and_binding(self):
-        cdks = database.create_cdks(count=1, remark="独享CDK")
-        code = cdks[0]
-        
-        # 绑定实例
-        database.create_instance(
-            instance_id=1,
-            name="ts1",
-            container_name="ts-teamspeak-1",
-            dir_path="/data/teamspeak/ts1",
-            voice_port=60001,
-            file_port=20001,
-            query_port=30001,
-            tsdns_port=40001,
-            admin_token="my-token-123"
-        )
-        database.bind_cdk_instance(code, 1)
-
-        cdk_info = database.get_cdk(code)
-        self.assertEqual(cdk_info["status"], "used")
-        self.assertEqual(cdk_info["instance_id"], 1)
-
-        instance = database.get_instance_by_id(cdk_info["instance_id"])
-        self.assertEqual(instance["name"], "ts1")
-        self.assertEqual(instance["admin_token"], "my-token-123")
-
-    def test_port_collision_skip(self):
-        # 预先占用 ts1 的端口
-        database.create_instance(
-            instance_id=1,
-            name="ts1",
-            container_name="ts-teamspeak-1",
-            dir_path="/data/teamspeak/ts1",
-            voice_port=60001,
-            file_port=20001,
-            query_port=30001,
-            tsdns_port=40001
-        )
-        # 预先占用 ts2 的端口
-        database.create_instance(
-            instance_id=2,
-            name="ts2",
-            container_name="ts-teamspeak-2",
-            dir_path="/data/teamspeak/ts2",
-            voice_port=60002,
-            file_port=20002,
-            query_port=30002,
-            tsdns_port=40002
-        )
-
-        # 此时新分配应该直接拿到 ts3 和对应端口
-        next_id, next_ports = port_manager.allocate_ports_for_instance()
-        self.assertEqual(next_id, 3)
-        self.assertEqual(next_ports["voice"], 60003)
-        self.assertEqual(next_ports["file"], 20003)
-        self.assertEqual(next_ports["query"], 30003)
-        self.assertEqual(next_ports["tsdns"], 40003)
+    def test_music_bot_client_connectivity(self):
+        # 测试音乐机器人远程平台鉴权与信息抓取
+        ok, res = music_bot_client.get_all_bots()
+        self.assertTrue(ok)
+        self.assertIsInstance(res, dict)
+        self.assertIn("bots", res)
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,45 +1,30 @@
 # TeamSpeak CDK 自动化开通与端口防冲突管理系统
 
-基于 Python FastAPI + Docker Compose 构建的 TeamSpeak 3 自动化分发开通平台。用户在网页端（默认端口 `12345`）输入 CDK 后，系统将自动分配独立端口、在 `/data/teamspeak/ts<N>` 目录下生成专属 `docker-compose.yml` 并通过 Docker 启动实例。系统还会自动抓取首启生成的管理员权限秘钥（ServerAdmin Token），让用户开箱即用。
+基于 Python FastAPI + Docker Compose 构建的 TeamSpeak 3 自动化分发开通平台。用户在网页端（默认端口 `12345`）输入 CDK 后，系统将自动分配独立端口、在 `/data/teamspeak/ts<N>` 目录下生成专属 `docker-compose.yml` 并通过 Docker 启动实例。
 
 ---
 
 ## 🌟 系统核心特性
 
-1. **大容量分段端口分配与自动防冲突**：
+1. **TeamSpeak 语音服务器 CDK 自动化开通**：
    - **分段自增规则**：
      - `ts1`：`60001` (Voice), `20001` (File), `30001` (Query), `40001` (TSDNS)
      - `ts2`：`60002` (Voice), `20002` (File), `30002` (Query), `40002` (TSDNS)
      - `tsN`：`60000 + N`, `20000 + N`, `30000 + N`, `40000 + N`
-   - **空号自动回收与填补**：当后台销毁 `ts2` 之后，下一个兑换的用户会自动补上 `ts2` 编号与对应的全部端口，零端口浪费。
-2. **标准 Docker Compose 编排生成**：
-   - 自动在 `/data/teamspeak/ts<N>` 目录下创建 `docker-compose.yml`：
-     ```yaml
-     version: '3.8'
-     services:
-       teamspeak2:
-         image: teamspeak:latest
-         container_name: ts-teamspeak-2
-         restart: always
-         environment:
-           - TS3SERVER_LICENSE=accept
-         ports:
-           - "9988:9987/udp"    # 语音服务 (已避开 9987)
-           - "30034:30033"      # 文件传输 (已避开 30033)
-           - "10012:10011"      # 服务器查询 raw (已避开 10011)
-           - "41145:41144"      # DNS域名解析（可选，已避开 41144）
-         volumes:
-           - ./data:/var/ts3server
-     ```
-3. **管理员权限秘钥 (Token) 自动捕获**：
-   - 实例启动后自动异步分析容器日志，抓取 `token=...` 管理员秘钥并展示在前端，支持一键复制。
-4. **双端界面**：
-   - **用户端**（`http://IP:12345/`）：输入 CDK 快速开通，支持一键复制连接串、管理员秘钥，支持唤起客户端。
+   - **空号自动回收与填补**：销毁旧实例后，自动补上空缺编号与端口，零端口浪费。
+   - **全自动凭据提取**：首启自动提取客户端管理员 Token (`admin_token`) 与 ServerQuery 超级管理员账号密码 (`serveradmin` / `password` / `apikey`)。
+
+2. **TeamSpeak 音乐机器人（Music Bot）CDK 兑换与自动化对接**：
+   - **多档位时长控制**：支持生成 1 个月（月卡）、3 个月（季卡）、6 个月（半年卡）、12 个月（年卡）及永久卡 CDK。
+   - **远程平台自动接入**：直接对接音乐机器人服务中心（`http://103.71.69.156:23467/`），用户兑换时仅需填写目标 TS 地址与端口，即可全自动创建实例并启动进入指定语音房间。
+   - **双端管理与控制**：支持在平台内一键启动、停止、重启机器人，并提供直达网页点歌/播放控制台的一键链接。
+
+3. **双端界面与批量导出**：
+   - **用户端**（`http://IP:12345/`）：自适应识别 TS 服务器卡密与音乐机器人卡密，智能引导开通。
    - **管理员后台**（`http://IP:12345/admin`）：
      - 默认管理密码：`admin123456`
-     - 批量生成、导出、删除 CDK
-     - 实时监控所有 TS 容器状态（启动、停止、重启、彻底销毁）
-     - 在线查看容器实时 Docker 日志与端口分布
+     - TS 服务器集群与音乐机器人实例双列表实时监控与控制
+     - 批量生成、TXT 导出（未使用/全部）、一键复制
 
 ---
 
@@ -50,12 +35,11 @@
 1. **环境准备**：
    确保服务器已安装 Python 3.8+ 及 Docker / Docker Compose：
    ```bash
-   # 测试 docker 是否正常可用
    docker --version
    docker compose version
    ```
 
-2. **克隆/解压本项目并进入目录**：
+2. **克隆/进入目录**：
    ```bash
    cd Teamspeak
    ```
