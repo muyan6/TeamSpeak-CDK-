@@ -56,7 +56,8 @@ def allocate_ports_for_instance(desired_id: int = None) -> Tuple[int, Dict[str, 
     used_all.add(BASE_QUERY_PORT)
     used_all.add(BASE_TSDNS_PORT)
 
-    candidate_id = desired_id if (desired_id and desired_id > 0) else get_next_instance_id()
+    # 从 1 开始寻找最小可用连续编号，保证 ts1 -> ts2 -> ts3 严格规律递增与端口严格对应
+    candidate_id = desired_id if (desired_id and desired_id > 0) else 1
 
     while True:
         container_name = f"ts-teamspeak-{candidate_id}"

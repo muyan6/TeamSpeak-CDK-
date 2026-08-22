@@ -184,11 +184,21 @@
           </div>
         </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
           <h3 style="font-size: 1.15rem;">CDK 列表与状态</h3>
-          <div style="display: flex; gap: 0.5rem;">
-            <button class="btn-action" onclick="copyUnusedCdks()"><i class="fa-regular fa-copy"></i> 批量复制未使用 CDK</button>
-            <button class="btn-action" onclick="loadCdks()"><i class="fa-solid fa-rotate"></i> 刷新</button>
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <button class="btn-action" style="background: rgba(59, 130, 246, 0.2); border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;" onclick="downloadCdksTxt('unused')">
+              <i class="fa-solid fa-file-arrow-down"></i> 导出未使用 (.txt)
+            </button>
+            <button class="btn-action" onclick="downloadCdksTxt('all')">
+              <i class="fa-solid fa-file-lines"></i> 导出全部 (.txt)
+            </button>
+            <button class="btn-action" onclick="copyUnusedCdks()">
+              <i class="fa-regular fa-copy"></i> 批量复制未使用
+            </button>
+            <button class="btn-action" onclick="loadCdks()">
+              <i class="fa-solid fa-rotate"></i> 刷新
+            </button>
           </div>
         </div>
 
@@ -406,16 +416,63 @@
         });
         const data = await res.json();
         if (data.success) {
-          alert(`成功生成 ${data.created.length} 个 CDK！`);
+          const listText = data.created.join('\n');
           document.getElementById('genRemark').value = '';
           loadCdks();
           loadStats();
+
+          if (confirm(`🎉 成功生成 ${data.created.length} 个 CDK！\n\n是否立即下载为 .txt 文本文件？`)) {
+            const dateStr = new Date().toISOString().slice(0, 10);
+            downloadTextFile(`cdk_batch_${dateStr}.txt`, listText);
+          }
         } else {
           alert(data.message || '生成失败');
         }
       } catch (e) {
         alert('请求异常');
       }
+    }
+
+    function downloadTextFile(filename, text) {
+      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    }
+
+    function downloadCdksTxt(type) {
+      if (!window._allCdks || window._allCdks.length === 0) {
+        alert('当前没有可导出的 CDK 数据');
+        return;
+      }
+      let filtered = [];
+      let filename = '';
+      const dateStr = new Date().toISOString().slice(0, 10);
+
+      if (type === 'unused') {
+        filtered = window._allCdks.filter(c => c.status === 'unused');
+        filename = `ts_cdks_unused_${dateStr}.txt`;
+      } else {
+        filtered = window._allCdks;
+        filename = `ts_cdks_all_${dateStr}.txt`;
+      }
+
+      if (filtered.length === 0) {
+        alert('没有符合条件的 CDK 数据');
+        return;
+      }
+
+      const text = filtered.map(c => {
+        if (type === 'unused') return c.code;
+        return `${c.code}\t状态: ${c.status === 'unused' ? '未使用' : (c.status === 'used' ? '已绑定ts' + c.instance_id : '已禁用')}\t备注: ${c.remark || '无'}`;
+      }).join('\n');
+
+      downloadTextFile(filename, text);
     }
 
     async function deleteCdk(code) {

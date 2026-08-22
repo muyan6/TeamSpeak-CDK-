@@ -252,6 +252,26 @@ def delete_cdk_api(code: str, _: bool = Depends(verify_admin)):
     ok = delete_cdk(code)
     return {"success": ok}
 
+@app.get("/api/admin/cdks/export")
+def export_cdks_txt(status: Optional[str] = "unused", _: bool = Depends(verify_admin)):
+    from fastapi.responses import PlainTextResponse
+    cdks = get_all_cdks()
+    if status == "unused":
+        selected = [c["code"] for c in cdks if c["status"] == "unused"]
+        filename = "unused_cdks.txt"
+    elif status == "used":
+        selected = [f"{c['code']} (ts{c['instance_id']})" for c in cdks if c["status"] == "used"]
+        filename = "used_cdks.txt"
+    else:
+        selected = [c["code"] for c in cdks]
+        filename = "all_cdks.txt"
+
+    content = "\n".join(selected)
+    return PlainTextResponse(
+        content=content,
+        headers={"Content-Disposition": f"attachment; filename={filename}"}
+    )
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host=config.SERVER_HOST, port=config.SERVER_PORT)
