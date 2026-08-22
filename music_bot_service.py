@@ -28,7 +28,9 @@ class MusicBotClient:
             data=payload,
             headers={
                 "Content-Type": "application/json",
-                "User-Agent": "TeamSpeak-Manager/1.0"
+                "User-Agent": "TeamSpeak-Manager/1.0",
+                "Origin": self.base_url,
+                "Referer": f"{self.base_url}/"
             }
         )
 
@@ -54,7 +56,7 @@ class MusicBotClient:
 
     def _request(self, method: str, path: str, data: Optional[Dict[str, Any]] = None) -> Tuple[bool, Any]:
         """
-        通用的 API 请求封装，支持自动处理 401 重连
+        通用的 API 请求封装，支持自动处理 401 重连并带有 CSRF Origin 校验
         """
         cookie = self._get_cookie()
         if not cookie:
@@ -63,7 +65,9 @@ class MusicBotClient:
         url = f"{self.base_url}{path}"
         headers = {
             "Cookie": cookie,
-            "User-Agent": "TeamSpeak-Manager/1.0"
+            "User-Agent": "TeamSpeak-Manager/1.0",
+            "Origin": self.base_url,
+            "Referer": f"{self.base_url}/"
         }
 
         body = None
