@@ -93,7 +93,7 @@
         <div class="token-box">
           <div class="token-box-header">
             <i class="fa-solid fa-key"></i>
-            <span>服务器管理员权限秘钥 (ServerAdmin Privilege Key)</span>
+            <span>客户端管理员权限秘钥 (ServerAdmin Privilege Key)</span>
           </div>
           <p style="font-size: 0.85rem; color: #fca5a5; margin-bottom: 0.6rem;">
             首次进入服务器时，TeamSpeak 客户端会提示输入秘钥以获取管理员 (Server Admin) 身份，请妥善保管：
@@ -103,6 +103,40 @@
             <button class="btn-copy" style="border-color: rgba(239, 68, 68, 0.4); color: #fff;" onclick="copyText('resAdminToken')">
               <i class="fa-regular fa-copy"></i> 复制秘钥
             </button>
+          </div>
+        </div>
+
+        <!-- ServerQuery 超级管理员账号与密码 -->
+        <div class="token-box" style="background: rgba(59, 130, 246, 0.1); border-color: rgba(59, 130, 246, 0.3);">
+          <div class="token-box-header" style="color: #60a5fa;">
+            <i class="fa-solid fa-user-shield"></i>
+            <span>ServerQuery 超级管理员账户与密码 (ServerAdmin Query Account)</span>
+          </div>
+          <p style="font-size: 0.85rem; color: #93c5fd; margin-bottom: 0.6rem;">
+            用于 YatQA / WebQuery / 机器人等后台超级管理工具连接控制：
+          </p>
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem;">
+            <div class="info-item" style="background: rgba(0, 0, 0, 0.4); border-color: rgba(59, 130, 246, 0.2);">
+              <div class="info-label" style="color: #94a3b8;">Query 登录账号</div>
+              <div class="info-value" style="font-size: 1rem; color: #38bdf8;">
+                <span id="resQueryUser">serveradmin</span>
+                <button class="btn-copy" onclick="copyText('resQueryUser')"><i class="fa-regular fa-copy"></i></button>
+              </div>
+            </div>
+            <div class="info-item" style="background: rgba(0, 0, 0, 0.4); border-color: rgba(59, 130, 246, 0.2);">
+              <div class="info-label" style="color: #94a3b8;">Query 登录密码</div>
+              <div class="info-value" style="font-size: 1rem; color: #facc15;">
+                <span id="resQueryPassword">-</span>
+                <button class="btn-copy" onclick="copyText('resQueryPassword')"><i class="fa-regular fa-copy"></i></button>
+              </div>
+            </div>
+            <div class="info-item" id="apiKeyContainer" style="background: rgba(0, 0, 0, 0.4); border-color: rgba(59, 130, 246, 0.2); display: none;">
+              <div class="info-label" style="color: #94a3b8;">API Key</div>
+              <div class="info-value" style="font-size: 1rem; color: #a78bfa;">
+                <span id="resQueryApiKey">-</span>
+                <button class="btn-copy" onclick="copyText('resQueryApiKey')"><i class="fa-regular fa-copy"></i></button>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -205,7 +239,15 @@
       document.getElementById('resVoicePort').innerText = `${inst.voice_port} (UDP)`;
       document.getElementById('resFilePort').innerText = `${inst.file_port} (TCP)`;
       document.getElementById('resQueryPort').innerText = `${inst.query_port} (TCP)`;
-      document.getElementById('resAdminToken').innerText = inst.admin_token || '（容器已启动，Token 可在日志或客户端首次进入时提示获取）';
+      document.getElementById('resAdminToken').innerText = inst.admin_token || '（容器已启动，可在客户端首次加入时获取或在日志中查看）';
+      document.getElementById('resQueryPassword').innerText = inst.query_password || '（已设置在容器日志中）';
+
+      if (inst.query_apikey) {
+        document.getElementById('apiKeyContainer').style.display = 'block';
+        document.getElementById('resQueryApiKey').innerText = inst.query_apikey;
+      } else {
+        document.getElementById('apiKeyContainer').style.display = 'none';
+      }
 
       // 唤起客户端链接 ts3server://host?port=xxxx
       const clientUrl = `ts3server://${host}?port=${inst.voice_port}`;

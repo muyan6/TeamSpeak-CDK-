@@ -339,8 +339,15 @@
               <div style="font-size: 0.8rem;">文件: ${inst.file_port}</div>
               <div style="font-size: 0.8rem; color: var(--text-muted);">查询: ${inst.query_port}</div>
             </td>
-            <td style="max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-              <span title="${inst.admin_token || ''}" style="font-family: monospace; font-size: 0.8rem; color: #fca5a5;">${inst.admin_token || '未抓取到'}</span>
+            <td>
+              <div style="font-size: 0.8rem; color: #fca5a5;">
+                <span title="${inst.admin_token || ''}">Token: ${inst.admin_token ? inst.admin_token.slice(0, 10) + '...' : '无'}</span>
+                ${inst.admin_token ? `<button class="btn-copy" style="padding: 1px 4px; font-size: 0.7rem;" onclick="navigator.clipboard.writeText('${inst.admin_token}'); alert('已复制管理员 Token')"><i class="fa-regular fa-copy"></i></button>` : ''}
+              </div>
+              <div style="font-size: 0.75rem; color: #facc15; margin-top: 2px;">
+                <span title="${inst.query_password || ''}">密码: ${inst.query_password ? inst.query_password.slice(0, 10) + '...' : '无'}</span>
+                ${inst.query_password ? `<button class="btn-copy" style="padding: 1px 4px; font-size: 0.7rem;" onclick="navigator.clipboard.writeText('${inst.query_password}'); alert('已复制 serveradmin 密码')"><i class="fa-regular fa-copy"></i></button>` : ''}
+              </div>
             </td>
             <td>
               <span class="badge ${inst.live_status === 'running' ? 'badge-success' : 'badge-warning'}">

@@ -36,10 +36,21 @@ def init_db():
                 query_port INTEGER NOT NULL,
                 tsdns_port INTEGER NOT NULL,
                 admin_token TEXT,
+                query_password TEXT,                   -- serveradmin 密码
+                query_apikey TEXT,                     -- serveradmin apikey
                 status TEXT NOT NULL DEFAULT 'running', -- 'running', 'stopped', 'error'
                 created_at TEXT NOT NULL
             )
         ''')
+        
+        # 兼容旧表升级：检查并添加列
+        cursor.execute("PRAGMA table_info(instances)")
+        cols = [col["name"] for col in cursor.fetchall()]
+        if "query_password" not in cols:
+            cursor.execute("ALTER TABLE instances ADD COLUMN query_password TEXT")
+        if "query_apikey" not in cols:
+            cursor.execute("ALTER TABLE instances ADD COLUMN query_apikey TEXT")
+
         conn.commit()
 
 # --- CDK 管理 ---
@@ -140,6 +151,8 @@ def create_instance(
     query_port: int,
     tsdns_port: int,
     admin_token: str = "",
+    query_password: str = "",
+    query_apikey: str = "",
     status: str = "running"
 ) -> Dict[str, Any]:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -149,12 +162,12 @@ def create_instance(
             INSERT INTO instances (
                 id, name, container_name, dir_path, 
                 voice_port, file_port, query_port, tsdns_port, 
-                admin_token, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                admin_token, query_password, query_apikey, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             instance_id, name, container_name, dir_path,
             voice_port, file_port, query_port, tsdns_port,
-            admin_token, status, now
+            admin_token, query_password, query_apikey, status, now
         ))
         conn.commit()
     return get_instance_by_id(instance_id)
@@ -171,6 +184,15 @@ def get_all_instances() -> List[Dict[str, Any]]:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM instances ORDER BY id ASC")
         return [dict(row) for row in cursor.fetchall()]
+
+def update_instance_credentials(instance_id: int, admin_token: str = "", query_password: str = "", query_apikey: str = ""):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE instances SET admin_token = ?, query_password = ?, query_apikey = ? WHERE id = ?",
+            (admin_token, query_password, query_apikey, instance_id)
+        )
+        conn.commit()
 
 def update_instance_token(instance_id: int, admin_token: str):
     with get_connection() as conn:

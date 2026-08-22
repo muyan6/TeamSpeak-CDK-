@@ -139,9 +139,13 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     instance_dir = os.path.join(config.DATA_BASE_DIR, name)
 
     # 执行 Docker 部署流水线
-    success, admin_token, msg = deploy_teamspeak_instance(instance_id, ports)
+    success, creds, msg = deploy_teamspeak_instance(instance_id, ports)
     if not success:
         return JSONResponse(status_code=500, content={"success": False, "message": f"服务器创建失败: {msg}"})
+
+    admin_token = creds.get("admin_token", "")
+    query_password = creds.get("query_password", "")
+    query_apikey = creds.get("query_apikey", "")
 
     # 记录到数据库
     instance = create_instance(
@@ -154,6 +158,8 @@ def redeem_cdk(req: RedeemRequest, request: Request):
         query_port=ports["query"],
         tsdns_port=ports["tsdns"],
         admin_token=admin_token,
+        query_password=query_password,
+        query_apikey=query_apikey,
         status="running"
     )
 

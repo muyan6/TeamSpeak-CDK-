@@ -52,31 +52,58 @@ def generate_compose_yaml_content(instance_id: int, ports: Dict[str, int]) -> st
 """
     return content
 
-def extract_admin_token_from_logs(logs_text: str) -> Optional[str]:
+def extract_credentials_from_logs(logs_text: str) -> Dict[str, str]:
     """
-    从 TeamSpeak 首次启动日志中提取管理员密钥 Token
-    格式通常形如: token=xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+    从 TeamSpeak 首次启动日志中提取管理员密钥 Token 与 ServerQuery 账号密码
     """
-    # 优先匹配 token=...
-    match = re.search(r'token=([a-zA-Z0-9+/=]+)', logs_text)
-    if match:
-        return match.group(1).strip()
+    creds = {
+        "admin_token": "",
+        "query_user": "serveradmin",
+        "query_password": "",
+        "query_apikey": ""
+    }
     
-    # 匹配可能包含在 privilege key 附近的 token
-    match2 = re.search(r'privilege key created.*?token=([^\s\r\n]+)', logs_text, re.IGNORECASE | re.DOTALL)
-    if match2:
-        return match2.group(1).strip()
-        
-    return None
+    # 1. 提取客户端管理员 Token (Privilege Key)
+    token_match = re.search(r'token=([a-zA-Z0-9+/=_-]+)', logs_text)
+    if token_match:
+        creds["admin_token"] = token_match.group(1).strip()
+    else:
+        token_match2 = re.search(r'privilege key created.*?token=([^\s\r\n]+)', logs_text, re.IGNORECASE | re.DOTALL)
+        if token_match2:
+            creds["admin_token"] = token_match2.group(1).strip()
 
-def deploy_teamspeak_instance(instance_id: int, ports: Dict[str, int]) -> Tuple[bool, str, str]:
+    # 2. 提取 ServerQuery 密码 (password= "xxx" 或 password=xxx)
+    pwd_match = re.search(r'password=\s*"([^"]+)"', logs_text)
+    if pwd_match:
+        creds["query_password"] = pwd_match.group(1).strip()
+    else:
+        pwd_match2 = re.search(r'password=\s*([^\s,]+)', logs_text)
+        if pwd_match2:
+            creds["query_password"] = pwd_match2.group(1).strip().strip('"')
+
+    # 3. 提取 ServerQuery apikey (apikey= "xxx" 或 apikey=xxx)
+    api_match = re.search(r'apikey=\s*"([^"]+)"', logs_text)
+    if api_match:
+        creds["query_apikey"] = api_match.group(1).strip()
+    else:
+        api_match2 = re.search(r'apikey=\s*([^\s,]+)', logs_text)
+        if api_match2:
+            creds["query_apikey"] = api_match2.group(1).strip().strip('"')
+
+    return creds
+
+# 保持对旧接口的兼容
+def extract_admin_token_from_logs(logs_text: str) -> Optional[str]:
+    return extract_credentials_from_logs(logs_text).get("admin_token") or None
+
+def deploy_teamspeak_instance(instance_id: int, ports: Dict[str, int]) -> Tuple[bool, Dict[str, str], str]:
     """
     全流程部署 TS 实例：
     1. 创建文件夹 /data/teamspeak/ts{N}
     2. 生成 docker-compose.yml
     3. 执行 docker compose up -d
-    4. 尝试获取管理员 Token
-    返回: (success: bool, admin_token: str, message: str)
+    4. 尝试获取管理员 Token 与 ServerQuery 账号密码
+    返回: (success: bool, creds: Dict[str, str], message: str)
     """
     instance_dir = get_instance_dir(instance_id)
     try:
@@ -84,7 +111,7 @@ def deploy_teamspeak_instance(instance_id: int, ports: Dict[str, int]) -> Tuple[
         # 创建 ./data 目录用于挂载卷
         os.makedirs(os.path.join(instance_dir, "data"), exist_ok=True)
     except Exception as e:
-        return False, "", f"创建目录失败: {str(e)}"
+        return False, {}, f"创建目录失败: {str(e)}"
 
     compose_file_path = os.path.join(instance_dir, "docker-compose.yml")
     compose_content = generate_compose_yaml_content(instance_id, ports)
@@ -93,7 +120,7 @@ def deploy_teamspeak_instance(instance_id: int, ports: Dict[str, int]) -> Tuple[
         with open(compose_file_path, "w", encoding="utf-8") as f:
             f.write(compose_content)
     except Exception as e:
-        return False, "", f"写入 docker-compose.yml 失败: {str(e)}"
+        return False, {}, f"写入 docker-compose.yml 失败: {str(e)}"
 
     compose_cmd = get_compose_cmd()
     cmd = compose_cmd + ["up", "-d"]
@@ -108,13 +135,18 @@ def deploy_teamspeak_instance(instance_id: int, ports: Dict[str, int]) -> Tuple[
             timeout=60
         )
         if res.returncode != 0:
-            return False, "", f"Docker 启动命令失败: {res.stderr or res.stdout}"
+            return False, {}, f"Docker 启动命令失败: {res.stderr or res.stdout}"
     except Exception as e:
-        return False, "", f"执行 Docker 命令异常: {str(e)}"
+        return False, {}, f"执行 Docker 命令异常: {str(e)}"
 
-    # 异步轮询捕获 Token（最多等待 15 秒）
+    # 异步轮询捕获 Token 与密码（最多等待 15 秒）
     container_name = f"ts-teamspeak-{instance_id}"
-    admin_token = ""
+    creds = {
+        "admin_token": "",
+        "query_user": "serveradmin",
+        "query_password": "",
+        "query_apikey": ""
+    }
     for _ in range(8):
         time.sleep(2)
         try:
@@ -126,14 +158,14 @@ def deploy_teamspeak_instance(instance_id: int, ports: Dict[str, int]) -> Tuple[
                 timeout=10
             )
             logs = log_res.stdout + "\n" + log_res.stderr
-            token = extract_admin_token_from_logs(logs)
-            if token:
-                admin_token = token
+            c = extract_credentials_from_logs(logs)
+            if c["admin_token"] or c["query_password"]:
+                creds = c
                 break
         except Exception:
             pass
 
-    return True, admin_token, "部署成功"
+    return True, creds, "部署成功"
 
 def get_container_status(instance_id: int) -> str:
     """
