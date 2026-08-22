@@ -165,5 +165,32 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertIsInstance(res, dict)
         self.assertIn("bots", res)
 
+    def test_bot_expiration_and_renewal(self):
+        # 1. 模拟一个已经超期的机器人
+        bot = database.create_bot_instance(
+            bot_id="uuid-expire-test",
+            name="即将过期机",
+            server_address="127.0.0.1",
+            server_port=60001,
+            nickname="OldBot",
+            cdk_code="BOT-OLD-CDK",
+            duration_months=1,
+            expire_at="2020-01-01 00:00:00",
+            status="active"
+        )
+        # 2. 检查超期扫描函数能够精确命中
+        expired = database.get_expired_active_bots()
+        self.assertTrue(any(b["bot_id"] == "uuid-expire-test" for b in expired))
+
+        # 3. 使用 1 个月卡进行续费
+        renewed = database.renew_bot_instance("uuid-expire-test", 1)
+        self.assertIsNotNone(renewed)
+        self.assertEqual(renewed["status"], "active")
+        self.assertGreater(renewed["expire_at"], "2026-01-01 00:00:00")
+
+        # 4. 再次扫描已不再判定为过期
+        expired_after = database.get_expired_active_bots()
+        self.assertFalse(any(b["bot_id"] == "uuid-expire-test" for b in expired_after))
+
 if __name__ == "__main__":
     unittest.main()

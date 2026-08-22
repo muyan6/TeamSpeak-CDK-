@@ -7,6 +7,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel
 
+import asyncio
 from datetime import datetime, timedelta
 import config
 from database import (
@@ -29,7 +30,9 @@ from database import (
     get_bot_instance_by_cdk,
     get_all_bot_instances,
     update_bot_instance_status,
-    delete_bot_instance
+    delete_bot_instance,
+    get_expired_active_bots,
+    renew_bot_instance
 )
 from port_manager import allocate_ports_for_instance
 from docker_service import (
@@ -45,6 +48,21 @@ from music_bot_service import music_bot_client
 
 from contextlib import asynccontextmanager
 
+async def bot_expiry_checker():
+    """
+    后台守护任务：定期扫描所有已到期的音乐机器人，自动向远程平台发送停止命令并标记状态为 expired
+    """
+    while True:
+        try:
+            expired_list = get_expired_active_bots()
+            for b in expired_list:
+                print(f"[*] ⏰ 监测到机器人 [{b['name']}] (ID: {b['bot_id']}) 已到达有效期限 ({b['expire_at']})，正在执行自动停机下线...")
+                music_bot_client.stop_bot(b["bot_id"])
+                update_bot_instance_status(b["bot_id"], "expired")
+        except Exception as err:
+            print(f"[Error in bot_expiry_checker]: {err}")
+        await asyncio.sleep(30)
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
@@ -56,7 +74,11 @@ async def lifespan(app: FastAPI):
     print(f"[*] TeamSpeak 管理服务已启动，监听端口: {config.SERVER_PORT}")
     print(f"[*] 数据存储根目录: {config.DATA_BASE_DIR}")
     print(f"[*] 音乐机器人对接中心: {config.BOT_PANEL_URL}")
+    
+    # 启动到期自动停机监控后台任务
+    checker_task = asyncio.create_task(bot_expiry_checker())
     yield
+    checker_task.cancel()
 
 app = FastAPI(
     title="TeamSpeak Automated Hosting Platform",
@@ -101,6 +123,10 @@ class InstanceActionRequest(BaseModel):
 
 class BotActionRequest(BaseModel):
     action: str  # 'start', 'stop', 'restart', 'delete'
+
+class RenewBotRequest(BaseModel):
+    cdk: str
+    bot_id: str
 
 # --- 权限校验依赖 ---
 
@@ -300,6 +326,20 @@ def user_bot_action(bot_id: str, req: BotActionRequest):
     if not bot:
         raise HTTPException(status_code=404, detail="未找到该机器人实例")
 
+    # 到期安全校验：若已超时，禁止非管理员启动
+    if action in ("start", "restart"):
+        if bot.get("expire_at") and bot["expire_at"] != "permanent":
+            try:
+                exp_dt = datetime.strptime(bot["expire_at"], "%Y-%m-%d %H:%M:%S")
+                if exp_dt < datetime.now():
+                    update_bot_instance_status(bot_id, "expired")
+                    return JSONResponse(status_code=403, content={
+                        "success": False,
+                        "message": f"该音乐机器人已于 {bot['expire_at']} 到期并已自动停止。请使用新的 CDK 进行续费！"
+                    })
+            except Exception:
+                pass
+
     if action == "start":
         ok, res = music_bot_client.start_bot(bot_id)
         if ok:
@@ -323,6 +363,38 @@ def user_bot_action(bot_id: str, req: BotActionRequest):
 
     else:
         raise HTTPException(status_code=400, detail="不支持的操作指令")
+
+@app.post("/api/renew-bot")
+def renew_bot_endpoint(req: RenewBotRequest):
+    code = req.cdk.strip().upper()
+    cdk_info = get_cdk(code)
+    if not cdk_info:
+        return JSONResponse(status_code=400, content={"success": False, "message": "CDK 无效或不存在"})
+
+    if cdk_info["status"] != "unused":
+        return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 已经使用或不可用"})
+
+    if cdk_info.get("cdk_type") != "music_bot":
+        return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 不是音乐机器人兑换码"})
+
+    bot = get_bot_instance_by_id(req.bot_id)
+    if not bot:
+        return JSONResponse(status_code=404, content={"success": False, "message": "未找到要续费的机器人实例"})
+
+    add_m = cdk_info.get("duration_months", 1)
+    renewed_bot = renew_bot_instance(req.bot_id, add_m)
+    bind_cdk_bot(code, req.bot_id)
+
+    # 尝试重新拉起机器人
+    music_bot_client.start_bot(req.bot_id)
+
+    return {
+        "success": True,
+        "type": "music_bot",
+        "message": f"🎉 续费成功！机器人有效期已顺延至: {renewed_bot['expire_at']}",
+        "instance": renewed_bot,
+        "bot_panel_url": config.BOT_PANEL_URL
+    }
 
 # --- 管理员 API ---
 

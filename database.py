@@ -2,7 +2,7 @@ import sqlite3
 import secrets
 import string
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any
 from config import DB_PATH
 
@@ -324,6 +324,56 @@ def update_bot_instance_expiry(bot_id: str, expire_at: str):
         cursor = conn.cursor()
         cursor.execute("UPDATE bot_instances SET expire_at = ?, status = 'active' WHERE bot_id = ?", (expire_at, bot_id))
         conn.commit()
+
+def get_expired_active_bots() -> List[Dict[str, Any]]:
+    """
+    获取所有已超过有效时间但仍处于 active 状态的机器人实例
+    """
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM bot_instances 
+            WHERE status = 'active' 
+              AND expire_at != 'permanent' 
+              AND expire_at < ?
+        """, (now_str,))
+        return [dict(row) for row in cursor.fetchall()]
+
+def renew_bot_instance(bot_id: str, add_months: int) -> Optional[Dict[str, Any]]:
+    """
+    为已有机器人实例续期
+    """
+    bot = get_bot_instance_by_id(bot_id)
+    if not bot:
+        return None
+
+    if add_months == 0:
+        new_expire = "permanent"
+    else:
+        now = datetime.now()
+        current_exp_str = bot.get("expire_at")
+        if current_exp_str and current_exp_str != "permanent":
+            try:
+                curr_exp = datetime.strptime(current_exp_str, "%Y-%m-%d %H:%M:%S")
+                # 如果当前还没过期，在原到期时间上累加；如果已过期，从现在开始计算
+                base_time = curr_exp if curr_exp > now else now
+                new_expire = (base_time + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                new_expire = (now + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            new_expire = (now + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE bot_instances 
+            SET expire_at = ?, status = 'active' 
+            WHERE bot_id = ?
+        """, (new_expire, bot_id))
+        conn.commit()
+
+    return get_bot_instance_by_id(bot_id)
 
 def delete_bot_instance(bot_id: str) -> bool:
     with get_connection() as conn:

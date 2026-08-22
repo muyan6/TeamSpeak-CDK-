@@ -248,6 +248,22 @@
             <i class="fa-solid fa-play"></i> 启动机器人
           </button>
         </div>
+
+        <!-- 机器人快捷续费卡片 -->
+        <div style="margin-top: 1.5rem; padding: 1rem; background: rgba(139, 92, 246, 0.1); border: 1px dashed rgba(139, 92, 246, 0.4); border-radius: 10px;">
+          <div style="font-size: 0.95rem; font-weight: 600; color: #c084fc; margin-bottom: 0.5rem;">
+            <i class="fa-solid fa-clock-rotate-left"></i> 机器人续费延期
+          </div>
+          <p style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 0.75rem;">
+            持有新的音乐机器人 CDK（月卡/季卡/年卡/永久卡）？输入卡密即可直接为当前机器人累加有效时长并自动恢复运行：
+          </p>
+          <form onsubmit="handleRenewBot(event)" style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <input type="text" id="renewCdkInput" placeholder="输入新的音乐机器人 CDK (BOT-xxxx-...)" style="flex: 1; min-width: 220px; padding: 0.5rem 0.8rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff; text-transform: uppercase;" required>
+            <button type="submit" class="btn-primary" style="background: linear-gradient(135deg, #a855f7, #6366f1); padding: 0.5rem 1.25rem;">
+              <i class="fa-solid fa-bolt"></i> 立即续费
+            </button>
+          </form>
+        </div>
       </div>
 
       <!-- 说明与指南 -->
@@ -433,6 +449,36 @@
       }
 
       botResultCard.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    async function handleRenewBot(e) {
+      e.preventDefault();
+      if (!currentBotInstance || !currentBotInstance.bot_id) {
+        alert('缺少当前机器人信息，无法续费');
+        return;
+      }
+      const renewInput = document.getElementById('renewCdkInput');
+      const cdk = renewInput.value.trim().toUpperCase();
+      if (!cdk) return;
+
+      try {
+        const response = await fetch('/api/renew-bot', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cdk: cdk, bot_id: currentBotInstance.bot_id })
+        });
+
+        const res = await response.json();
+        if (!response.ok || !res.success) {
+          throw new Error(res.message || '续费失败');
+        }
+
+        renewInput.value = '';
+        renderBotResult(res.instance, res.bot_panel_url);
+        alert(res.message || '续费成功！');
+      } catch (err) {
+        alert(err.message || '续费异常');
+      }
     }
 
     async function botAction(action) {
