@@ -34,7 +34,25 @@ from docker_service import (
     fetch_container_logs
 )
 
-app = FastAPI(title="TeamSpeak Automated Hosting Platform", version="1.0.0")
+from contextlib import asynccontextmanager
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    # 确保存储目录存在
+    try:
+        os.makedirs(config.DATA_BASE_DIR, exist_ok=True)
+    except Exception as e:
+        print(f"[Warning] 无法创建数据根目录: {config.DATA_BASE_DIR}, 错误: {e}")
+    print(f"[*] TeamSpeak 管理服务已启动，监听端口: {config.SERVER_PORT}")
+    print(f"[*] 数据存储根目录: {config.DATA_BASE_DIR}")
+    yield
+
+app = FastAPI(
+    title="TeamSpeak Automated Hosting Platform",
+    version="1.0.0",
+    lifespan=lifespan
+)
 
 # 挂载静态文件与模板
 BASE_DIR = Path(__file__).parent.resolve()
@@ -66,19 +84,6 @@ def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-P
     if not x_admin_password or x_admin_password != config.ADMIN_PASSWORD:
         raise HTTPException(status_code=401, detail="管理员密码错误或未提供")
     return True
-
-# --- 启动事件 ---
-
-@app.on_event("startup")
-def on_startup():
-    init_db()
-    # 确保存储目录存在
-    try:
-        os.makedirs(config.DATA_BASE_DIR, exist_ok=True)
-    except Exception as e:
-        print(f"[Warning] 无法创建数据根目录: {config.DATA_BASE_DIR}, 错误: {e}")
-    print(f"[*] TeamSpeak 管理服务已启动，监听端口: {config.SERVER_PORT}")
-    print(f"[*] 数据存储根目录: {config.DATA_BASE_DIR}")
 
 # --- 页面路由 ---
 
