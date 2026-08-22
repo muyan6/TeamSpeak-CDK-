@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TeamSpeak 自动化开通平台</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body>
+  <div class="container">
+    <!-- 导航栏 -->
+    <header class="navbar">
+      <a href="/" class="brand">
+        <div class="brand-icon">
+          <i class="fa-solid fa-headset"></i>
+        </div>
+        <span>TeamSpeak Cloud</span>
+      </a>
+      <nav class="nav-links">
+        <a href="/admin"><i class="fa-solid fa-lock"></i> 管理后台</a>
+      </nav>
+    </header>
+
+    <!-- 主体区域 -->
+    <main>
+      <div class="hero-section">
+        <h1 class="hero-title">自主开通专属 TeamSpeak 服务器</h1>
+        <p class="hero-subtitle">输入兑换 CDK，系统将通过 Docker 独立容器为您毫秒级自动化部署专属语音服务器</p>
+      </div>
+
+      <!-- CDK 兑换表单 -->
+      <div class="card">
+        <form id="redeemForm" class="cdk-form" onsubmit="handleRedeem(event)">
+          <div class="input-box">
+            <input 
+              type="text" 
+              id="cdkInput" 
+              class="cdk-input" 
+              placeholder="请输入您的激活 CDK（如 TS-ABCD-EFGH）" 
+              required 
+              autocomplete="off"
+            />
+            <button type="submit" id="submitBtn" class="btn-primary">
+              <span class="spinner" id="loadingSpinner"></span>
+              <span id="btnText"><i class="fa-solid fa-bolt"></i> 立即开通 / 查询</span>
+            </button>
+          </div>
+        </form>
+        <div id="statusAlert" style="margin-top: 1.25rem; display: none; padding: 0.85rem; border-radius: 8px; font-size: 0.9rem;"></div>
+      </div>
+
+      <!-- 开通结果展示卡片 -->
+      <div id="resultCard" class="card result-card">
+        <div class="result-header">
+          <div>
+            <h2 style="font-size: 1.4rem; font-weight: 700;" id="resServerName">TeamSpeak 服务器</h2>
+            <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;" id="resCreatedAt"></p>
+          </div>
+          <span class="badge badge-success" id="resStatusBadge">运行中 (Active)</span>
+        </div>
+
+        <!-- 服务器连接信息 -->
+        <div class="info-grid">
+          <div class="info-item">
+            <div class="info-label">语音连接地址 (Voice Address)</div>
+            <div class="info-value">
+              <span id="resVoiceAddr">-</span>
+              <button class="btn-copy" onclick="copyText('resVoiceAddr')"><i class="fa-regular fa-copy"></i></button>
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">语音端口 (UDP Port)</div>
+            <div class="info-value">
+              <span id="resVoicePort">-</span>
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">文件传输端口 (File Port)</div>
+            <div class="info-value">
+              <span id="resFilePort">-</span>
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">服务器查询端口 (Query Port)</div>
+            <div class="info-value">
+              <span id="resQueryPort">-</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 管理员密钥 Token -->
+        <div class="token-box">
+          <div class="token-box-header">
+            <i class="fa-solid fa-key"></i>
+            <span>服务器管理员权限秘钥 (ServerAdmin Privilege Key)</span>
+          </div>
+          <p style="font-size: 0.85rem; color: #fca5a5; margin-bottom: 0.6rem;">
+            首次进入服务器时，TeamSpeak 客户端会提示输入秘钥以获取管理员 (Server Admin) 身份，请妥善保管：
+          </p>
+          <div class="token-code">
+            <span id="resAdminToken">加载中...</span>
+            <button class="btn-copy" style="border-color: rgba(239, 68, 68, 0.4); color: #fff;" onclick="copyText('resAdminToken')">
+              <i class="fa-regular fa-copy"></i> 复制秘钥
+            </button>
+          </div>
+        </div>
+
+        <!-- 快捷连接按钮 -->
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+          <a id="tsClientLink" href="#" class="btn-primary" style="background: linear-gradient(135deg, #10b981, #059669); text-decoration: none;">
+            <i class="fa-solid fa-arrow-up-right-from-square"></i> 一键唤起 TeamSpeak 客户端连接
+          </a>
+          <button class="btn-primary" style="background: var(--bg-secondary); border: 1px solid var(--border-color);" onclick="copyVoiceFull()">
+            <i class="fa-regular fa-clipboard"></i> 复制完整连接串
+          </button>
+        </div>
+      </div>
+
+      <!-- 说明与指南 -->
+      <div class="card" style="margin-top: 1rem;">
+        <h3 style="font-size: 1.1rem; margin-bottom: 1rem;"><i class="fa-solid fa-circle-question"></i> 使用帮助与说明</h3>
+        <ol style="color: var(--text-muted); font-size: 0.9rem; line-height: 1.8; padding-left: 1.25rem;">
+          <li>每个 CDK 对应一个独立的 Docker 虚拟化 TeamSpeak 服务器，享有独享的端口与独立存储目录。</li>
+          <li>开通后系统自动分配未占用的语音端口（例如 9988、9989 等，已规避官方冲突端口）。</li>
+          <li>若不慎刷新页面，只需再次输入相同的 CDK 即可重新查询并获取连接地址与管理员秘钥。</li>
+          <li>使用 TeamSpeak 客户端连接时，在服务器地址栏输入 <code style="color: #60a5fa;" id="guideExampleAddr">IP:端口</code> 即可加入。</li>
+        </ol>
+      </div>
+    </main>
+
+    <footer>
+      <p>&copy; 2026 TeamSpeak Cloud Service &bull; Powered by Docker Engine</p>
+    </footer>
+  </div>
+
+  <script>
+    let currentInstance = null;
+
+    async function handleRedeem(e) {
+      e.preventDefault();
+      const cdkInput = document.getElementById('cdkInput');
+      const cdk = cdkInput.value.trim();
+      if (!cdk) return;
+
+      const submitBtn = document.getElementById('submitBtn');
+      const spinner = document.getElementById('loadingSpinner');
+      const btnText = document.getElementById('btnText');
+      const alertBox = document.getElementById('statusAlert');
+      const resultCard = document.getElementById('resultCard');
+
+      // UI 状态进入加载
+      submitBtn.disabled = true;
+      spinner.style.display = 'inline-block';
+      btnText.innerText = '正在自动化创建并启动...';
+      alertBox.style.display = 'none';
+
+      try {
+        const response = await fetch('/api/redeem', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cdk: cdk })
+        });
+
+        const res = await response.json();
+
+        if (!response.ok || !res.success) {
+          throw new Error(res.message || '操作失败，请重试');
+        }
+
+        // 成功
+        currentInstance = res.instance;
+        renderResult(res.instance, res.message);
+        
+        alertBox.style.display = 'block';
+        alertBox.style.background = 'rgba(16, 185, 129, 0.15)';
+        alertBox.style.color = '#34d399';
+        alertBox.style.border = '1px solid #10b981';
+        alertBox.innerText = res.message || '服务器准备就绪！';
+
+      } catch (err) {
+        alertBox.style.display = 'block';
+        alertBox.style.background = 'rgba(239, 68, 68, 0.15)';
+        alertBox.style.color = '#f87171';
+        alertBox.style.border = '1px solid #ef4444';
+        alertBox.innerText = err.message || '系统异常，请稍后重试';
+      } finally {
+        submitBtn.disabled = false;
+        spinner.style.display = 'none';
+        btnText.innerHTML = '<i class="fa-solid fa-bolt"></i> 立即开通 / 查询';
+      }
+    }
+
+    function renderResult(inst, msg) {
+      const resultCard = document.getElementById('resultCard');
+      resultCard.style.display = 'block';
+
+      // 提取客户端直连 host
+      const host = inst.public_host || window.location.hostname;
+      const voiceAddr = `${host}:${inst.voice_port}`;
+
+      document.getElementById('resServerName').innerText = `TeamSpeak 实例 (${inst.name})`;
+      document.getElementById('resCreatedAt').innerText = `开通时间: ${inst.created_at || '刚刚'}`;
+      document.getElementById('resVoiceAddr').innerText = voiceAddr;
+      document.getElementById('resVoicePort').innerText = `${inst.voice_port} (UDP)`;
+      document.getElementById('resFilePort').innerText = `${inst.file_port} (TCP)`;
+      document.getElementById('resQueryPort').innerText = `${inst.query_port} (TCP)`;
+      document.getElementById('resAdminToken').innerText = inst.admin_token || '（容器已启动，Token 可在日志或客户端首次进入时提示获取）';
+
+      // 唤起客户端链接 ts3server://host?port=xxxx
+      const clientUrl = `ts3server://${host}?port=${inst.voice_port}`;
+      document.getElementById('tsClientLink').href = clientUrl;
+
+      // 平滑滚动
+      resultCard.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function copyText(elementId) {
+      const el = document.getElementById(elementId);
+      if (!el) return;
+      const text = el.innerText;
+      navigator.clipboard.writeText(text).then(() => {
+        alert('已复制到剪贴板: ' + text);
+      }).catch(() => {
+        alert('复制失败，请手动选择复制');
+      });
+    }
+
+    function copyVoiceFull() {
+      if (!currentInstance) return;
+      const host = currentInstance.public_host || window.location.hostname;
+      const voiceAddr = `${host}:${currentInstance.voice_port}`;
+      navigator.clipboard.writeText(voiceAddr).then(() => {
+        alert('已复制连接串: ' + voiceAddr);
+      });
+    }
+  </script>
+</body>
+</html>

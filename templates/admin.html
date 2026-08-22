@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>TeamSpeak 管理员控制台</title>
+  <link rel="stylesheet" href="/static/css/style.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    .tab-nav {
+      display: flex;
+      gap: 1rem;
+      border-bottom: 1px solid var(--border-color);
+      margin-bottom: 1.5rem;
+    }
+    .tab-btn {
+      background: none;
+      border: none;
+      color: var(--text-muted);
+      font-size: 1rem;
+      font-weight: 600;
+      padding: 0.75rem 1rem;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .tab-btn.active {
+      color: var(--accent-primary);
+      border-bottom-color: var(--accent-primary);
+    }
+    .stats-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+    }
+    .stat-card {
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 1.25rem;
+    }
+    .stat-val {
+      font-size: 1.8rem;
+      font-weight: 700;
+      color: #fff;
+      margin-top: 0.25rem;
+    }
+    .btn-action {
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid var(--border-color);
+      color: #fff;
+      padding: 0.35rem 0.65rem;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 0.8rem;
+      transition: background 0.2s;
+    }
+    .btn-action:hover {
+      background: rgba(255, 255, 255, 0.18);
+    }
+    .btn-danger {
+      background: rgba(239, 68, 68, 0.2);
+      border-color: rgba(239, 68, 68, 0.4);
+      color: #f87171;
+    }
+    .btn-danger:hover {
+      background: rgba(239, 68, 68, 0.4);
+    }
+    pre.log-viewer {
+      background: #000;
+      color: #38bdf8;
+      padding: 1rem;
+      border-radius: 8px;
+      font-family: monospace;
+      font-size: 0.85rem;
+      height: 400px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header class="navbar">
+      <a href="/admin" class="brand">
+        <div class="brand-icon" style="background: linear-gradient(135deg, #ec4899, #8b5cf6);">
+          <i class="fa-solid fa-server"></i>
+        </div>
+        <span>TS3 Admin Console</span>
+      </a>
+      <nav class="nav-links">
+        <a href="/"><i class="fa-solid fa-arrow-left"></i> 返回前台</a>
+      </nav>
+    </header>
+
+    <!-- 登录区域（若未登录） -->
+    <div id="loginSection" class="card" style="max-width: 450px; margin: 3rem auto; display: none;">
+      <h2 style="margin-bottom: 1rem; text-align: center;"><i class="fa-solid fa-lock"></i> 管理员身份认证</h2>
+      <div style="margin-bottom: 1.25rem;">
+        <label class="info-label">请输入管理员密钥 (ADMIN_PASSWORD)</label>
+        <input type="password" id="adminPwdInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.75rem;" placeholder="默认: admin123456">
+      </div>
+      <button class="btn-primary" style="width: 100%; justify-content: center;" onclick="performLogin()">
+        <i class="fa-solid fa-right-to-bracket"></i> 进入后台
+      </button>
+      <p id="loginError" style="color: #f87171; font-size: 0.85rem; margin-top: 0.75rem; text-align: center; display: none;"></p>
+    </div>
+
+    <!-- 主控板（已登录） -->
+    <div id="dashboardSection" style="display: none;">
+      <!-- 统计指标 -->
+      <div class="stats-row">
+        <div class="stat-card">
+          <div class="info-label">总 TS 实例数</div>
+          <div class="stat-val" id="statTotalInstances">0</div>
+        </div>
+        <div class="stat-card">
+          <div class="info-label">已生成 CDK / 未使用</div>
+          <div class="stat-val" id="statCdkCounts">0 / 0</div>
+        </div>
+        <div class="stat-card">
+          <div class="info-label">已分配语音端口范围</div>
+          <div class="stat-val" style="font-size: 1.2rem; color: #60a5fa;" id="statPortRange">-</div>
+        </div>
+      </div>
+
+      <!-- 标签页切换 -->
+      <div class="tab-nav">
+        <button class="tab-btn active" id="tabBtnInstances" onclick="switchTab('instances')">
+          <i class="fa-solid fa-cubes"></i> 实例集群管理
+        </button>
+        <button class="tab-btn" id="tabBtnCdks" onclick="switchTab('cdks')">
+          <i class="fa-solid fa-ticket"></i> CDK 激活码管理
+        </button>
+      </div>
+
+      <!-- Tab 1: 实例集群列表 -->
+      <div id="tabContentInstances" class="card">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h3 style="font-size: 1.15rem;">运行中的 TeamSpeak 容器集群</h3>
+          <button class="btn-action" onclick="loadInstances()"><i class="fa-solid fa-rotate"></i> 刷新列表</button>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>编号</th>
+                <th>实例目录 / 容器名</th>
+                <th>语音端口 (UDP)</th>
+                <th>文件 / 查询端口</th>
+                <th>管理员 Token</th>
+                <th>容器状态</th>
+                <th>创建时间</th>
+                <th>管理操作</th>
+              </tr>
+            </thead>
+            <tbody id="instancesTableBody">
+              <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">暂无实例</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <!-- Tab 2: CDK 管理 -->
+      <div id="tabContentCdks" class="card" style="display: none;">
+        <!-- 生成 CDK 工具栏 -->
+        <div style="background: rgba(0,0,0,0.25); border: 1px solid var(--border-color); padding: 1.25rem; border-radius: 10px; margin-bottom: 1.5rem;">
+          <h4 style="margin-bottom: 0.75rem;"><i class="fa-solid fa-plus-circle"></i> 批量生成 CDK</h4>
+          <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: center;">
+            <div>
+              <label class="info-label">生成数量</label>
+              <input type="number" id="genCount" value="5" min="1" max="100" style="width: 90px; padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff;">
+            </div>
+            <div style="flex: 1; min-width: 200px;">
+              <label class="info-label">备注信息</label>
+              <input type="text" id="genRemark" placeholder="如：活动发放 / 玩家定制" style="width: 100%; padding: 0.4rem 0.6rem; border-radius: 6px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff;">
+            </div>
+            <div style="align-self: flex-end;">
+              <button class="btn-primary" onclick="generateCdks()"><i class="fa-solid fa-wand-magic-sparkles"></i> 立即生成</button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+          <h3 style="font-size: 1.15rem;">CDK 列表与状态</h3>
+          <div style="display: flex; gap: 0.5rem;">
+            <button class="btn-action" onclick="copyUnusedCdks()"><i class="fa-regular fa-copy"></i> 批量复制未使用 CDK</button>
+            <button class="btn-action" onclick="loadCdks()"><i class="fa-solid fa-rotate"></i> 刷新</button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="data-table">
+            <thead>
+              <tr>
+                <th>CDK 激活码</th>
+                <th>使用状态</th>
+                <th>绑定实例</th>
+                <th>备注</th>
+                <th>生成时间</th>
+                <th>兑换时间</th>
+                <th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="cdksTableBody">
+              <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">暂无 CDK 数据</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 日志模态框 -->
+  <div id="logsModal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 800px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <h3 id="logsModalTitle"><i class="fa-solid fa-terminal"></i> 容器实时日志</h3>
+        <button class="btn-action" onclick="closeLogsModal()"><i class="fa-solid fa-xmark"></i> 关闭</button>
+      </div>
+      <pre id="logsContent" class="log-viewer">加载日志中...</pre>
+    </div>
+  </div>
+
+  <script>
+    let adminToken = localStorage.getItem('ts_admin_pwd') || '';
+    let currentLogInstanceId = null;
+
+    window.addEventListener('DOMContentLoaded', () => {
+      if (adminToken) {
+        checkAuth();
+      } else {
+        showLogin();
+      }
+    });
+
+    function showLogin() {
+      document.getElementById('loginSection').style.display = 'block';
+      document.getElementById('dashboardSection').style.display = 'none';
+    }
+
+    async function performLogin() {
+      const pwd = document.getElementById('adminPwdInput').value.trim();
+      if (!pwd) return;
+      adminToken = pwd;
+      localStorage.setItem('ts_admin_pwd', pwd);
+      checkAuth();
+    }
+
+    async function checkAuth() {
+      try {
+        const res = await fetch('/api/admin/system-status', {
+          headers: { 'X-Admin-Password': adminToken }
+        });
+        if (res.status === 401 || res.status === 403) {
+          showLogin();
+          document.getElementById('loginError').style.display = 'block';
+          document.getElementById('loginError').innerText = '密码错误，请重新输入';
+          return;
+        }
+        document.getElementById('loginSection').style.display = 'none';
+        document.getElementById('dashboardSection').style.display = 'block';
+        loadDashboard();
+      } catch (e) {
+        showLogin();
+      }
+    }
+
+    function switchTab(tab) {
+      if (tab === 'instances') {
+        document.getElementById('tabBtnInstances').classList.add('active');
+        document.getElementById('tabBtnCdks').classList.remove('active');
+        document.getElementById('tabContentInstances').style.display = 'block';
+        document.getElementById('tabContentCdks').style.display = 'none';
+        loadInstances();
+      } else {
+        document.getElementById('tabBtnCdks').classList.add('active');
+        document.getElementById('tabBtnInstances').classList.remove('active');
+        document.getElementById('tabContentCdks').style.display = 'block';
+        document.getElementById('tabContentInstances').style.display = 'none';
+        loadCdks();
+      }
+    }
+
+    async function loadDashboard() {
+      loadStats();
+      loadInstances();
+    }
+
+    async function loadStats() {
+      try {
+        const res = await fetch('/api/admin/system-status', {
+          headers: { 'X-Admin-Password': adminToken }
+        });
+        const data = await res.json();
+        if (data.success) {
+          document.getElementById('statTotalInstances').innerText = data.total_instances;
+          document.getElementById('statCdkCounts').innerText = `${data.total_cdks} / ${data.unused_cdks}`;
+          document.getElementById('statPortRange').innerText = data.voice_ports_summary || '暂无分配';
+        }
+      } catch (e) {}
+    }
+
+    async function loadInstances() {
+      const tbody = document.getElementById('instancesTableBody');
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align: center;">加载中...</td></tr>';
+      try {
+        const res = await fetch('/api/admin/instances', {
+          headers: { 'X-Admin-Password': adminToken }
+        });
+        const data = await res.json();
+        if (!data.success || data.instances.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted);">暂无实例</td></tr>';
+          return;
+        }
+
+        tbody.innerHTML = data.instances.map(inst => `
+          <tr>
+            <td><strong style="color: #60a5fa;">${inst.name}</strong> (ID: ${inst.id})</td>
+            <td>
+              <div><code style="color: #a78bfa;">${inst.dir_path}</code></div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">${inst.container_name}</div>
+            </td>
+            <td><span class="badge badge-info">${inst.voice_port} / UDP</span></td>
+            <td>
+              <div style="font-size: 0.8rem;">文件: ${inst.file_port}</div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">查询: ${inst.query_port}</div>
+            </td>
+            <td style="max-width: 140px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+              <span title="${inst.admin_token || ''}" style="font-family: monospace; font-size: 0.8rem; color: #fca5a5;">${inst.admin_token || '未抓取到'}</span>
+            </td>
+            <td>
+              <span class="badge ${inst.live_status === 'running' ? 'badge-success' : 'badge-warning'}">
+                ${inst.live_status || inst.status}
+              </span>
+            </td>
+            <td style="font-size: 0.8rem; color: var(--text-muted);">${inst.created_at}</td>
+            <td>
+              <div style="display: flex; gap: 0.35rem; flex-wrap: wrap;">
+                <button class="btn-action" title="查看日志" onclick="showLogs(${inst.id})"><i class="fa-solid fa-terminal"></i></button>
+                <button class="btn-action" title="重启容器" onclick="instanceAction(${inst.id}, 'restart')"><i class="fa-solid fa-rotate-right"></i></button>
+                <button class="btn-action" title="停止容器" onclick="instanceAction(${inst.id}, 'stop')"><i class="fa-solid fa-stop"></i></button>
+                <button class="btn-action" title="启动容器" onclick="instanceAction(${inst.id}, 'start')"><i class="fa-solid fa-play"></i></button>
+                <button class="btn-action btn-danger" title="销毁实例" onclick="destroyInstance(${inst.id})"><i class="fa-solid fa-trash"></i></button>
+              </div>
+            </td>
+          </tr>
+        `).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #f87171;">加载失败</td></tr>';
+      }
+    }
+
+    async function loadCdks() {
+      const tbody = document.getElementById('cdksTableBody');
+      tbody.innerHTML = '<tr><td colspan="7" style="text-align: center;">加载中...</td></tr>';
+      try {
+        const res = await fetch('/api/admin/cdks', {
+          headers: { 'X-Admin-Password': adminToken }
+        });
+        const data = await res.json();
+        if (!data.success || data.cdks.length === 0) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted);">暂无 CDK 数据</td></tr>';
+          return;
+        }
+
+        window._allCdks = data.cdks;
+
+        tbody.innerHTML = data.cdks.map(c => `
+          <tr>
+            <td><code style="font-size: 0.95rem; font-weight: 600; color: #38bdf8;">${c.code}</code></td>
+            <td>
+              <span class="badge ${c.status === 'unused' ? 'badge-success' : (c.status === 'used' ? 'badge-warning' : 'badge-danger')}">
+                ${c.status === 'unused' ? '未使用' : (c.status === 'used' ? '已使用' : '已禁用')}
+              </span>
+            </td>
+            <td>${c.instance_id ? `<strong style="color:#60a5fa">ts${c.instance_id}</strong>` : '-'}</td>
+            <td>${c.remark || '-'}</td>
+            <td style="font-size: 0.8rem; color: var(--text-muted);">${c.created_at}</td>
+            <td style="font-size: 0.8rem; color: var(--text-muted);">${c.used_at || '-'}</td>
+            <td>
+              <button class="btn-action" onclick="navigator.clipboard.writeText('${c.code}'); alert('已复制: ${c.code}')"><i class="fa-regular fa-copy"></i></button>
+              <button class="btn-action btn-danger" onclick="deleteCdk('${c.code}')"><i class="fa-solid fa-trash"></i></button>
+            </td>
+          </tr>
+        `).join('');
+      } catch (e) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #f87171;">加载失败</td></tr>';
+      }
+    }
+
+    async function generateCdks() {
+      const count = parseInt(document.getElementById('genCount').value) || 1;
+      const remark = document.getElementById('genRemark').value.trim();
+      try {
+        const res = await fetch('/api/admin/cdks/generate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify({ count, remark })
+        });
+        const data = await res.json();
+        if (data.success) {
+          alert(`成功生成 ${data.created.length} 个 CDK！`);
+          document.getElementById('genRemark').value = '';
+          loadCdks();
+          loadStats();
+        } else {
+          alert(data.message || '生成失败');
+        }
+      } catch (e) {
+        alert('请求异常');
+      }
+    }
+
+    async function deleteCdk(code) {
+      if (!confirm(`确定要删除 CDK: ${code} 吗？`)) return;
+      try {
+        const res = await fetch(`/api/admin/cdks/${code}`, {
+          method: 'DELETE',
+          headers: { 'X-Admin-Password': adminToken }
+        });
+        const data = await res.json();
+        if (data.success) {
+          loadCdks();
+          loadStats();
+        }
+      } catch (e) {
+        alert('删除失败');
+      }
+    }
+
+    function copyUnusedCdks() {
+      if (!window._allCdks) return;
+      const unused = window._allCdks.filter(c => c.status === 'unused').map(c => c.code);
+      if (unused.length === 0) {
+        alert('没有未使用的 CDK 可复制');
+        return;
+      }
+      const text = unused.join('\n');
+      navigator.clipboard.writeText(text).then(() => {
+        alert(`已复制 ${unused.length} 个未使用的 CDK 到剪贴板！\n\n` + text);
+      });
+    }
+
+    async function instanceAction(id, action) {
+      try {
+        const res = await fetch(`/api/admin/instances/${id}/action`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify({ action })
+        });
+        const data = await res.json();
+        alert(data.message || '操作完成');
+        loadInstances();
+      } catch (e) {
+        alert('操作失败');
+      }
+    }
+
+    async function destroyInstance(id) {
+      if (!confirm(`⚠️ 警告: 确定要彻底销毁并删除 ts${id} 的 Docker 容器和数据文件夹吗？此操作不可逆！`)) return;
+      instanceAction(id, 'destroy');
+    }
+
+    async function showLogs(id) {
+      currentLogInstanceId = id;
+      document.getElementById('logsModalTitle').innerHTML = `<i class="fa-solid fa-terminal"></i> 实例 ts${id} 容器日志`;
+      document.getElementById('logsContent').innerText = '正在读取 Docker 日志...';
+      document.getElementById('logsModal').style.display = 'flex';
+
+      try {
+        const res = await fetch(`/api/admin/instances/${id}/logs`, {
+          headers: { 'X-Admin-Password': adminToken }
+        });
+        const data = await res.json();
+        document.getElementById('logsContent').innerText = data.logs || '（暂无日志输出）';
+      } catch (e) {
+        document.getElementById('logsContent').innerText = '读取日志失败';
+      }
+    }
+
+    function closeLogsModal() {
+      document.getElementById('logsModal').style.display = 'none';
+    }
+  </script>
+</body>
+</html>
