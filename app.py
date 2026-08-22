@@ -89,11 +89,17 @@ def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-P
 
 @app.get("/", response_class=HTMLResponse)
 def index_page(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    try:
+        return templates.TemplateResponse(request=request, name="index.html")
+    except TypeError:
+        return templates.TemplateResponse("index.html", {"request": request})
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request):
-    return templates.TemplateResponse("admin.html", {"request": request})
+    try:
+        return templates.TemplateResponse(request=request, name="admin.html")
+    except TypeError:
+        return templates.TemplateResponse("admin.html", {"request": request})
 
 # --- 用户端 API ---
 
