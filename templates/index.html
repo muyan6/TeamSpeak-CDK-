@@ -347,6 +347,23 @@
     let currentBotInstance = null;
     let currentPendingBotCdk = '';
 
+    window.addEventListener('DOMContentLoaded', () => {
+      const addrInput = document.getElementById('botServerAddrInput');
+      const portInput = document.getElementById('botServerPortInput');
+      if (addrInput && portInput) {
+        addrInput.addEventListener('input', (e) => {
+          const val = e.target.value.trim();
+          if (val.includes(':') && !val.startsWith('http://') && !val.startsWith('https://')) {
+            const parts = val.split(':');
+            e.target.value = parts[0].trim();
+            if (parts[1] && !isNaN(parts[1])) {
+              portInput.value = parseInt(parts[1]);
+            }
+          }
+        });
+      }
+    });
+
     async function handleRedeem(e) {
       e.preventDefault();
       const cdkInput = document.getElementById('cdkInput');
@@ -450,7 +467,7 @@
         cdk: currentPendingBotCdk,
         name: document.getElementById('botNameInput').value.trim(),
         serverAddress: document.getElementById('botServerAddrInput').value.trim(),
-        serverPort: parseInt(document.getElementById('botServerPortInput').value) || 60001,
+        serverPort: parseInt(document.getElementById('botServerPortInput').value) || 9987,
         nickname: document.getElementById('botNickInput').value.trim(),
         defaultChannel: document.getElementById('botDefaultChannelInput').value.trim() || null,
         serverPassword: document.getElementById('botServerPassInput').value.trim() || null

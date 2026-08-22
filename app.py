@@ -277,14 +277,22 @@ def redeem_bot_instance(req: RedeemBotRequest):
     if cdk_info["status"] != "unused":
         return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 已经使用或不可用"})
 
-    if cdk_info.get("cdk_type") != "music_bot":
-        return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 不是音乐机器人兑换码"})
+    # 智能兼容：如果用户在服务器地址中直接填入了 IP:Port (如 stormclub.ts3.uno:60001)
+    raw_addr = req.serverAddress.strip()
+    target_port = req.serverPort
+    if ":" in raw_addr and not raw_addr.startswith("http://") and not raw_addr.startswith("https://"):
+        parts = raw_addr.split(":")
+        raw_addr = parts[0].strip()
+        try:
+            target_port = int(parts[1].strip())
+        except ValueError:
+            pass
 
     # 调用远程音乐机器人 API 创建实例
     ok, res = music_bot_client.create_bot(
         name=req.name.strip() or "我的音乐机器人",
-        server_address=req.serverAddress.strip(),
-        server_port=req.serverPort,
+        server_address=raw_addr,
+        server_port=target_port,
         nickname=req.nickname.strip() or "MusicBot",
         default_channel=req.defaultChannel.strip() if req.defaultChannel else None,
         server_password=req.serverPassword if req.serverPassword else None,
@@ -305,8 +313,8 @@ def redeem_bot_instance(req: RedeemBotRequest):
     bot_inst = create_bot_instance(
         bot_id=bot_id,
         name=req.name,
-        server_address=req.serverAddress,
-        server_port=req.serverPort,
+        server_address=raw_addr,
+        server_port=target_port,
         nickname=req.nickname,
         cdk_code=code,
         duration_months=duration_m,
