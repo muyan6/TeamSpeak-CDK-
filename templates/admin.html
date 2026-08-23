@@ -511,10 +511,26 @@
           <button class="btn-action" onclick="loadInstances()"><i class="fa-solid fa-rotate"></i> 刷新列表</button>
         </div>
 
+        <!-- 批量操作悬浮工具栏 (TS 实例) -->
+        <div id="selectedInstancesActionBar" style="display: none; align-items: center; justify-content: space-between; background: rgba(59, 130, 246, 0.12); border: 1px solid rgba(59, 130, 246, 0.35); padding: 0.55rem 1rem; border-radius: 8px; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div style="font-size: 0.85rem; color: #93c5fd; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fa-solid fa-square-check" style="color: #60a5fa;"></i>
+            <span>已勾选 <strong id="selectedInstancesCount" style="color: #fff; font-size: 0.95rem;">0</strong> 个 TS 实例</span>
+          </div>
+          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap;">
+            <button class="btn-action btn-action-sm" onclick="batchInstancesAction('start')"><i class="fa-solid fa-play"></i> 批量启动</button>
+            <button class="btn-action btn-action-sm" onclick="batchInstancesAction('stop')"><i class="fa-solid fa-stop"></i> 批量停止</button>
+            <button class="btn-action btn-action-sm" onclick="batchInstancesAction('restart')"><i class="fa-solid fa-rotate-right"></i> 批量重启</button>
+            <button class="btn-action btn-action-sm btn-danger" onclick="batchInstancesAction('destroy')"><i class="fa-solid fa-trash"></i> 批量彻底销毁</button>
+            <button class="btn-action btn-action-sm" onclick="clearSelectedInstances()"><i class="fa-solid fa-xmark"></i> 取消勾选</button>
+          </div>
+        </div>
+
         <div class="table-responsive">
           <table class="data-table">
             <thead>
               <tr>
+                <th style="width: 36px; text-align: center;"><input type="checkbox" id="selectAllInstances" onchange="toggleSelectAllInstances(this)"></th>
                 <th>编号 / 实例名</th>
                 <th>存储目录 / 容器名</th>
                 <th>语音端口 (UDP)</th>
@@ -528,7 +544,7 @@
               </tr>
             </thead>
             <tbody id="instancesTableBody">
-              <tr><td colspan="10" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
+              <tr><td colspan="11" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
             </tbody>
           </table>
         </div>
@@ -554,10 +570,26 @@
           </div>
         </div>
 
+        <!-- 批量操作悬浮工具栏 (机器人) -->
+        <div id="selectedBotsActionBar" style="display: none; align-items: center; justify-content: space-between; background: rgba(168, 85, 247, 0.12); border: 1px solid rgba(168, 85, 247, 0.35); padding: 0.55rem 1rem; border-radius: 8px; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div style="font-size: 0.85rem; color: #d8b4fe; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fa-solid fa-square-check" style="color: #c084fc;"></i>
+            <span>已勾选 <strong id="selectedBotsCount" style="color: #fff; font-size: 0.95rem;">0</strong> 个音乐机器人</span>
+          </div>
+          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap;">
+            <button class="btn-action btn-action-sm" onclick="batchBotsAction('start')"><i class="fa-solid fa-play"></i> 批量启动</button>
+            <button class="btn-action btn-action-sm" onclick="batchBotsAction('stop')"><i class="fa-solid fa-stop"></i> 批量停止</button>
+            <button class="btn-action btn-action-sm" onclick="batchBotsAction('restart')"><i class="fa-solid fa-rotate-right"></i> 批量重启</button>
+            <button class="btn-action btn-action-sm btn-danger" onclick="batchBotsAction('delete')"><i class="fa-solid fa-trash"></i> 批量删除</button>
+            <button class="btn-action btn-action-sm" onclick="clearSelectedBots()"><i class="fa-solid fa-xmark"></i> 取消勾选</button>
+          </div>
+        </div>
+
         <div class="table-responsive">
           <table class="data-table">
             <thead>
               <tr>
+                <th style="width: 36px; text-align: center;"><input type="checkbox" id="selectAllBots" onchange="toggleSelectAllBots(this)"></th>
                 <th>机器人名称</th>
                 <th>目标 TS 服务器</th>
                 <th>机器人昵称</th>
@@ -569,7 +601,7 @@
               </tr>
             </thead>
             <tbody id="botsTableBody">
-              <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
+              <tr><td colspan="9" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
             </tbody>
           </table>
         </div>
@@ -616,7 +648,7 @@
 
         <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.85rem;">
           <!-- 分组切换与辅助筛选 -->
-          <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+          <div style="display: flex; gap: 0.65rem; align-items: center; flex-wrap: wrap;">
             <!-- 状态分组 Tabs -->
             <div class="cdk-filter-group">
               <button class="cdk-filter-btn active" id="cdkFilterAll" onclick="setCdkStatusFilter('all')">
@@ -631,23 +663,37 @@
             </div>
 
             <!-- 类型细分筛选 -->
-            <select id="cdkTypeFilter" class="form-control" onchange="applyCdkFilters()" style="padding: 0.42rem 0.75rem; font-size: 0.85rem;">
+            <select id="cdkTypeFilter" class="form-control" onchange="applyCdkFilters()" style="padding: 0.42rem 0.65rem; font-size: 0.85rem;">
               <option value="all">所有类型</option>
               <option value="teamspeak">TS 语音服务器</option>
               <option value="music_bot">音乐机器人</option>
             </select>
 
+            <!-- 时长细分筛选 (月卡/季卡/半年卡/年卡/永久) -->
+            <select id="cdkDurationFilter" class="form-control" onchange="applyCdkFilters()" style="padding: 0.42rem 0.65rem; font-size: 0.85rem; color: #facc15;">
+              <option value="all">所有时长</option>
+              <option value="1">月卡 (1个月)</option>
+              <option value="3">季卡 (3个月)</option>
+              <option value="6">半年卡 (6个月)</option>
+              <option value="12">年卡 (12个月)</option>
+              <option value="0">永久卡 (永久)</option>
+            </select>
+
             <!-- 搜索框 -->
             <div style="position: relative;">
-              <input type="text" id="cdkSearchInput" class="form-control" placeholder="搜索卡密 / 备注..." oninput="applyCdkFilters()" style="padding: 0.42rem 0.75rem 0.42rem 2rem; font-size: 0.85rem; width: 170px;">
+              <input type="text" id="cdkSearchInput" class="form-control" placeholder="搜索卡密 / 备注..." oninput="applyCdkFilters()" style="padding: 0.42rem 0.75rem 0.42rem 2rem; font-size: 0.85rem; width: 160px;">
               <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 0.65rem; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 0.8rem;"></i>
             </div>
           </div>
 
           <!-- 操作按钮组 -->
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <!-- 按条件批量清理/删除 (月卡、年卡、永久卡等) -->
+            <button class="btn-action btn-danger" style="background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.35); color: #f87171;" onclick="openBatchDeleteCdkModal()">
+              <i class="fa-solid fa-filter-circle-xmark"></i> 按时长/条件批量清理
+            </button>
             <button class="btn-action" style="background: rgba(59, 130, 246, 0.2); border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;" onclick="exportCurrentCdksTxt()">
-              <i class="fa-solid fa-file-arrow-down"></i> 导出当前列表 (.txt)
+              <i class="fa-solid fa-file-arrow-down"></i> 导出列表 (.txt)
             </button>
             <button class="btn-action" onclick="copyCurrentCdks()">
               <i class="fa-regular fa-copy"></i> 复制当前卡密
@@ -658,10 +704,24 @@
           </div>
         </div>
 
+        <!-- 批量操作悬浮工具栏 (CDK) -->
+        <div id="selectedCdksActionBar" style="display: none; align-items: center; justify-content: space-between; background: rgba(239, 68, 68, 0.12); border: 1px solid rgba(239, 68, 68, 0.35); padding: 0.55rem 1rem; border-radius: 8px; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+          <div style="font-size: 0.85rem; color: #fca5a5; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fa-solid fa-square-check" style="color: #f87171;"></i>
+            <span>已勾选 <strong id="selectedCdksCount" style="color: #fff; font-size: 0.95rem;">0</strong> 个 CDK 激活码</span>
+          </div>
+          <div style="display: flex; gap: 0.45rem; flex-wrap: wrap;">
+            <button class="btn-action btn-action-sm btn-danger" onclick="batchDeleteSelectedCdks()"><i class="fa-solid fa-trash"></i> 批量删除选中项</button>
+            <button class="btn-action btn-action-sm" onclick="copySelectedCdks()"><i class="fa-regular fa-copy"></i> 复制选中卡密</button>
+            <button class="btn-action btn-action-sm" onclick="clearSelectedCdks()"><i class="fa-solid fa-xmark"></i> 取消勾选</button>
+          </div>
+        </div>
+
         <div class="table-responsive">
           <table class="data-table">
             <thead>
               <tr>
+                <th style="width: 36px; text-align: center;"><input type="checkbox" id="selectAllCdks" onchange="toggleSelectAllCdks(this)"></th>
                 <th>CDK 激活码</th>
                 <th>类型 / 时长</th>
                 <th>使用状态</th>
@@ -672,7 +732,7 @@
               </tr>
             </thead>
             <tbody id="cdksTableBody">
-              <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
+              <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
             </tbody>
           </table>
         </div>
@@ -794,6 +854,63 @@
         <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
           <button type="button" class="btn-action" onclick="closePwdModal()">取消</button>
           <button type="submit" class="btn-primary"><i class="fa-solid fa-check"></i> 确认保存新密码</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <!-- 按条件批量清理 / 删除 CDK 模态框 -->
+  <div id="batchDeleteCdkModal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 520px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <h3 style="font-size: 1.15rem; color: #f87171;"><i class="fa-solid fa-filter-circle-xmark"></i> 按条件批量清理 / 删除 CDK</h3>
+        <button class="btn-action" onclick="closeBatchDeleteCdkModal()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div style="background: rgba(239, 68, 68, 0.08); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; font-size: 0.82rem; color: #fca5a5;">
+        <i class="fa-solid fa-triangle-exclamation"></i> <strong>警告</strong>：批量删除将永久从数据库中移除符合条件的卡密，该操作不可逆，请核对后再执行！
+      </div>
+
+      <form onsubmit="submitBatchDeleteFilter(event)">
+        <div style="margin-bottom: 1rem;">
+          <label class="info-label" style="display: block; margin-bottom: 0.35rem;">1. 卡密有效时长 (Duration)</label>
+          <select id="batchDelDuration" class="form-control" style="width: 100%; color: #facc15;" onchange="updateBatchDeletePreview()">
+            <option value="all">全部时长</option>
+            <option value="1">月卡 (1 个月)</option>
+            <option value="3">季卡 (3 个月)</option>
+            <option value="6">半年卡 (6 个月)</option>
+            <option value="12">年卡 (12 个月)</option>
+            <option value="0">永久卡 (永久有效)</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom: 1rem;">
+          <label class="info-label" style="display: block; margin-bottom: 0.35rem;">2. 卡密业务类型 (Type)</label>
+          <select id="batchDelType" class="form-control" style="width: 100%;" onchange="updateBatchDeletePreview()">
+            <option value="all">全部类型 (TS 语音服务器 + 音乐机器人)</option>
+            <option value="teamspeak">仅限 TeamSpeak 语音服务器</option>
+            <option value="music_bot">仅限 TeamSpeak 音乐机器人</option>
+          </select>
+        </div>
+
+        <div style="margin-bottom: 1.25rem;">
+          <label class="info-label" style="display: block; margin-bottom: 0.35rem;">3. 卡密使用状态 (Status)</label>
+          <select id="batchDelStatus" class="form-control" style="width: 100%;" onchange="updateBatchDeletePreview()">
+            <option value="all">全部状态 (未使用 + 已使用)</option>
+            <option value="unused">仅限【未使用】(作废未激活卡密)</option>
+            <option value="used">仅限【已使用】(清理历史卡密记录)</option>
+          </select>
+        </div>
+
+        <!-- 匹配统计预览 -->
+        <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.85rem 1.1rem; margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.88rem; color: #cbd5e1;">当前符合条件的卡密数：</span>
+          <span class="badge badge-danger" style="font-size: 0.95rem; font-weight: 700;" id="batchDelPreviewCount">0 张</span>
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+          <button type="button" class="btn-action" onclick="closeBatchDeleteCdkModal()">取消</button>
+          <button type="submit" id="execBatchDeleteBtn" class="btn-primary btn-danger"><i class="fa-solid fa-trash"></i> 确认执行批量删除</button>
         </div>
       </form>
     </div>
@@ -1039,19 +1156,23 @@
 
     async function loadInstances() {
       const tbody = document.getElementById('instancesTableBody');
-      tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
+      clearSelectedInstances();
       try {
         const res = await fetch('/api/admin/instances', {
           headers: { 'X-Admin-Password': adminToken }
         });
         const data = await res.json();
         if (!data.success || data.instances.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无 TeamSpeak 实例</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无 TeamSpeak 实例</td></tr>';
           return;
         }
 
         tbody.innerHTML = data.instances.map(inst => `
           <tr>
+            <td style="text-align: center;">
+              <input type="checkbox" class="inst-row-cb" value="${inst.id}" onchange="onInstanceRowCheckboxChange()">
+            </td>
             <td>
               <div style="font-weight: 700; color: #60a5fa; font-size: 1rem;">${inst.name}</div>
               <div style="font-size: 0.75rem; color: var(--text-muted);">ID: ${inst.id}</div>
@@ -1100,25 +1221,29 @@
           </tr>
         `).join('');
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
       }
     }
 
     async function loadBots() {
       const tbody = document.getElementById('botsTableBody');
-      tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
+      clearSelectedBots();
       try {
         const res = await fetch('/api/admin/bots', {
           headers: { 'X-Admin-Password': adminToken }
         });
         const data = await res.json();
         if (!data.success || data.bots.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无音乐机器人实例</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无音乐机器人实例</td></tr>';
           return;
         }
 
         tbody.innerHTML = data.bots.map(b => `
           <tr>
+            <td style="text-align: center;">
+              <input type="checkbox" class="bot-row-cb" value="${b.bot_id}" onchange="onBotRowCheckboxChange()">
+            </td>
             <td>
               <strong style="color: #c084fc; font-size: 0.95rem;">${b.name}</strong>
               <div style="font-size: 0.75rem; color: var(--text-muted);">${b.default_channel || '默认大厅'}</div>
@@ -1149,7 +1274,7 @@
           </tr>
         `).join('');
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
       }
     }
 
@@ -1190,8 +1315,10 @@
     function applyCdkFilters() {
       if (!window._allCdks) return;
       const typeEl = document.getElementById('cdkTypeFilter');
+      const durEl = document.getElementById('cdkDurationFilter');
       const searchEl = document.getElementById('cdkSearchInput');
       const typeVal = typeEl ? typeEl.value : 'all';
+      const durVal = durEl ? durEl.value : 'all';
       const searchVal = searchEl ? searchEl.value.trim().toLowerCase() : '';
 
       currentFilteredCdks = window._allCdks.filter(c => {
@@ -1203,7 +1330,11 @@
         if (typeVal !== 'all') {
           if (c.cdk_type !== typeVal) return false;
         }
-        // 3. 关键字搜索
+        // 3. 时长筛选 (月卡/季卡/半年卡/年卡/永久卡)
+        if (durVal !== 'all') {
+          if ((c.duration_months || 0) !== parseInt(durVal)) return false;
+        }
+        // 4. 关键字搜索
         if (searchVal) {
           const matchCode = (c.code || '').toLowerCase().includes(searchVal);
           const matchRemark = (c.remark || '').toLowerCase().includes(searchVal);
@@ -1219,11 +1350,12 @@
 
     function renderCdksTable(cdks) {
       const tbody = document.getElementById('cdksTableBody');
+      clearSelectedCdks();
       if (!cdks || cdks.length === 0) {
         let emptyDesc = '暂无 CDK 数据';
         if (currentCdkStatusFilter === 'unused') emptyDesc = '暂无未使用的 CDK 激活码';
         else if (currentCdkStatusFilter === 'used') emptyDesc = '暂无已使用的 CDK 激活码';
-        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2.5rem 1rem;">
+        tbody.innerHTML = `<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2.5rem 1rem;">
           <div style="font-size: 1.5rem; margin-bottom: 0.5rem; opacity: 0.4;"><i class="fa-solid fa-inbox"></i></div>
           <div>${emptyDesc}</div>
         </td></tr>`;
@@ -1257,6 +1389,9 @@
 
         return `
           <tr>
+            <td style="text-align: center;">
+              <input type="checkbox" class="cdk-row-cb" value="${c.code}" onchange="onCdkRowCheckboxChange()">
+            </td>
             <td>
               <div style="display: flex; align-items: center; gap: 0.35rem;">
                 <code style="font-size: 0.92rem; font-weight: 700; color: #38bdf8;">${c.code}</code>
@@ -1280,6 +1415,306 @@
           </tr>
         `;
       }).join('');
+    }
+
+    // === CDK 模态框及按时长/条件批量删除 ===
+    function openBatchDeleteCdkModal() {
+      document.getElementById('batchDeleteCdkModal').style.display = 'flex';
+      updateBatchDeletePreview();
+    }
+
+    function closeBatchDeleteCdkModal() {
+      document.getElementById('batchDeleteCdkModal').style.display = 'none';
+    }
+
+    function updateBatchDeletePreview() {
+      if (!window._allCdks) return;
+      const durVal = document.getElementById('batchDelDuration').value;
+      const typeVal = document.getElementById('batchDelType').value;
+      const statusVal = document.getElementById('batchDelStatus').value;
+
+      const matched = window._allCdks.filter(c => {
+        if (durVal !== 'all' && (c.duration_months || 0) !== parseInt(durVal)) return false;
+        if (typeVal !== 'all' && c.cdk_type !== typeVal) return false;
+        if (statusVal !== 'all' && c.status !== statusVal) return false;
+        return true;
+      });
+
+      const previewEl = document.getElementById('batchDelPreviewCount');
+      if (previewEl) previewEl.innerText = `${matched.length} 张`;
+      const btn = document.getElementById('execBatchDeleteBtn');
+      if (btn) btn.disabled = matched.length === 0;
+    }
+
+    async function submitBatchDeleteFilter(e) {
+      e.preventDefault();
+      const durVal = document.getElementById('batchDelDuration').value;
+      const typeVal = document.getElementById('batchDelType').value;
+      const statusVal = document.getElementById('batchDelStatus').value;
+
+      const durDesc = durVal === 'all' ? '全部时长' : (durVal === '0' ? '永久卡' : `${durVal} 个月`);
+      const typeDesc = typeVal === 'all' ? '全部类型' : (typeVal === 'music_bot' ? '音乐机器人' : 'TS服务器');
+      const statusDesc = statusVal === 'all' ? '全部状态' : (statusVal === 'unused' ? '未使用' : '已使用');
+
+      if (!confirm(`⚠️ 危险确认：\n\n确定要按条件批量删除以下 CDK 吗？\n• 有效时长：${durDesc}\n• 业务类型：${typeDesc}\n• 使用状态：${statusDesc}\n\n执行后这些卡密将永久被删除且不可恢复！`)) {
+        return;
+      }
+
+      try {
+        const filter = {
+          cdk_type: typeVal,
+          duration_months: durVal === 'all' ? null : parseInt(durVal),
+          status: statusVal
+        };
+        const res = await fetch('/api/admin/cdks/batch-delete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify({ filter })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || '批量删除成功！', 'success');
+          closeBatchDeleteCdkModal();
+          loadCdks();
+          loadStats();
+        } else {
+          showToast(data.message || '批量删除失败', 'error');
+        }
+      } catch (err) {
+        showToast('请求异常', 'error');
+      }
+    }
+
+    // === CDK 表格多选与批量操作 ===
+    function getSelectedCdkCodes() {
+      const cbs = document.querySelectorAll('.cdk-row-cb:checked');
+      return Array.from(cbs).map(cb => cb.value);
+    }
+
+    function toggleSelectAllCdks(masterCb) {
+      const cbs = document.querySelectorAll('.cdk-row-cb');
+      cbs.forEach(cb => cb.checked = masterCb.checked);
+      updateSelectedCdksBar();
+    }
+
+    function onCdkRowCheckboxChange() {
+      const allCbs = document.querySelectorAll('.cdk-row-cb');
+      const checkedCbs = document.querySelectorAll('.cdk-row-cb:checked');
+      const masterCb = document.getElementById('selectAllCdks');
+      if (masterCb) {
+        masterCb.checked = allCbs.length > 0 && allCbs.length === checkedCbs.length;
+      }
+      updateSelectedCdksBar();
+    }
+
+    function updateSelectedCdksBar() {
+      const selected = getSelectedCdkCodes();
+      const bar = document.getElementById('selectedCdksActionBar');
+      const countEl = document.getElementById('selectedCdksCount');
+      if (countEl) countEl.innerText = selected.length;
+      if (bar) {
+        bar.style.display = selected.length > 0 ? 'flex' : 'none';
+      }
+    }
+
+    function clearSelectedCdks() {
+      const masterCb = document.getElementById('selectAllCdks');
+      if (masterCb) masterCb.checked = false;
+      const cbs = document.querySelectorAll('.cdk-row-cb');
+      cbs.forEach(cb => cb.checked = false);
+      updateSelectedCdksBar();
+    }
+
+    function copySelectedCdks() {
+      const selected = getSelectedCdkCodes();
+      if (selected.length === 0) return;
+      copyToClipboard(selected.join('\n'), `已复制选中的 ${selected.length} 个卡密`);
+    }
+
+    async function batchDeleteSelectedCdks() {
+      const selected = getSelectedCdkCodes();
+      if (selected.length === 0) return;
+      if (!confirm(`确定要彻底删除已选中的 ${selected.length} 个 CDK 激活码吗？\n\n删除后不可恢复！`)) {
+        return;
+      }
+      try {
+        const res = await fetch('/api/admin/cdks/batch-delete', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify({ codes: selected })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || '删除成功', 'success');
+          clearSelectedCdks();
+          loadCdks();
+          loadStats();
+        } else {
+          showToast(data.message || '删除失败', 'error');
+        }
+      } catch (e) {
+        showToast('请求异常', 'error');
+      }
+    }
+
+    // === TS 实例表格多选与批量操作 ===
+    function getSelectedInstanceIds() {
+      const cbs = document.querySelectorAll('.inst-row-cb:checked');
+      return Array.from(cbs).map(cb => parseInt(cb.value));
+    }
+
+    function toggleSelectAllInstances(masterCb) {
+      const cbs = document.querySelectorAll('.inst-row-cb');
+      cbs.forEach(cb => cb.checked = masterCb.checked);
+      updateSelectedInstancesBar();
+    }
+
+    function onInstanceRowCheckboxChange() {
+      const allCbs = document.querySelectorAll('.inst-row-cb');
+      const checkedCbs = document.querySelectorAll('.inst-row-cb:checked');
+      const masterCb = document.getElementById('selectAllInstances');
+      if (masterCb) {
+        masterCb.checked = allCbs.length > 0 && allCbs.length === checkedCbs.length;
+      }
+      updateSelectedInstancesBar();
+    }
+
+    function updateSelectedInstancesBar() {
+      const selected = getSelectedInstanceIds();
+      const bar = document.getElementById('selectedInstancesActionBar');
+      const countEl = document.getElementById('selectedInstancesCount');
+      if (countEl) countEl.innerText = selected.length;
+      if (bar) {
+        bar.style.display = selected.length > 0 ? 'flex' : 'none';
+      }
+    }
+
+    function clearSelectedInstances() {
+      const masterCb = document.getElementById('selectAllInstances');
+      if (masterCb) masterCb.checked = false;
+      const cbs = document.querySelectorAll('.inst-row-cb');
+      cbs.forEach(cb => cb.checked = false);
+      updateSelectedInstancesBar();
+    }
+
+    async function batchInstancesAction(action) {
+      const selected = getSelectedInstanceIds();
+      if (selected.length === 0) return;
+      const actionName = action === 'start' ? '启动' : (action === 'stop' ? '停止' : (action === 'restart' ? '重启' : '彻底销毁'));
+      if (action === 'destroy') {
+        if (!confirm(`⚠️ 危险确认：\n\n确定要彻底销毁选中的 ${selected.length} 个 TS 虚拟服务器实例吗？\n这将停止容器并清除其数据存储目录，不可恢复！`)) {
+          return;
+        }
+      } else {
+        if (!confirm(`确定要对选中的 ${selected.length} 个 TS 实例执行【${actionName}】操作吗？`)) {
+          return;
+        }
+      }
+
+      try {
+        const res = await fetch('/api/admin/instances/batch-action', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify({ ids: selected, action })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || '批量操作成功！', 'success');
+          clearSelectedInstances();
+          loadInstances();
+          loadStats();
+        } else {
+          showToast(data.message || '操作失败', 'error');
+        }
+      } catch (e) {
+        showToast('请求异常', 'error');
+      }
+    }
+
+    // === 机器人表格多选与批量操作 ===
+    function getSelectedBotIds() {
+      const cbs = document.querySelectorAll('.bot-row-cb:checked');
+      return Array.from(cbs).map(cb => cb.value);
+    }
+
+    function toggleSelectAllBots(masterCb) {
+      const cbs = document.querySelectorAll('.bot-row-cb');
+      cbs.forEach(cb => cb.checked = masterCb.checked);
+      updateSelectedBotsBar();
+    }
+
+    function onBotRowCheckboxChange() {
+      const allCbs = document.querySelectorAll('.bot-row-cb');
+      const checkedCbs = document.querySelectorAll('.bot-row-cb:checked');
+      const masterCb = document.getElementById('selectAllBots');
+      if (masterCb) {
+        masterCb.checked = allCbs.length > 0 && allCbs.length === checkedCbs.length;
+      }
+      updateSelectedBotsBar();
+    }
+
+    function updateSelectedBotsBar() {
+      const selected = getSelectedBotIds();
+      const bar = document.getElementById('selectedBotsActionBar');
+      const countEl = document.getElementById('selectedBotsCount');
+      if (countEl) countEl.innerText = selected.length;
+      if (bar) {
+        bar.style.display = selected.length > 0 ? 'flex' : 'none';
+      }
+    }
+
+    function clearSelectedBots() {
+      const masterCb = document.getElementById('selectAllBots');
+      if (masterCb) masterCb.checked = false;
+      const cbs = document.querySelectorAll('.bot-row-cb');
+      cbs.forEach(cb => cb.checked = false);
+      updateSelectedBotsBar();
+    }
+
+    async function batchBotsAction(action) {
+      const selected = getSelectedBotIds();
+      if (selected.length === 0) return;
+      const actionName = action === 'start' ? '启动' : (action === 'stop' ? '停止' : (action === 'restart' ? '重启' : '删除'));
+      if (action === 'delete') {
+        if (!confirm(`⚠️ 危险确认：\n\n确定要删除选中的 ${selected.length} 个音乐机器人实例吗？\n删除后不可恢复！`)) {
+          return;
+        }
+      } else {
+        if (!confirm(`确定要对选中的 ${selected.length} 个机器人执行【${actionName}】操作吗？`)) {
+          return;
+        }
+      }
+
+      try {
+        const res = await fetch('/api/admin/bots/batch-action', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify({ bot_ids: selected, action })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || '批量操作成功！', 'success');
+          clearSelectedBots();
+          loadBots();
+          loadStats();
+        } else {
+          showToast(data.message || '操作失败', 'error');
+        }
+      } catch (e) {
+        showToast('请求异常', 'error');
+      }
     }
 
     async function loadCdks() {

@@ -363,5 +363,69 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertIn("days_left", found)
         self.assertFalse(found["is_expired"])
 
+    def test_batch_delete_cdks_by_codes_and_filter(self):
+        # 1. 批量创建不同时长与类型的 CDK
+        # 3张月卡 (1个月)
+        m_cdks = database.create_cdks(count=3, remark="月卡批次", cdk_type="teamspeak", duration_months=1)
+        # 2张季卡 (3个月)
+        q_cdks = database.create_cdks(count=2, remark="季卡批次", cdk_type="teamspeak", duration_months=3)
+        # 2张年卡 (12个月) 音乐机器人
+        y_cdks = database.create_cdks(count=2, remark="机器人年卡", cdk_type="music_bot", duration_months=12)
+        # 2张永久卡 (0)
+        p_cdks = database.create_cdks(count=2, remark="永久卡", cdk_type="teamspeak", duration_months=0)
+
+        # 标记其中一张月卡为已使用
+        database.bind_cdk_instance(m_cdks[0], 100)
+
+        # 2. 测试根据 code 列表批量删除
+        deleted_count = database.delete_cdks([m_cdks[1], m_cdks[2]])
+        self.assertEqual(deleted_count, 2)
+        self.assertIsNone(database.get_cdk(m_cdks[1]))
+        self.assertIsNone(database.get_cdk(m_cdks[2]))
+
+        # 3. 测试根据时长过滤批量删除 (删除所有季卡 duration_months=3)
+        deleted_q = database.delete_cdks_by_filter(duration_months=3)
+        self.assertEqual(deleted_q, 2)
+        self.assertIsNone(database.get_cdk(q_cdks[0]))
+        self.assertIsNone(database.get_cdk(q_cdks[1]))
+
+        # 4. 测试按类型与时长联合过滤批量删除 (删除音乐机器人年卡)
+        deleted_bot_y = database.delete_cdks_by_filter(cdk_type="music_bot", duration_months=12)
+        self.assertEqual(deleted_bot_y, 2)
+        self.assertIsNone(database.get_cdk(y_cdks[0]))
+
+        # 5. 测试按使用状态过滤 (仅删除已使用状态)
+        deleted_used = database.delete_cdks_by_filter(status="used")
+        self.assertEqual(deleted_used, 1)  # 即 m_cdks[0]
+        self.assertIsNone(database.get_cdk(m_cdks[0]))
+
+        # 6. 测试删除永久卡 (duration_months=0)
+        deleted_perm = database.delete_cdks_by_filter(duration_months=0)
+        self.assertEqual(deleted_perm, 2)
+        self.assertIsNone(database.get_cdk(p_cdks[0]))
+
+    def test_batch_delete_instances_and_bots(self):
+        # 1. 批量创建 TS 实例
+        database.create_instance(31, "ts31", "ts-teamspeak-31", "/data/teamspeak/ts31", 60031, 20031, 30031, 40031, "token31")
+        database.create_instance(32, "ts32", "ts-teamspeak-32", "/data/teamspeak/ts32", 60032, 20032, 30032, 40032, "token32")
+        self.assertIsNotNone(database.get_instance_by_id(31))
+        self.assertIsNotNone(database.get_instance_by_id(32))
+
+        del_inst_count = database.delete_instances([31, 32])
+        self.assertEqual(del_inst_count, 2)
+        self.assertIsNone(database.get_instance_by_id(31))
+        self.assertIsNone(database.get_instance_by_id(32))
+
+        # 2. 批量创建机器人
+        database.create_bot_instance("bot-del-1", "Bot1", "127.0.0.1", 9987, "Nick1", "CDK1", 1, "2026-01-01 00:00:00")
+        database.create_bot_instance("bot-del-2", "Bot2", "127.0.0.1", 9987, "Nick2", "CDK2", 1, "2026-01-01 00:00:00")
+        self.assertIsNotNone(database.get_bot_instance_by_id("bot-del-1"))
+        self.assertIsNotNone(database.get_bot_instance_by_id("bot-del-2"))
+
+        del_bot_count = database.delete_bot_instances(["bot-del-1", "bot-del-2"])
+        self.assertEqual(del_bot_count, 2)
+        self.assertIsNone(database.get_bot_instance_by_id("bot-del-1"))
+        self.assertIsNone(database.get_bot_instance_by_id("bot-del-2"))
+
 if __name__ == "__main__":
     unittest.main()

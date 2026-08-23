@@ -215,6 +215,42 @@ def delete_cdk(code: str) -> bool:
         conn.commit()
         return cursor.rowcount > 0
 
+def delete_cdks(codes: List[str]) -> int:
+    if not codes:
+        return 0
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        placeholders = ",".join("?" for _ in codes)
+        cursor.execute(f"DELETE FROM cdks WHERE code IN ({placeholders})", [c.strip() for c in codes])
+        conn.commit()
+        return cursor.rowcount
+
+def delete_cdks_by_filter(
+    cdk_type: Optional[str] = None,
+    duration_months: Optional[int] = None,
+    status: Optional[str] = None
+) -> int:
+    conditions = []
+    params = []
+    if cdk_type and cdk_type != "all":
+        conditions.append("cdk_type = ?")
+        params.append(cdk_type)
+    if duration_months is not None:
+        conditions.append("duration_months = ?")
+        params.append(int(duration_months))
+    if status and status != "all":
+        conditions.append("status = ?")
+        params.append(status)
+
+    where_clause = " WHERE " + " AND ".join(conditions) if conditions else ""
+    sql = f"DELETE FROM cdks{where_clause}"
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(sql, params)
+        conn.commit()
+        return cursor.rowcount
+
 def bind_cdk_instance(code: str, instance_id: int):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
@@ -395,6 +431,16 @@ def delete_instance(instance_id: int) -> bool:
         conn.commit()
         return cursor.rowcount > 0
 
+def delete_instances(instance_ids: List[int]) -> int:
+    if not instance_ids:
+        return 0
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        placeholders = ",".join("?" for _ in instance_ids)
+        cursor.execute(f"DELETE FROM instances WHERE id IN ({placeholders})", instance_ids)
+        conn.commit()
+        return cursor.rowcount
+
 # --- 音乐机器人实例管理 ---
 
 def create_bot_instance(
@@ -512,3 +558,13 @@ def delete_bot_instance(bot_id: str) -> bool:
         cursor.execute("DELETE FROM bot_instances WHERE bot_id = ?", (bot_id,))
         conn.commit()
         return cursor.rowcount > 0
+
+def delete_bot_instances(bot_ids: List[str]) -> int:
+    if not bot_ids:
+        return 0
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        placeholders = ",".join("?" for _ in bot_ids)
+        cursor.execute(f"DELETE FROM bot_instances WHERE bot_id IN ({placeholders})", bot_ids)
+        conn.commit()
+        return cursor.rowcount

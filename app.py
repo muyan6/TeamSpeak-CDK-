@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 import asyncio
 from datetime import datetime, timedelta
+from typing import Optional, List
 import config
 from database import (
     init_db,
@@ -16,6 +17,8 @@ from database import (
     create_cdks,
     get_all_cdks,
     delete_cdk,
+    delete_cdks,
+    delete_cdks_by_filter,
     bind_cdk_instance,
     bind_cdk_bot,
     get_instance_by_id,
@@ -27,6 +30,7 @@ from database import (
     get_expired_active_instances,
     renew_instance,
     delete_instance,
+    delete_instances,
     get_all_used_ports,
     create_bot_instance,
     get_bot_instance_by_id,
@@ -34,6 +38,7 @@ from database import (
     get_all_bot_instances,
     update_bot_instance_status,
     delete_bot_instance,
+    delete_bot_instances,
     get_expired_active_bots,
     renew_bot_instance,
     get_admin_password,
@@ -154,6 +159,23 @@ class RenewBotRequest(BaseModel):
 class RenewInstanceRequest(BaseModel):
     cdk: str
     instance_id: int
+
+class BatchDeleteFilter(BaseModel):
+    cdk_type: Optional[str] = "all"
+    duration_months: Optional[int] = None
+    status: Optional[str] = "all"
+
+class BatchDeleteCdksRequest(BaseModel):
+    codes: Optional[List[str]] = None
+    filter: Optional[BatchDeleteFilter] = None
+
+class BatchActionInstancesRequest(BaseModel):
+    ids: List[int]
+    action: str  # 'start', 'stop', 'restart', 'destroy'
+
+class BatchActionBotsRequest(BaseModel):
+    bot_ids: List[str]
+    action: str  # 'start', 'stop', 'restart', 'delete'
 
 class ChangePasswordRequest(BaseModel):
     old_password: str
@@ -645,6 +667,55 @@ def manage_instance(instance_id: int, req: InstanceActionRequest, _: bool = Depe
     else:
         raise HTTPException(status_code=400, detail="不支持的操作指令")
 
+@app.post("/api/admin/instances/batch-action")
+def batch_manage_instances_api(req: BatchActionInstancesRequest, _: bool = Depends(verify_admin)):
+    action = req.action.lower()
+    success_count = 0
+    for instance_id in req.ids:
+        if action == "start":
+            if start_instance_container(instance_id):
+                update_instance_status(instance_id, "running")
+                success_count += 1
+        elif action == "stop":
+            if stop_instance_container(instance_id):
+                update_instance_status(instance_id, "stopped")
+                success_count += 1
+        elif action == "restart":
+            if restart_instance_container(instance_id):
+                update_instance_status(instance_id, "running")
+                success_count += 1
+        elif action == "destroy":
+            destroy_instance_container(instance_id, delete_files=True)
+            delete_instance(instance_id)
+            success_count += 1
+    return {"success": True, "count": success_count, "message": f"已成功对 {success_count} 个 TS 实例执行【{action}】操作"}
+
+@app.post("/api/admin/bots/batch-action")
+def batch_manage_bots_api(req: BatchActionBotsRequest, _: bool = Depends(verify_admin)):
+    action = req.action.lower()
+    success_count = 0
+    for bot_id in req.bot_ids:
+        if action == "start":
+            ok, _ = music_bot_client.start_bot(bot_id)
+            if ok:
+                update_bot_instance_status(bot_id, "active")
+                success_count += 1
+        elif action == "stop":
+            ok, _ = music_bot_client.stop_bot(bot_id)
+            if ok:
+                update_bot_instance_status(bot_id, "stopped")
+                success_count += 1
+        elif action == "restart":
+            ok, _ = music_bot_client.restart_bot(bot_id)
+            if ok:
+                update_bot_instance_status(bot_id, "active")
+                success_count += 1
+        elif action == "delete":
+            music_bot_client.delete_bot(bot_id)
+            delete_bot_instance(bot_id)
+            success_count += 1
+    return {"success": True, "count": success_count, "message": f"已成功对 {success_count} 个音乐机器人执行【{action}】操作"}
+
 @app.get("/api/admin/instances/{instance_id}/logs")
 def get_instance_logs_api(instance_id: int, _: bool = Depends(verify_admin)):
     logs = fetch_container_logs(instance_id)
@@ -670,6 +741,21 @@ def generate_cdks_api(req: GenerateCdksRequest, _: bool = Depends(verify_admin))
 def delete_cdk_api(code: str, _: bool = Depends(verify_admin)):
     ok = delete_cdk(code)
     return {"success": ok}
+
+@app.post("/api/admin/cdks/batch-delete")
+def batch_delete_cdks_api(req: BatchDeleteCdksRequest, _: bool = Depends(verify_admin)):
+    if req.codes is not None:
+        count = delete_cdks(req.codes)
+        return {"success": True, "deleted_count": count, "message": f"已成功删除选中的 {count} 个 CDK"}
+    elif req.filter is not None:
+        count = delete_cdks_by_filter(
+            cdk_type=req.filter.cdk_type,
+            duration_months=req.filter.duration_months,
+            status=req.filter.status
+        )
+        return {"success": True, "deleted_count": count, "message": f"已成功按条件批量删除 {count} 个 CDK"}
+    else:
+        raise HTTPException(status_code=400, detail="缺少删除参数或筛选条件")
 
 @app.get("/api/admin/cdks/export")
 def export_cdks_txt(status: Optional[str] = "unused", _: bool = Depends(verify_admin)):
