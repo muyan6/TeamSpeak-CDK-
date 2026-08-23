@@ -582,5 +582,46 @@ class TestTeamSpeakManager(unittest.TestCase):
         used_after, _ = database.has_server_used_trial("10.0.0.1", 9987)
         self.assertFalse(used_after)
 
+    def test_permanent_renewal_protection(self):
+        # 1. 创建永久 TS 实例并续费月卡 -> 仍保持 permanent
+        inst = database.create_instance(99, "ts99", "ts-teamspeak-99", "/data/teamspeak/ts99", 60099, 20099, 30099, 40099, "tok99", expire_at="permanent")
+        renewed = database.renew_instance(99, 1)
+        self.assertEqual(renewed["expire_at"], "permanent")
+
+        # 2. 创建永久机器人实例并续费月卡 -> 仍保持 permanent
+        bot = database.create_bot_instance("bot-perm-1", "PermBot", "127.0.0.1", 9987, "PBot", "CDK-PERM", expire_at="permanent")
+        renewed_bot = database.renew_bot_instance("bot-perm-1", 1)
+        self.assertEqual(renewed_bot["expire_at"], "permanent")
+
+    def test_used_cdk_fallthrough_protection(self):
+        try:
+            from fastapi.testclient import TestClient
+            import app as ts_app
+            client = TestClient(ts_app.app)
+        except Exception:
+            return
+
+        # 创建一个已使用的 CDK 但不创建对应的 instance
+        cdks = database.create_cdks(count=1, remark="已用卡", cdk_type="teamspeak", duration_months=1)
+        cdk = cdks[0]
+        database.bind_cdk_instance(cdk, 99999) # 绑定一个不存在的实例
+
+        resp = client.post("/api/redeem", json={"cdk": cdk})
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("绑定的 TeamSpeak 实例已不存在", resp.json()["message"])
+
+    def test_filter_delete_trial_and_duration_combination(self):
+        # 创建 2 张普通月卡 (is_trial=0, duration=1), 2 张体验卡 (is_trial=1, duration=1), 2 张普通季卡 (is_trial=0, duration=3)
+        c_m = database.create_cdks(count=2, remark="普通月卡", cdk_type="teamspeak", duration_months=1, is_trial=0)
+        c_t = database.create_cdks(count=2, remark="体验卡", cdk_type="teamspeak", duration_months=1, is_trial=1)
+        c_q = database.create_cdks(count=2, remark="普通季卡", cdk_type="teamspeak", duration_months=3, is_trial=0)
+
+        # 仅删除普通月卡 (is_trial=0, duration_months=1)
+        del_count = database.delete_cdks_by_filter(is_trial=0, duration_months=1)
+        self.assertEqual(del_count, 2)
+        # 验证体验卡和季卡仍然存在
+        self.assertIsNotNone(database.get_cdk(c_t[0]))
+        self.assertIsNotNone(database.get_cdk(c_q[0]))
+
 if __name__ == "__main__":
     unittest.main()

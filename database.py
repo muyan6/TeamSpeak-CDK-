@@ -129,8 +129,6 @@ def init_db():
 
         conn.commit()
 
-        conn.commit()
-
 # --- 系统配置与密码管理 ---
 
 def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
@@ -268,7 +266,7 @@ def delete_cdks_by_filter(
     if is_trial is not None and str(is_trial) != "all":
         conditions.append("is_trial = ?")
         params.append(int(is_trial))
-    elif duration_months is not None and str(duration_months) != "all":
+    if duration_months is not None and str(duration_months) != "all":
         conditions.append("duration_months = ?")
         params.append(int(duration_months))
     if status and status != "all":
@@ -549,7 +547,9 @@ def renew_instance(instance_id: int, add_months: int) -> Optional[Dict[str, Any]
     else:
         now = datetime.now()
         current_exp_str = inst.get("expire_at")
-        if current_exp_str and current_exp_str != "permanent":
+        if current_exp_str == "permanent":
+            new_expire = "permanent"
+        elif current_exp_str:
             try:
                 curr_exp = datetime.strptime(current_exp_str, "%Y-%m-%d %H:%M:%S")
                 # 如果当前还没过期，在原到期时间上累加；如果已过期，从现在开始计算
@@ -677,7 +677,9 @@ def renew_bot_instance(bot_id: str, add_months: int) -> Optional[Dict[str, Any]]
     else:
         now = datetime.now()
         current_exp_str = bot.get("expire_at")
-        if current_exp_str and current_exp_str != "permanent":
+        if current_exp_str == "permanent":
+            new_expire = "permanent"
+        elif current_exp_str:
             try:
                 curr_exp = datetime.strptime(current_exp_str, "%Y-%m-%d %H:%M:%S")
                 # 如果当前还没过期，在原到期时间上累加；如果已过期，从现在开始计算

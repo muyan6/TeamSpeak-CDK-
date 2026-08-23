@@ -1146,8 +1146,8 @@
     }
 
     function onCdkTypeChange() {
-      const type = document.getElementById('genType').value;
-      document.getElementById('durationSelectGroup').style.display = type === 'music_bot' ? 'block' : 'none';
+      const durationGroup = document.getElementById('durationSelectGroup');
+      if (durationGroup) durationGroup.style.display = 'block';
     }
 
     function switchTab(tab) {
@@ -1800,14 +1800,14 @@
 
     async function loadCdks() {
       const tbody = document.getElementById('cdksTableBody');
-      tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
       try {
         const res = await fetch('/api/admin/cdks', {
           headers: { 'X-Admin-Password': adminToken }
         });
         const data = await res.json();
         if (!data.success) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
           return;
         }
 
@@ -1829,7 +1829,7 @@
 
         applyCdkFilters();
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #f87171; padding: 2rem;">加载异常</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #f87171; padding: 2rem;">加载异常</td></tr>';
       }
     }
 

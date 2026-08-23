@@ -75,14 +75,14 @@ async def system_expiry_checker():
             expired_bots = get_expired_active_bots()
             for b in expired_bots:
                 print(f"[*] ⏰ 监测到机器人 [{b['name']}] (ID: {b['bot_id']}) 已到达有效期限 ({b['expire_at']})，正在执行自动停机下线...")
-                music_bot_client.stop_bot(b["bot_id"])
+                await asyncio.to_thread(music_bot_client.stop_bot, b["bot_id"])
                 update_bot_instance_status(b["bot_id"], "expired")
 
             # 2. 扫描已到期的 TeamSpeak 语音服务器
             expired_instances = get_expired_active_instances()
             for inst in expired_instances:
                 print(f"[*] ⏰ 监测到 TeamSpeak 服务器 [{inst['name']}] (ID: {inst['id']}) 已到达有效期限 ({inst['expire_at']})，正在执行自动停机下线...")
-                stop_instance_container(inst["id"])
+                await asyncio.to_thread(stop_instance_container, inst["id"])
                 update_instance_status(inst["id"], "expired")
         except Exception as err:
             print(f"[Error in system_expiry_checker]: {err}")
@@ -253,6 +253,10 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                     "instance": bot,
                     "bot_panel_url": get_bot_config()["bot_panel_url"]
                 }
+            return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 已被激活使用，但绑定的音乐机器人实例已不存在"})
+
+        if cdk_info["status"] != "unused":
+            return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 状态异常或不可用"})
 
         # 未使用：返回需要前端填写机器人连接配置
         is_trial = cdk_info.get("is_trial", 0)
@@ -275,8 +279,8 @@ def redeem_cdk(req: RedeemRequest, request: Request):
 
     # 如果该 CDK 已经兑换过，直接返回已绑定的实例信息
     if cdk_info["status"] == "used":
-        instance_id = cdk_info["instance_id"]
-        instance = get_instance_by_id(instance_id)
+        instance_id = cdk_info.get("instance_id")
+        instance = get_instance_by_id(instance_id) if instance_id else None
         if instance:
             instance["public_host"] = client_host
             return {
@@ -285,6 +289,10 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                 "message": f"该 CDK 已于 {cdk_info['used_at']} 激活，已为您加载服务器连接信息",
                 "instance": instance
             }
+        return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 已被激活使用，但绑定的 TeamSpeak 实例已不存在"})
+
+    if cdk_info["status"] != "unused":
+        return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 状态异常或不可用"})
 
     # 未使用：开始分配端口与开通
     try:
@@ -547,7 +555,7 @@ def renew_bot_endpoint(req: RenewBotRequest):
     }
 
 @app.post("/api/renew-instance")
-def renew_instance_endpoint(req: RenewInstanceRequest):
+def renew_instance_endpoint(req: RenewInstanceRequest, request: Request):
     code = req.cdk.strip().upper()
     cdk_info = get_cdk(code)
     if not cdk_info:
@@ -563,7 +571,7 @@ def renew_instance_endpoint(req: RenewInstanceRequest):
     if not instance:
         return JSONResponse(status_code=404, content={"success": False, "message": "未找到要续费的 TeamSpeak 实例"})
 
-    client_host = config.PUBLIC_SERVER_IP or "127.0.0.1"
+    client_host = config.PUBLIC_SERVER_IP or request.headers.get("host", "127.0.0.1").split(":")[0]
 
     # 体验卡续费检测
     is_trial = cdk_info.get("is_trial", 0)
@@ -864,15 +872,18 @@ def export_cdks_txt(status: Optional[str] = "unused", _: bool = Depends(verify_a
         filename = "unused_cdks.txt"
     elif status == "used":
         selected = [
-            f"{c['code']}\t类型: {'音乐机器人' if c.get('cdk_type') == 'music_bot' else 'TS服务器'}\t绑定: {c.get('bot_id') or ('ts' + str(c.get('instance_id')))}"
+            f"{c['code']}\t类型: {'音乐机器人' if c.get('cdk_type') == 'music_bot' else 'TS服务器'}\t绑定: {c.get('bot_id') or (('ts' + str(c.get('instance_id'))) if c.get('instance_id') else '-')}"
             for c in cdks if c["status"] == "used"
         ]
         filename = "used_cdks.txt"
     else:
-        selected = [
-            f"{c['code']}\t类型: {'音乐机器人' if c.get('cdk_type') == 'music_bot' else 'TS服务器'}\t时长: {str(c.get('duration_months')) + '个月' if c.get('duration_months') else '永久'}\t状态: {c['status']}\t备注: {c.get('remark') or '无'}"
-            for c in cdks
-        ]
+        selected = []
+        for c in cdks:
+            is_trial = c.get("is_trial") == 1
+            dur_str = "体验卡(1个月)" if is_trial else (f"{c.get('duration_months')}个月" if c.get("duration_months") else "永久")
+            type_str = "音乐机器人" if c.get("cdk_type") == "music_bot" else "TS服务器"
+            bound_str = c.get("bot_id") or (f"ts{c.get('instance_id')}" if c.get("instance_id") else "-")
+            selected.append(f"{c['code']}\t类型: {type_str}\t时长: {dur_str}\t状态: {c['status']}\t绑定: {bound_str}\t备注: {c.get('remark') or '无'}")
         filename = "all_cdks.txt"
 
     content = "\n".join(selected)

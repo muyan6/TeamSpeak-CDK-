@@ -3,7 +3,7 @@ import socket
 import subprocess
 from typing import Tuple, Dict, Any
 from config import BASE_VOICE_PORT, BASE_FILE_PORT, BASE_QUERY_PORT, BASE_TSDNS_PORT, DATA_BASE_DIR
-from database import get_all_used_ports, get_next_instance_id
+from database import get_all_used_ports, get_next_instance_id, get_instance_by_id
 
 def is_socket_port_free(port: int, proto: str = "tcp") -> bool:
     """
@@ -16,7 +16,10 @@ def is_socket_port_free(port: int, proto: str = "tcp") -> bool:
                 return True
         else:
             with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
-                s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                if os.name != "nt":
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                elif hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
                 s.bind(("0.0.0.0", port))
                 return True
     except (OSError, socket.error):
@@ -60,6 +63,11 @@ def allocate_ports_for_instance(desired_id: int = None) -> Tuple[int, Dict[str, 
     candidate_id = desired_id if (desired_id and desired_id > 0) else 1
 
     while True:
+        # 检查数据库是否已有该 ID 的实例
+        if get_instance_by_id(candidate_id) is not None:
+            candidate_id += 1
+            continue
+
         container_name = f"ts-teamspeak-{candidate_id}"
         dir_name = os.path.join(DATA_BASE_DIR, f"ts{candidate_id}")
 
