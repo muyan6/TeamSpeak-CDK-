@@ -44,7 +44,11 @@ from database import (
     get_admin_password,
     set_admin_password,
     get_bot_config,
-    set_bot_config
+    set_bot_config,
+    has_server_used_trial,
+    record_trial_server,
+    get_all_trial_records,
+    delete_trial_record
 )
 from port_manager import allocate_ports_for_instance
 from docker_service import (
@@ -145,6 +149,7 @@ class GenerateCdksRequest(BaseModel):
     remark: Optional[str] = ""
     cdk_type: Optional[str] = "teamspeak"  # 'teamspeak' 或 'music_bot'
     duration_months: Optional[int] = 0     # 0 为永久, 1, 3, 6, 12 为月数
+    is_trial: Optional[int] = 0            # 0 为普通卡, 1 为体验卡 (时长为1个月，单服限用一次)
 
 class InstanceActionRequest(BaseModel):
     action: str  # 'start', 'stop', 'restart', 'destroy'
@@ -163,6 +168,7 @@ class RenewInstanceRequest(BaseModel):
 class BatchDeleteFilter(BaseModel):
     cdk_type: Optional[str] = "all"
     duration_months: Optional[int] = None
+    is_trial: Optional[int] = None
     status: Optional[str] = "all"
 
 class BatchDeleteCdksRequest(BaseModel):
@@ -249,14 +255,16 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                 }
 
         # 未使用：返回需要前端填写机器人连接配置
+        is_trial = cdk_info.get("is_trial", 0)
         duration_m = cdk_info.get("duration_months", 1)
-        duration_desc = f"{duration_m} 个月" if duration_m > 0 else "永久"
+        duration_desc = "体验卡 (1个月/限用1次)" if is_trial else (f"{duration_m} 个月" if duration_m > 0 else "永久")
         return {
             "success": True,
             "type": "music_bot",
             "status": "unused",
             "need_config": True,
             "cdk": code,
+            "is_trial": bool(is_trial),
             "duration_months": duration_m,
             "duration_desc": duration_desc,
             "message": f"CDK 验证成功！当前为【音乐机器人 - {duration_desc}】，请填写目标服务器连接配置以启动机器人"
@@ -297,6 +305,7 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     query_password = creds.get("query_password", "")
     query_apikey = creds.get("query_apikey", "")
 
+    is_trial = cdk_info.get("is_trial", 0)
     duration_m = cdk_info.get("duration_months", 0)
     if duration_m > 0:
         expire_at = (datetime.now() + timedelta(days=30 * duration_m)).strftime("%Y-%m-%d %H:%M:%S")
@@ -325,6 +334,17 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     # 绑定 CDK
     bind_cdk_instance(code, instance_id)
     instance["public_host"] = client_host
+
+    # 如果是体验卡开通，记录该服务器地址
+    if is_trial:
+        record_trial_server(
+            addr=client_host,
+            port=ports["voice"],
+            cdk_code=code,
+            cdk_type="teamspeak",
+            target_id=str(instance_id),
+            raw_input=f"{client_host}:{ports['voice']}"
+        )
 
     # 针对新创建的实例端口进行本地防火墙即时放行
     try:
@@ -360,6 +380,16 @@ def redeem_bot_instance(req: RedeemBotRequest):
             target_port = int(parts[1].strip())
         except ValueError:
             pass
+
+    # 体验卡防刷检测（同一 IP 不同端口视为独立服务器）
+    is_trial = cdk_info.get("is_trial", 0)
+    if is_trial:
+        used, rec = has_server_used_trial(raw_addr, target_port)
+        if used:
+            return JSONResponse(status_code=400, content={
+                "success": False,
+                "message": "该服务器已使用过体验卡，每个服务器只能使用一次体验卡，请联系退款"
+            })
 
     # 调用远程音乐机器人 API 创建实例
     ok, res = music_bot_client.create_bot(
@@ -398,6 +428,17 @@ def redeem_bot_instance(req: RedeemBotRequest):
 
     # 绑定 CDK
     bind_cdk_bot(code, bot_id)
+
+    # 体验卡记录指纹到本地数据库
+    if is_trial:
+        record_trial_server(
+            addr=raw_addr,
+            port=target_port,
+            cdk_code=code,
+            cdk_type="music_bot",
+            target_id=bot_id,
+            raw_input=req.serverAddress
+        )
 
     return {
         "success": True,
@@ -469,9 +510,30 @@ def renew_bot_endpoint(req: RenewBotRequest):
     if not bot:
         return JSONResponse(status_code=404, content={"success": False, "message": "未找到要续费的机器人实例"})
 
-    add_m = cdk_info.get("duration_months", 1)
+    # 体验卡续费检测
+    is_trial = cdk_info.get("is_trial", 0)
+    if is_trial:
+        used, rec = has_server_used_trial(bot["server_address"], bot["server_port"])
+        if used:
+            return JSONResponse(status_code=400, content={
+                "success": False,
+                "message": "该服务器已使用过体验卡，每个服务器只能使用一次体验卡，请联系退款"
+            })
+
+    add_m = 1 if is_trial else cdk_info.get("duration_months", 1)
     renewed_bot = renew_bot_instance(req.bot_id, add_m)
     bind_cdk_bot(code, req.bot_id)
+
+    # 若为体验卡，记录入库
+    if is_trial:
+        record_trial_server(
+            addr=bot["server_address"],
+            port=bot["server_port"],
+            cdk_code=code,
+            cdk_type="music_bot",
+            target_id=req.bot_id,
+            raw_input=f"{bot['server_address']}:{bot['server_port']}"
+        )
 
     # 尝试重新拉起机器人
     music_bot_client.start_bot(req.bot_id)
@@ -501,14 +563,35 @@ def renew_instance_endpoint(req: RenewInstanceRequest):
     if not instance:
         return JSONResponse(status_code=404, content={"success": False, "message": "未找到要续费的 TeamSpeak 实例"})
 
-    add_m = cdk_info.get("duration_months", 0)
+    client_host = config.PUBLIC_SERVER_IP or "127.0.0.1"
+
+    # 体验卡续费检测
+    is_trial = cdk_info.get("is_trial", 0)
+    if is_trial:
+        used, rec = has_server_used_trial(client_host, instance["voice_port"])
+        if used:
+            return JSONResponse(status_code=400, content={
+                "success": False,
+                "message": "该服务器已使用过体验卡，每个服务器只能使用一次体验卡，请联系退款"
+            })
+
+    add_m = 1 if is_trial else cdk_info.get("duration_months", 0)
     renewed_inst = renew_instance(req.instance_id, add_m)
     bind_cdk_instance(code, req.instance_id)
+
+    if is_trial:
+        record_trial_server(
+            addr=client_host,
+            port=instance["voice_port"],
+            cdk_code=code,
+            cdk_type="teamspeak",
+            target_id=str(req.instance_id),
+            raw_input=f"{client_host}:{instance['voice_port']}"
+        )
 
     # 尝试重新拉起/启动 TS 容器
     start_instance_container(req.instance_id)
 
-    client_host = config.PUBLIC_SERVER_IP or "127.0.0.1"
     renewed_inst["public_host"] = client_host
 
     return {
@@ -733,7 +816,8 @@ def generate_cdks_api(req: GenerateCdksRequest, _: bool = Depends(verify_admin))
         count=req.count,
         remark=req.remark or "",
         cdk_type=req.cdk_type or "teamspeak",
-        duration_months=req.duration_months or 0
+        duration_months=req.duration_months or 0,
+        is_trial=req.is_trial or 0
     )
     return {"success": True, "created": created}
 
@@ -751,11 +835,25 @@ def batch_delete_cdks_api(req: BatchDeleteCdksRequest, _: bool = Depends(verify_
         count = delete_cdks_by_filter(
             cdk_type=req.filter.cdk_type,
             duration_months=req.filter.duration_months,
+            is_trial=req.filter.is_trial,
             status=req.filter.status
         )
         return {"success": True, "deleted_count": count, "message": f"已成功按条件批量删除 {count} 个 CDK"}
     else:
         raise HTTPException(status_code=400, detail="缺少删除参数或筛选条件")
+
+@app.get("/api/admin/trial-records")
+def list_trial_records_api(_: bool = Depends(verify_admin)):
+    records = get_all_trial_records()
+    return {"success": True, "records": records}
+
+@app.delete("/api/admin/trial-records/{record_id}")
+def delete_trial_record_api(record_id: int, _: bool = Depends(verify_admin)):
+    ok = delete_trial_record(record_id)
+    if ok:
+        return {"success": True, "message": "已成功清除该服务器的体验记录，体验资格已重置！"}
+    else:
+        return JSONResponse(status_code=404, content={"success": False, "message": "未找到该条体验记录"})
 
 @app.get("/api/admin/cdks/export")
 def export_cdks_txt(status: Optional[str] = "unused", _: bool = Depends(verify_admin)):

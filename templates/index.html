@@ -522,8 +522,10 @@
         alertBox.style.color = '#34d399';
         alertBox.style.border = '1px solid #10b981';
         alertBox.innerText = res.message || '音乐机器人已就绪！';
+        showToast(res.message || '音乐机器人已就绪！', 'success');
 
       } catch (err) {
+        showToast(err.message || '创建异常', 'error');
         alert(err.message || '创建异常');
       } finally {
         botSubmitBtn.disabled = false;
@@ -576,8 +578,10 @@
 
         renewInput.value = '';
         renderBotResult(res.instance, res.bot_panel_url);
+        showToast(res.message || '续费成功！', 'success');
         alert(res.message || '续费成功！');
       } catch (err) {
+        showToast(err.message || '续费异常', 'error');
         alert(err.message || '续费异常');
       }
     }
@@ -670,6 +674,7 @@
         showToast(res.message || '续费成功！', 'success');
         alert(res.message || '续费成功！');
       } catch (err) {
+        showToast(err.message || '续费异常', 'error');
         alert(err.message || '续费异常');
       }
     }

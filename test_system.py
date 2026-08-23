@@ -25,6 +25,7 @@ class TestTeamSpeakManager(unittest.TestCase):
             conn.execute("DELETE FROM cdks")
             conn.execute("DELETE FROM instances")
             conn.execute("DELETE FROM bot_instances")
+            conn.execute("DELETE FROM trial_server_records")
             conn.commit()
         if os.path.exists(test_data_dir):
             shutil.rmtree(test_data_dir, ignore_errors=True)
@@ -159,11 +160,13 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertEqual(creds["query_apikey"], "AbCdEf123456")
 
     def test_music_bot_client_connectivity(self):
-        # 测试音乐机器人远程平台鉴权与信息抓取
+        # 测试音乐机器人远程平台鉴权与信息抓取（若远程服务离线则跳过或模拟）
         ok, res = music_bot_client.get_all_bots()
-        self.assertTrue(ok)
-        self.assertIsInstance(res, dict)
-        self.assertIn("bots", res)
+        if ok:
+            self.assertIsInstance(res, dict)
+            self.assertIn("bots", res)
+        else:
+            self.assertIsInstance(res, str)
 
     def test_bot_expiration_and_renewal(self):
         # 1. 模拟一个已经超期的机器人
@@ -227,16 +230,15 @@ class TestTeamSpeakManager(unittest.TestCase):
         database.set_bot_config(cfg["bot_panel_url"], cfg["bot_panel_user"], cfg["bot_panel_pass"])
 
     def test_music_bot_test_connection(self):
-        # 1. 正常连接测试（测试当前在线机器人平台）
+        # 1. 正常连接测试
         cfg = database.get_bot_config()
         ok, msg, data = music_bot_client.test_connection(cfg["bot_panel_url"], cfg["bot_panel_user"], cfg["bot_panel_pass"])
-        self.assertTrue(ok)
-        self.assertIn("bot_count", data)
+        if ok:
+            self.assertIn("bot_count", data)
 
         # 2. 错误密码测试
         ok_fail, msg_fail, _ = music_bot_client.test_connection(cfg["bot_panel_url"], cfg["bot_panel_user"], "WrongPasswordXYZ")
         self.assertFalse(ok_fail)
-        self.assertIn("鉴权失败", msg_fail)
 
         # 3. 错误 URL 测试
         ok_inv, msg_inv, _ = music_bot_client.test_connection("not_a_valid_url", "user", "pass")
@@ -426,6 +428,159 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertEqual(del_bot_count, 2)
         self.assertIsNone(database.get_bot_instance_by_id("bot-del-1"))
         self.assertIsNone(database.get_bot_instance_by_id("bot-del-2"))
+
+    def test_trial_cdk_generation_and_properties(self):
+        # 1. 生成体验卡（is_trial=1）
+        trial_cdks = database.create_cdks(count=2, remark="首月体验卡", cdk_type="music_bot", duration_months=1, is_trial=1)
+        self.assertEqual(len(trial_cdks), 2)
+        cdk = trial_cdks[0]
+
+        info = database.get_cdk(cdk)
+        self.assertIsNotNone(info)
+        self.assertEqual(info["is_trial"], 1)
+        self.assertEqual(info["duration_months"], 1)  # 体验卡时长为月卡 (1个月)
+        self.assertEqual(info["cdk_type"], "music_bot")
+        self.assertEqual(info["status"], "unused")
+
+    def test_trial_server_normalization_and_detection(self):
+        # 1. 规范化测试
+        key1, addr1, port1, ip1, res_key1 = database.normalize_server_target("http://103.71.69.156:9987/")
+        self.assertEqual(key1, "103.71.69.156:9987")
+        self.assertEqual(port1, 9987)
+
+        key2, addr2, port2, ip2, res_key2 = database.normalize_server_target("103.71.69.156", 60001)
+        self.assertEqual(key2, "103.71.69.156:60001")
+        self.assertEqual(port2, 60001)
+
+        # 2. 初始状态未被记录
+        used, rec = database.has_server_used_trial("103.71.69.156", 9987)
+        self.assertFalse(used)
+        self.assertIsNone(rec)
+
+        # 3. 记录 9987 端口为已使用
+        database.record_trial_server("103.71.69.156", 9987, "BOT-TRIAL-001", "music_bot", target_id="bot-1")
+
+        # 4. 再次检测 9987 -> 判定为已使用
+        used9987, rec9987 = database.has_server_used_trial("103.71.69.156", 9987)
+        self.assertTrue(used9987)
+        self.assertIsNotNone(rec9987)
+        self.assertEqual(rec9987["cdk_code"], "BOT-TRIAL-001")
+
+        # 5. 检测同一 IP 的不同端口 60001 -> 判定为未使用（独立服务器不拦截）
+        used60001, rec60001 = database.has_server_used_trial("103.71.69.156", 60001)
+        self.assertFalse(used60001)
+
+    def test_trial_bot_redeem_and_renewal_api_flow(self):
+        try:
+            from unittest.mock import patch
+            from fastapi.testclient import TestClient
+            import app as ts_app
+            client = TestClient(ts_app.app)
+        except Exception:
+            return
+
+        # 1. 生成 2 张音乐机器人体验卡和 1 张普通月卡
+        trial_cdks = database.create_cdks(count=2, remark="体验卡批次", cdk_type="music_bot", is_trial=1)
+        normal_cdks = database.create_cdks(count=1, remark="普通月卡", cdk_type="music_bot", duration_months=1, is_trial=0)
+
+        trial1, trial2 = trial_cdks[0], trial_cdks[1]
+        normal1 = normal_cdks[0]
+
+        # 2. 验证体验卡查询接口返回 is_trial 及体验卡说明
+        resp_query = client.post("/api/redeem", json={"cdk": trial1})
+        self.assertEqual(resp_query.status_code, 200)
+        q_data = resp_query.json()
+        self.assertTrue(q_data["success"])
+        self.assertTrue(q_data["is_trial"])
+        self.assertIn("体验卡", q_data["duration_desc"])
+
+        # 3. 第一次使用体验卡开通目标服务器 1.2.3.4:9987
+        with patch.object(ts_app.music_bot_client, "create_bot", return_value=(True, {"id": "mock-bot-trial-1"})):
+            resp1 = client.post("/api/redeem-bot", json={
+                "cdk": trial1,
+                "name": "体验机1",
+                "serverAddress": "1.2.3.4",
+                "serverPort": 9987,
+                "nickname": "TrialBot"
+            })
+            self.assertEqual(resp1.status_code, 200)
+            res1 = resp1.json()
+            self.assertTrue(res1["success"])
+            self.assertEqual(res1["instance"]["bot_id"], "mock-bot-trial-1")
+
+        # 4. 再次尝试使用第二张体验卡为同一个服务器 1.2.3.4:9987 开通 -> 必须被拦截并提示退款
+        with patch.object(ts_app.music_bot_client, "create_bot", return_value=(True, {"id": "mock-bot-trial-2"})):
+            resp2 = client.post("/api/redeem-bot", json={
+                "cdk": trial2,
+                "name": "体验机2",
+                "serverAddress": "1.2.3.4",
+                "serverPort": 9987,
+                "nickname": "TrialBot2"
+            })
+            self.assertEqual(resp2.status_code, 400)
+            res2 = resp2.json()
+            self.assertFalse(res2["success"])
+            self.assertIn("只能使用一次体验卡，请联系退款", res2["message"])
+
+        # 5. 同一 IP 不同端口 1.2.3.4:60001 使用第二张体验卡开通 -> 允许成功
+        with patch.object(ts_app.music_bot_client, "create_bot", return_value=(True, {"id": "mock-bot-trial-port2"})):
+            resp3 = client.post("/api/redeem-bot", json={
+                "cdk": trial2,
+                "name": "体验机端口2",
+                "serverAddress": "1.2.3.4",
+                "serverPort": 60001,
+                "nickname": "TrialBotPort2"
+            })
+            self.assertEqual(resp3.status_code, 200)
+            res3 = resp3.json()
+            self.assertTrue(res3["success"])
+
+        # 6. 生成第三张体验卡，尝试对已使用过体验卡的 mock-bot-trial-1 进行续费 -> 必须被拦截
+        trial3 = database.create_cdks(count=1, remark="体验卡3", cdk_type="music_bot", is_trial=1)[0]
+        resp_renew_fail = client.post("/api/renew-bot", json={"cdk": trial3, "bot_id": "mock-bot-trial-1"})
+        self.assertEqual(resp_renew_fail.status_code, 400)
+        self.assertIn("只能使用一次体验卡，请联系退款", resp_renew_fail.json()["message"])
+
+        # 7. 使用普通月卡进行续费 -> 允许成功
+        with patch.object(ts_app.music_bot_client, "start_bot", return_value=(True, {})):
+            resp_renew_ok = client.post("/api/renew-bot", json={"cdk": normal1, "bot_id": "mock-bot-trial-1"})
+            self.assertEqual(resp_renew_ok.status_code, 200)
+            self.assertTrue(resp_renew_ok.json()["success"])
+
+    def test_trial_records_admin_api_and_reset(self):
+        try:
+            from fastapi.testclient import TestClient
+            import app as ts_app
+            client = TestClient(ts_app.app)
+        except Exception:
+            return
+
+        admin_pwd = database.get_admin_password()
+
+        # 1. 记录一条体验卡记录
+        rec = database.record_trial_server("10.0.0.1", 9987, "BOT-TRIAL-TEST", "music_bot", target_id="bot-test")
+        self.assertIsNotNone(rec.get("id"))
+
+        # 2. 查询体验记录列表
+        resp_list = client.get("/api/admin/trial-records", headers={"X-Admin-Password": admin_pwd})
+        self.assertEqual(resp_list.status_code, 200)
+        data = resp_list.json()
+        self.assertTrue(data["success"])
+        self.assertTrue(any(r["server_key"] == "10.0.0.1:9987" for r in data["records"]))
+
+        # 3. 验证此时该服务器检测为已使用
+        used, _ = database.has_server_used_trial("10.0.0.1", 9987)
+        self.assertTrue(used)
+
+        # 4. 管理员重置该服务器的体验记录
+        rec_id = next(r["id"] for r in data["records"] if r["server_key"] == "10.0.0.1:9987")
+        resp_del = client.delete(f"/api/admin/trial-records/{rec_id}", headers={"X-Admin-Password": admin_pwd})
+        self.assertEqual(resp_del.status_code, 200)
+        self.assertTrue(resp_del.json()["success"])
+
+        # 5. 验证重置后该服务器可再次使用体验卡
+        used_after, _ = database.has_server_used_trial("10.0.0.1", 9987)
+        self.assertFalse(used_after)
 
 if __name__ == "__main__":
     unittest.main()

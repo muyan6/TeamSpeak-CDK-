@@ -623,6 +623,7 @@
             <div id="durationSelectGroup">
               <label class="info-label" style="display: block; margin-bottom: 0.35rem;">卡密有效时长</label>
               <select id="genDuration" class="form-control" style="width: 100%; color: #facc15;">
+                <option value="trial" style="color: #f472b6; font-weight: 600;">🎁 体验卡 (1个月/单服限用1次)</option>
                 <option value="1">1 个月 (月卡)</option>
                 <option value="3">3 个月 (季卡)</option>
                 <option value="6">6 个月 (半年卡)</option>
@@ -636,7 +637,7 @@
             </div>
             <div style="grid-column: span 1;">
               <label class="info-label" style="display: block; margin-bottom: 0.35rem;">备注说明 (选填)</label>
-              <input type="text" id="genRemark" class="form-control" placeholder="如：活动发放 / 战队月卡" style="width: 100%;">
+              <input type="text" id="genRemark" class="form-control" placeholder="如：活动发放 / 体验卡" style="width: 100%;">
             </div>
             <div>
               <button class="btn-primary" style="width: 100%; justify-content: center; height: 38px;" onclick="generateCdks()">
@@ -669,9 +670,10 @@
               <option value="music_bot">音乐机器人</option>
             </select>
 
-            <!-- 时长细分筛选 (月卡/季卡/半年卡/年卡/永久) -->
+            <!-- 时长细分筛选 (体验卡/月卡/季卡/半年卡/年卡/永久) -->
             <select id="cdkDurationFilter" class="form-control" onchange="applyCdkFilters()" style="padding: 0.42rem 0.65rem; font-size: 0.85rem; color: #facc15;">
               <option value="all">所有时长</option>
+              <option value="trial" style="color: #f472b6; font-weight: 600;">🎁 体验卡 (1个月/限1次)</option>
               <option value="1">月卡 (1个月)</option>
               <option value="3">季卡 (3个月)</option>
               <option value="6">半年卡 (6个月)</option>
@@ -688,6 +690,10 @@
 
           <!-- 操作按钮组 -->
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+            <!-- 体验卡服务器使用记录 -->
+            <button class="btn-action" style="background: rgba(244, 114, 182, 0.15); border-color: rgba(244, 114, 182, 0.35); color: #f472b6;" onclick="openTrialRecordsModal()">
+              <i class="fa-solid fa-shield-halved"></i> 体验卡使用记录 (<span id="countTrialRecords">0</span>)
+            </button>
             <!-- 按条件批量清理/删除 (月卡、年卡、永久卡等) -->
             <button class="btn-action btn-danger" style="background: rgba(239, 68, 68, 0.15); border-color: rgba(239, 68, 68, 0.35); color: #f87171;" onclick="openBatchDeleteCdkModal()">
               <i class="fa-solid fa-filter-circle-xmark"></i> 按时长/条件批量清理
@@ -876,6 +882,7 @@
           <label class="info-label" style="display: block; margin-bottom: 0.35rem;">1. 卡密有效时长 (Duration)</label>
           <select id="batchDelDuration" class="form-control" style="width: 100%; color: #facc15;" onchange="updateBatchDeletePreview()">
             <option value="all">全部时长</option>
+            <option value="trial" style="color: #f472b6; font-weight: 600;">🎁 体验卡 (1 个月/限用1次)</option>
             <option value="1">月卡 (1 个月)</option>
             <option value="3">季卡 (3 个月)</option>
             <option value="6">半年卡 (6 个月)</option>
@@ -913,6 +920,48 @@
           <button type="submit" id="execBatchDeleteBtn" class="btn-primary btn-danger"><i class="fa-solid fa-trash"></i> 确认执行批量删除</button>
         </div>
       </form>
+    </div>
+  </div>
+
+  <!-- 体验卡服务器指纹记录与配额管理模态框 -->
+  <div id="trialRecordsModal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 860px; width: 95%;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <h3 style="font-size: 1.2rem; color: #f472b6;"><i class="fa-solid fa-shield-halved"></i> 体验卡使用记录（防白嫖指纹库）</h3>
+        <button class="btn-action" onclick="closeTrialRecordsModal()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <div style="background: rgba(244, 114, 182, 0.08); border: 1px solid rgba(244, 114, 182, 0.25); border-radius: 8px; padding: 0.75rem 1rem; margin-bottom: 1rem; font-size: 0.82rem; color: #fbcfe8; line-height: 1.6;">
+        <i class="fa-solid fa-circle-info"></i> <strong>说明</strong>：此处展示所有已成功使用过体验卡的目标服务器地址与解析指纹（同一 IP 不同端口视为独立服务器）。如需允许某服务器再次体验，点击对应行的<strong>【重置资格】</strong>即可。
+      </div>
+
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; flex-wrap: wrap; gap: 0.5rem;">
+        <input type="text" id="trialRecordSearchInput" class="form-control" placeholder="搜索服务器地址 / CDK..." oninput="filterTrialRecordsTable()" style="max-width: 260px; font-size: 0.85rem;">
+        <button class="btn-action" onclick="loadTrialRecords()"><i class="fa-solid fa-rotate"></i> 刷新列表</button>
+      </div>
+
+      <div class="table-responsive" style="max-height: 420px; overflow-y: auto;">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>目标服务器 (规范化标识)</th>
+              <th>DNS 真实 IP</th>
+              <th>关联体验卡 CDK</th>
+              <th>业务类型</th>
+              <th>兑换使用时间</th>
+              <th style="text-align: right;">操作</th>
+            </tr>
+          </thead>
+          <tbody id="trialRecordsTableBody">
+            <tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">加载中...</td></tr>
+          </tbody>
+        </table>
+      </div>
+
+      <div style="display: flex; justify-content: flex-end; margin-top: 1.25rem;">
+        <button type="button" class="btn-action" onclick="closeTrialRecordsModal()">关闭窗口</button>
+      </div>
     </div>
   </div>
 
@@ -1133,6 +1182,7 @@
     async function loadDashboard() {
       loadStats();
       loadInstances();
+      loadTrialRecords();
     }
 
     async function loadStats() {
@@ -1330,9 +1380,11 @@
         if (typeVal !== 'all') {
           if (c.cdk_type !== typeVal) return false;
         }
-        // 3. 时长筛选 (月卡/季卡/半年卡/年卡/永久卡)
-        if (durVal !== 'all') {
-          if ((c.duration_months || 0) !== parseInt(durVal)) return false;
+        // 3. 时长筛选 (体验卡 / 月卡 / 季卡 / 半年卡 / 年卡 / 永久卡)
+        if (durVal === 'trial') {
+          if (c.is_trial !== 1) return false;
+        } else if (durVal !== 'all') {
+          if (c.is_trial === 1 || (c.duration_months || 0) !== parseInt(durVal)) return false;
         }
         // 4. 关键字搜索
         if (searchVal) {
@@ -1365,6 +1417,7 @@
       tbody.innerHTML = cdks.map(c => {
         const isUsed = c.status === 'used';
         const isUnused = c.status === 'unused';
+        const isTrial = c.is_trial === 1;
 
         let statusBadge = '';
         if (isUnused) {
@@ -1387,6 +1440,17 @@
           timeHtml += `<div style="font-size: 0.78rem; color: #fbbf24; margin-top: 3px;" title="兑换使用时间"><i class="fa-solid fa-bolt" style="font-size: 0.72rem;"></i> 使用: ${c.used_at}</div>`;
         }
 
+        let typeBadgeHtml = '';
+        if (isTrial) {
+          typeBadgeHtml = `<span class="badge" style="background: rgba(244, 114, 182, 0.18); color: #f472b6; border: 1px solid rgba(244, 114, 182, 0.4);">
+            <i class="fa-solid fa-gift"></i> ${c.cdk_type === 'music_bot' ? '音乐机器人 · 体验卡(1个月)' : 'TS服务器 · 体验卡(1个月)'}
+          </span>`;
+        } else {
+          typeBadgeHtml = `<span class="badge ${c.cdk_type === 'music_bot' ? 'badge-purple' : 'badge-info'}">
+            ${c.cdk_type === 'music_bot' ? ('音乐机器人 · ' + (c.duration_months ? c.duration_months + '个月' : '永久')) : ('TS 语音服务器 · ' + (c.duration_months ? c.duration_months + '个月' : '永久'))}
+          </span>`;
+        }
+
         return `
           <tr>
             <td style="text-align: center;">
@@ -1398,11 +1462,7 @@
                 <button class="btn-action btn-action-sm" title="复制卡密" onclick="copyToClipboard('${c.code}', '已复制 CDK: ${c.code}')"><i class="fa-regular fa-copy"></i></button>
               </div>
             </td>
-            <td>
-              <span class="badge ${c.cdk_type === 'music_bot' ? 'badge-purple' : 'badge-info'}">
-                ${c.cdk_type === 'music_bot' ? ('音乐机器人 · ' + (c.duration_months ? c.duration_months + '个月' : '永久')) : ('TS 语音服务器 · ' + (c.duration_months ? c.duration_months + '个月' : '永久'))}
-              </span>
-            </td>
+            <td>${typeBadgeHtml}</td>
             <td>${statusBadge}</td>
             <td>${boundTarget}</td>
             <td style="color: #cbd5e1; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${c.remark || ''}">
@@ -1434,7 +1494,11 @@
       const statusVal = document.getElementById('batchDelStatus').value;
 
       const matched = window._allCdks.filter(c => {
-        if (durVal !== 'all' && (c.duration_months || 0) !== parseInt(durVal)) return false;
+        if (durVal === 'trial') {
+          if (c.is_trial !== 1) return false;
+        } else if (durVal !== 'all') {
+          if (c.is_trial === 1 || (c.duration_months || 0) !== parseInt(durVal)) return false;
+        }
         if (typeVal !== 'all' && c.cdk_type !== typeVal) return false;
         if (statusVal !== 'all' && c.status !== statusVal) return false;
         return true;
@@ -1452,7 +1516,23 @@
       const typeVal = document.getElementById('batchDelType').value;
       const statusVal = document.getElementById('batchDelStatus').value;
 
-      const durDesc = durVal === 'all' ? '全部时长' : (durVal === '0' ? '永久卡' : `${durVal} 个月`);
+      let durDesc = '';
+      let is_trial_val = null;
+      let duration_months_val = null;
+
+      if (durVal === 'trial') {
+        durDesc = '体验卡 (1 个月/限用1次)';
+        is_trial_val = 1;
+      } else if (durVal === 'all') {
+        durDesc = '全部时长';
+      } else if (durVal === '0') {
+        durDesc = '永久卡';
+        duration_months_val = 0;
+      } else {
+        durDesc = `${durVal} 个月`;
+        duration_months_val = parseInt(durVal);
+      }
+
       const typeDesc = typeVal === 'all' ? '全部类型' : (typeVal === 'music_bot' ? '音乐机器人' : 'TS服务器');
       const statusDesc = statusVal === 'all' ? '全部状态' : (statusVal === 'unused' ? '未使用' : '已使用');
 
@@ -1463,7 +1543,8 @@
       try {
         const filter = {
           cdk_type: typeVal,
-          duration_months: durVal === 'all' ? null : parseInt(durVal),
+          duration_months: duration_months_val,
+          is_trial: is_trial_val,
           status: statusVal
         };
         const res = await fetch('/api/admin/cdks/batch-delete', {
@@ -1756,7 +1837,9 @@
       const count = parseInt(document.getElementById('genCount').value) || 1;
       const remark = document.getElementById('genRemark').value.trim();
       const cdk_type = document.getElementById('genType').value;
-      const duration_months = parseInt(document.getElementById('genDuration').value) || 0;
+      const durVal = document.getElementById('genDuration').value;
+      const is_trial = durVal === 'trial' ? 1 : 0;
+      const duration_months = is_trial ? 1 : (parseInt(durVal) || 0);
 
       try {
         const res = await fetch('/api/admin/cdks/generate', {
@@ -1765,7 +1848,7 @@
             'Content-Type': 'application/json',
             'X-Admin-Password': adminToken
           },
-          body: JSON.stringify({ count, remark, cdk_type, duration_months })
+          body: JSON.stringify({ count, remark, cdk_type, duration_months, is_trial })
         });
         const data = await res.json();
         if (data.success) {
@@ -1773,12 +1856,14 @@
           document.getElementById('genRemark').value = '';
           loadCdks();
           loadStats();
+          loadTrialRecords();
 
-          showToast(`🎉 成功生成 ${data.created.length} 个 CDK！`, 'success');
+          const cardName = is_trial ? '体验卡 (1个月)' : (duration_months ? duration_months + '个月' : '永久');
+          showToast(`🎉 成功生成 ${data.created.length} 个 ${cardName} CDK！`, 'success');
 
-          if (confirm(`🎉 成功生成 ${data.created.length} 个 ${cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器'} CDK！\n\n是否立即下载为 .txt 文本文件？`)) {
+          if (confirm(`🎉 成功生成 ${data.created.length} 个 ${cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器'}【${cardName}】CDK！\n\n是否立即下载为 .txt 文本文件？`)) {
             const dateStr = new Date().toISOString().slice(0, 10);
-            downloadTextFile(`cdk_batch_${cdk_type}_${dateStr}.txt`, listText);
+            downloadTextFile(`cdk_${is_trial ? 'trial_' : ''}${cdk_type}_${dateStr}.txt`, listText);
           }
         } else {
           showToast(data.message || '生成失败', 'error');
@@ -1811,7 +1896,7 @@
       const filename = `ts_cdks_${groupLabel}_${dateStr}.txt`;
       
       const text = list.map(c => {
-        const durStr = c.duration_months ? (c.duration_months + '个月') : '永久';
+        const durStr = c.is_trial ? '体验卡(1个月)' : (c.duration_months ? (c.duration_months + '个月') : '永久');
         const typeStr = c.cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器';
         if (c.status === 'unused') {
           return `${c.code}\t类型: ${typeStr}\t时长: ${durStr}\t备注: ${c.remark || '无'}\t生成时间: ${c.created_at}`;
@@ -1846,8 +1931,9 @@
       }
 
       const text = filtered.map(c => {
+        const durStr = c.is_trial ? '体验卡(1个月)' : (c.duration_months ? (c.duration_months + '个月') : '永久');
         if (type === 'unused') return c.code;
-        return `${c.code}\t类型: ${c.cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器'}\t状态: ${c.status === 'unused' ? '未使用' : '已使用'}\t备注: ${c.remark || '无'}`;
+        return `${c.code}\t类型: ${c.cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器'}\t时长: ${durStr}\t状态: ${c.status === 'unused' ? '未使用' : '已使用'}\t备注: ${c.remark || '无'}`;
       }).join('\n');
 
       downloadTextFile(filename, text);
@@ -1873,6 +1959,100 @@
       }
       const text = unused.join('\n');
       copyToClipboard(text, `已复制 ${unused.length} 个未使用的 CDK 到剪贴板！`);
+    }
+
+    // === 体验卡使用记录管理 ===
+    let _allTrialRecords = [];
+
+    function openTrialRecordsModal() {
+      document.getElementById('trialRecordsModal').style.display = 'flex';
+      loadTrialRecords();
+    }
+
+    function closeTrialRecordsModal() {
+      document.getElementById('trialRecordsModal').style.display = 'none';
+    }
+
+    async function loadTrialRecords() {
+      const tbody = document.getElementById('trialRecordsTableBody');
+      const countEl = document.getElementById('countTrialRecords');
+      try {
+        const res = await fetch('/api/admin/trial-records', {
+          headers: { 'X-Admin-Password': adminToken }
+        });
+        const data = await res.json();
+        if (data.success) {
+          _allTrialRecords = data.records || [];
+          if (countEl) countEl.innerText = _allTrialRecords.length;
+          renderTrialRecordsTable(_allTrialRecords);
+        } else {
+          if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #f87171; padding: 2rem;">加载体验记录失败</td></tr>';
+        }
+      } catch (err) {
+        if (tbody) tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #f87171; padding: 2rem;">请求异常</td></tr>';
+      }
+    }
+
+    function renderTrialRecordsTable(records) {
+      const tbody = document.getElementById('trialRecordsTableBody');
+      if (!tbody) return;
+      if (!records || records.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无体验卡使用记录（所有服务器均可使用体验卡）</td></tr>';
+        return;
+      }
+
+      tbody.innerHTML = records.map(r => `
+        <tr>
+          <td style="color: var(--text-muted); font-size: 0.82rem;">#${r.id}</td>
+          <td><strong style="color: #38bdf8; font-size: 0.9rem;">${r.server_key}</strong></td>
+          <td><code style="color: #a78bfa; font-size: 0.85rem;">${r.resolved_ip ? (r.resolved_ip + ':' + r.server_port) : (r.server_address + ':' + r.server_port)}</code></td>
+          <td><code style="color: #f472b6; font-size: 0.85rem;">${r.cdk_code}</code></td>
+          <td><span class="badge ${r.cdk_type === 'music_bot' ? 'badge-purple' : 'badge-info'}">${r.cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器'}</span></td>
+          <td style="font-size: 0.8rem; color: var(--text-muted);">${r.used_at}</td>
+          <td style="text-align: right;">
+            <button class="btn-action btn-action-sm btn-danger" onclick="deleteTrialRecord(${r.id}, '${r.server_key}')" title="重置该服务器体验资格">
+              <i class="fa-solid fa-rotate-left"></i> 重置资格
+            </button>
+          </td>
+        </tr>
+      `).join('');
+    }
+
+    function filterTrialRecordsTable() {
+      const searchVal = (document.getElementById('trialRecordSearchInput')?.value || '').trim().toLowerCase();
+      if (!searchVal) {
+        renderTrialRecordsTable(_allTrialRecords);
+        return;
+      }
+      const filtered = _allTrialRecords.filter(r => {
+        const matchKey = (r.server_key || '').toLowerCase().includes(searchVal);
+        const matchAddr = (r.server_address || '').toLowerCase().includes(searchVal);
+        const matchCdk = (r.cdk_code || '').toLowerCase().includes(searchVal);
+        const matchIp = (r.resolved_ip || '').toLowerCase().includes(searchVal);
+        return matchKey || matchAddr || matchCdk || matchIp;
+      });
+      renderTrialRecordsTable(filtered);
+    }
+
+    async function deleteTrialRecord(recordId, serverKey) {
+      if (!confirm(`确定要重置服务器【${serverKey}】的体验卡使用记录吗？\n\n重置后，该服务器将重新获得使用一次体验卡的资格！`)) {
+        return;
+      }
+      try {
+        const res = await fetch(`/api/admin/trial-records/${recordId}`, {
+          method: 'DELETE',
+          headers: { 'X-Admin-Password': adminToken }
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || '重置成功！', 'success');
+          loadTrialRecords();
+        } else {
+          showToast(data.message || '操作失败', 'error');
+        }
+      } catch (err) {
+        showToast('请求异常', 'error');
+      }
     }
 
     async function deleteCdk(code) {

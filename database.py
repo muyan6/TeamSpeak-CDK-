@@ -1,9 +1,11 @@
 import sqlite3
 import secrets
 import string
+import socket
+import ipaddress
 from contextlib import contextmanager
 from datetime import datetime, timedelta
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from config import DB_PATH
 
 @contextmanager
@@ -25,6 +27,7 @@ def init_db():
                 status TEXT NOT NULL DEFAULT 'unused',  -- 'unused', 'used', 'disabled'
                 cdk_type TEXT NOT NULL DEFAULT 'teamspeak', -- 'teamspeak', 'music_bot'
                 duration_months INTEGER NOT NULL DEFAULT 0, -- 0 为永久, 1 为 1个月, 3 为 3个月...
+                is_trial INTEGER NOT NULL DEFAULT 0,    -- 0 为普通卡, 1 为体验卡 (限用一次)
                 instance_id INTEGER,
                 bot_id TEXT,                            -- 绑定的音乐机器人 ID
                 remark TEXT,
@@ -71,6 +74,26 @@ def init_db():
             )
         ''')
         
+        # 创建体验卡使用记录表（本地防重复白嫖指纹库）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS trial_server_records (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                server_key TEXT NOT NULL UNIQUE,     -- 规范化唯一键，例如 "103.71.69.156:9987"
+                server_address TEXT NOT NULL,       -- 主机地址/域名 (小写)
+                server_port INTEGER NOT NULL,       -- 语音端口号
+                resolved_ip TEXT,                   -- DNS 解析后的公网真实 IP
+                resolved_key TEXT,                  -- DNS 解析后的 "IP:Port"
+                raw_input TEXT,                     -- 用户原始输入内容
+                cdk_code TEXT NOT NULL,             -- 关联的体验卡 CDK
+                cdk_type TEXT NOT NULL,             -- 'music_bot' 或 'teamspeak'
+                target_id TEXT,                     -- 绑定的 bot_id 或 instance_id
+                used_at TEXT NOT NULL               -- 记录时间
+            )
+        ''')
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_trial_server_key ON trial_server_records(server_key)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_trial_resolved_key ON trial_server_records(resolved_key)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_trial_server_addr ON trial_server_records(server_address)")
+
         # 创建系统配置表
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS system_settings (
@@ -99,8 +122,12 @@ def init_db():
             cursor.execute("ALTER TABLE cdks ADD COLUMN cdk_type TEXT NOT NULL DEFAULT 'teamspeak'")
         if "duration_months" not in cdk_cols:
             cursor.execute("ALTER TABLE cdks ADD COLUMN duration_months INTEGER NOT NULL DEFAULT 0")
+        if "is_trial" not in cdk_cols:
+            cursor.execute("ALTER TABLE cdks ADD COLUMN is_trial INTEGER NOT NULL DEFAULT 0")
         if "bot_id" not in cdk_cols:
             cursor.execute("ALTER TABLE cdks ADD COLUMN bot_id TEXT")
+
+        conn.commit()
 
         conn.commit()
 
@@ -172,11 +199,13 @@ def create_cdks(
     count: int = 1,
     remark: str = "",
     cdk_type: str = "teamspeak",
-    duration_months: int = 0
+    duration_months: int = 0,
+    is_trial: int = 0
 ) -> List[str]:
     created = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     prefix = "BOT-" if cdk_type == "music_bot" else "TS-"
+    final_dur = 1 if is_trial else duration_months
     with get_connection() as conn:
         cursor = conn.cursor()
         for _ in range(count):
@@ -184,9 +213,9 @@ def create_cdks(
                 code = generate_random_cdk(prefix=prefix)
                 try:
                     cursor.execute(
-                        """INSERT INTO cdks (code, status, cdk_type, duration_months, remark, created_at) 
-                           VALUES (?, 'unused', ?, ?, ?, ?)""",
-                        (code, cdk_type, duration_months, remark, now)
+                        """INSERT INTO cdks (code, status, cdk_type, duration_months, is_trial, remark, created_at) 
+                           VALUES (?, 'unused', ?, ?, ?, ?, ?)""",
+                        (code, cdk_type, final_dur, is_trial, remark, now)
                     )
                     created.append(code)
                     break
@@ -228,6 +257,7 @@ def delete_cdks(codes: List[str]) -> int:
 def delete_cdks_by_filter(
     cdk_type: Optional[str] = None,
     duration_months: Optional[int] = None,
+    is_trial: Optional[int] = None,
     status: Optional[str] = None
 ) -> int:
     conditions = []
@@ -235,7 +265,10 @@ def delete_cdks_by_filter(
     if cdk_type and cdk_type != "all":
         conditions.append("cdk_type = ?")
         params.append(cdk_type)
-    if duration_months is not None:
+    if is_trial is not None and str(is_trial) != "all":
+        conditions.append("is_trial = ?")
+        params.append(int(is_trial))
+    elif duration_months is not None and str(duration_months) != "all":
         conditions.append("duration_months = ?")
         params.append(int(duration_months))
     if status and status != "all":
@@ -250,6 +283,120 @@ def delete_cdks_by_filter(
         cursor.execute(sql, params)
         conn.commit()
         return cursor.rowcount
+
+# --- 体验卡与服务器地址指纹检测记录 ---
+
+def normalize_server_target(addr: str, port: Optional[int] = 9987) -> Tuple[str, str, int, Optional[str], Optional[str]]:
+    """
+    智能解析并规范化目标 TeamSpeak 服务器地址与端口
+    返回: (server_key, clean_addr, target_port, resolved_ip, resolved_key)
+    例如: ("103.71.69.156:9987", "103.71.69.156", 9987, "103.71.69.156", "103.71.69.156:9987")
+    """
+    clean_addr = str(addr or "").strip().lower()
+    if clean_addr.startswith("http://"):
+        clean_addr = clean_addr[7:]
+    elif clean_addr.startswith("https://"):
+        clean_addr = clean_addr[8:]
+    clean_addr = clean_addr.rstrip("/")
+
+    target_port = int(port) if port else 9987
+    if ":" in clean_addr:
+        parts = clean_addr.split(":", 1)
+        clean_addr = parts[0].strip()
+        try:
+            target_port = int(parts[1].strip())
+        except ValueError:
+            pass
+
+    server_key = f"{clean_addr}:{target_port}"
+
+    resolved_ip = None
+    resolved_key = None
+    try:
+        try:
+            ipaddress.ip_address(clean_addr)
+            resolved_ip = clean_addr
+        except ValueError:
+            # 域名解析真实公网 IP
+            resolved_ip = socket.gethostbyname(clean_addr)
+        if resolved_ip:
+            resolved_key = f"{resolved_ip}:{target_port}"
+    except Exception:
+        pass
+
+    return server_key, clean_addr, target_port, resolved_ip, resolved_key
+
+def has_server_used_trial(addr: str, port: Optional[int] = 9987) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """
+    检测目标服务器是否已在本地使用过体验卡（同一 IP 不同端口视为独立服务器）
+    """
+    server_key, clean_addr, target_port, resolved_ip, resolved_key = normalize_server_target(addr, port)
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        # 1. 检查 server_key 匹配
+        cursor.execute("SELECT * FROM trial_server_records WHERE server_key = ?", (server_key,))
+        row = cursor.fetchone()
+        if row:
+            return True, dict(row)
+
+        # 2. 如果存在解析后的真实 IP 端口，检查是否匹配
+        if resolved_key:
+            cursor.execute("""
+                SELECT * FROM trial_server_records 
+                WHERE server_key = ? OR resolved_key = ?
+            """, (resolved_key, resolved_key))
+            row = cursor.fetchone()
+            if row:
+                return True, dict(row)
+
+        return False, None
+
+def record_trial_server(
+    addr: str,
+    port: int,
+    cdk_code: str,
+    cdk_type: str = "music_bot",
+    target_id: Optional[str] = None,
+    raw_input: Optional[str] = None
+) -> Dict[str, Any]:
+    """
+    持久化记录已使用体验卡的目标服务器标识与详细指纹
+    """
+    server_key, clean_addr, target_port, resolved_ip, resolved_key = normalize_server_target(addr, port)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO trial_server_records (
+                server_key, server_address, server_port, resolved_ip, resolved_key,
+                raw_input, cdk_code, cdk_type, target_id, used_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(server_key) DO UPDATE SET
+                cdk_code = excluded.cdk_code,
+                used_at = excluded.used_at,
+                target_id = excluded.target_id
+        """, (
+            server_key, clean_addr, target_port, resolved_ip, resolved_key,
+            raw_input or f"{addr}:{port}", cdk_code, cdk_type, str(target_id) if target_id else None, now
+        ))
+        conn.commit()
+        record_id = cursor.lastrowid
+        cursor.execute("SELECT * FROM trial_server_records WHERE id = ? OR server_key = ?", (record_id, server_key))
+        row = cursor.fetchone()
+        return dict(row) if row else {}
+
+def get_all_trial_records() -> List[Dict[str, Any]]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM trial_server_records ORDER BY used_at DESC")
+        return [dict(row) for row in cursor.fetchall()]
+
+def delete_trial_record(record_id: int) -> bool:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM trial_server_records WHERE id = ?", (record_id,))
+        conn.commit()
+        return cursor.rowcount > 0
 
 def bind_cdk_instance(code: str, instance_id: int):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
