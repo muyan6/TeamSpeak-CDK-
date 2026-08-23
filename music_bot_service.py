@@ -12,11 +12,41 @@ class MusicBotClient:
         self.password = BOT_PANEL_PASS
         self._session_cookie: Optional[str] = None
         self._cookie_expires_at: float = 0
+        self._sync_with_db()
+
+    def _sync_with_db(self):
+        try:
+            from database import get_bot_config
+            cfg = get_bot_config()
+            new_url = cfg["bot_panel_url"]
+            new_user = cfg["bot_panel_user"]
+            new_pass = cfg["bot_panel_pass"]
+            if new_url != self.base_url or new_user != self.username or new_pass != self.password:
+                self.base_url = new_url
+                self.username = new_user
+                self.password = new_pass
+                self._session_cookie = None
+                self._cookie_expires_at = 0
+        except Exception:
+            pass
+
+    def reload_config(self):
+        self._session_cookie = None
+        self._cookie_expires_at = 0
+        self._sync_with_db()
+
+    def update_config(self, base_url: str, username: str, password: str):
+        self.base_url = base_url.strip().rstrip("/")
+        self.username = username.strip()
+        self.password = password.strip()
+        self._session_cookie = None
+        self._cookie_expires_at = 0
 
     def _login(self) -> bool:
         """
         向音乐机器人后台登录并保存 Session Cookie
         """
+        self._sync_with_db()
         login_url = f"{self.base_url}/api/session/login"
         payload = json.dumps({
             "username": self.username,
@@ -49,6 +79,7 @@ class MusicBotClient:
         return False
 
     def _get_cookie(self) -> Optional[str]:
+        self._sync_with_db()
         if not self._session_cookie or time.time() > self._cookie_expires_at:
             if not self._login():
                 return None
@@ -58,9 +89,10 @@ class MusicBotClient:
         """
         通用的 API 请求封装，支持自动处理 401 重连并带有 CSRF Origin 校验
         """
+        self._sync_with_db()
         cookie = self._get_cookie()
         if not cookie:
-            return False, "未能连接到音乐机器人服务中心"
+            return False, "未能连接到音乐机器人服务中心，请检查后台机器人平台地址、账号与密码配置"
 
         url = f"{self.base_url}{path}"
         headers = {
@@ -111,6 +143,92 @@ class MusicBotClient:
             return False, f"HTTP {e.code}: {err_body or e.reason}"
         except Exception as e:
             return False, str(e)
+
+    def test_connection(self, url: Optional[str] = None, username: Optional[str] = None, password: Optional[str] = None) -> Tuple[bool, str, Dict[str, Any]]:
+        """
+        测试与指定或当前音乐机器人平台的连通性与账号密码有效性
+        """
+        target_url = (url or self.base_url).strip().rstrip("/")
+        target_user = (username or self.username).strip()
+        target_pass = (password or self.password).strip()
+
+        if not target_url:
+            return False, "机器人平台网址 (URL) 不能为空", {}
+        if not target_url.startswith("http://") and not target_url.startswith("https://"):
+            return False, "平台网址格式不正确，必须以 http:// 或 https:// 开头", {}
+        if not target_user:
+            return False, "管理员账号不能为空", {}
+        if not target_pass:
+            return False, "管理员密码不能为空", {}
+
+        # 1. 尝试登录获取 Cookie
+        login_url = f"{target_url}/api/session/login"
+        payload = json.dumps({
+            "username": target_user,
+            "password": target_pass
+        }).encode("utf-8")
+
+        req = urllib.request.Request(
+            login_url,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "User-Agent": "TeamSpeak-Manager/1.0",
+                "Origin": target_url,
+                "Referer": f"{target_url}/"
+            }
+        )
+
+        session_cookie = None
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                if resp.status == 200:
+                    set_cookie = resp.headers.get("Set-Cookie")
+                    if set_cookie:
+                        session_cookie = set_cookie.split(";")[0]
+                else:
+                    return False, f"登录失败，远程服务器返回状态码: {resp.status}", {}
+        except urllib.error.HTTPError as e:
+            if e.code == 401 or e.code == 403:
+                return False, f"鉴权失败 (HTTP {e.code})：账号或密码错误，请核对后重试", {}
+            return False, f"连接异常 (HTTP {e.code}): {e.reason}", {}
+        except urllib.error.URLError as e:
+            return False, f"无法连接到目标服务器: {e.reason}", {}
+        except Exception as e:
+            return False, f"连接失败: {str(e)}", {}
+
+        if not session_cookie:
+            return False, "登录成功但未收到 Session Cookie 响应", {}
+
+        # 2. 尝试读取机器人列表
+        bots_url = f"{target_url}/api/bot"
+        req_bots = urllib.request.Request(
+            bots_url,
+            headers={
+                "Cookie": session_cookie,
+                "User-Agent": "TeamSpeak-Manager/1.0",
+                "Origin": target_url,
+                "Referer": f"{target_url}/"
+            }
+        )
+
+        try:
+            with urllib.request.urlopen(req_bots, timeout=10) as resp_bots:
+                if resp_bots.status == 200:
+                    raw_text = resp_bots.read().decode("utf-8")
+                    try:
+                        data = json.loads(raw_text)
+                    except Exception:
+                        data = {}
+                    bot_list = data.get("bots", []) if isinstance(data, dict) else []
+                    return True, f"对接成功！已成功握手远程平台，当前平台共有 {len(bot_list)} 个机器人实例", {
+                        "bot_count": len(bot_list),
+                        "connected_url": target_url
+                    }
+                else:
+                    return False, f"抓取机器人列表失败 (HTTP {resp_bots.status})", {}
+        except Exception as e:
+            return False, f"读取机器人列表异常: {str(e)}", {}
 
     def create_bot(
         self,

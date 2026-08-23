@@ -428,6 +428,9 @@
         <button class="tab-btn" id="tabBtnCdks" onclick="switchTab('cdks')">
           <i class="fa-solid fa-ticket"></i> CDK 激活码管理
         </button>
+        <button class="tab-btn" id="tabBtnBotConfig" onclick="switchTab('bot_config')">
+          <i class="fa-solid fa-sliders"></i> 机器人平台对接配置
+        </button>
       </div>
 
       <!-- Tab 1: TS 实例列表 -->
@@ -470,10 +473,13 @@
               控制中心: <a id="botPanelTopLink" href="http://103.71.69.156:23467/" target="_blank" style="color: #c084fc; text-decoration: none;">http://103.71.69.156:23467/</a>
             </p>
           </div>
-          <div style="display: flex; gap: 0.5rem;">
+          <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
             <a href="http://103.71.69.156:23467/" target="_blank" class="btn-action btn-purple">
               <i class="fa-solid fa-arrow-up-right-from-square"></i> 打开点歌网页后台
             </a>
+            <button class="btn-action" onclick="switchTab('bot_config')">
+              <i class="fa-solid fa-sliders"></i> 修改对接平台配置
+            </button>
             <button class="btn-action" onclick="loadBots()"><i class="fa-solid fa-rotate"></i> 刷新</button>
           </div>
         </div>
@@ -573,6 +579,82 @@
               <tr><td colspan="7" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
             </tbody>
           </table>
+        </div>
+      </div>
+
+      <!-- Tab 4: 音乐机器人平台对接配置 -->
+      <div id="tabContentBotConfig" class="card" style="display: none;">
+        <div style="margin-bottom: 1.5rem;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+            <div>
+              <h3 style="font-size: 1.2rem; font-weight: 700; color: #c084fc;">
+                <i class="fa-solid fa-sliders"></i> 音乐机器人平台对接配置
+              </h3>
+              <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.3rem;">
+                设置本系统对接的音乐机器人 Web 平台中心地址与管理员鉴权凭据（支持随时切换至不同机器人网站）
+              </p>
+            </div>
+            <button class="btn-action" onclick="loadBotConfig()"><i class="fa-solid fa-rotate"></i> 重新载入</button>
+          </div>
+        </div>
+
+        <div style="max-width: 680px;">
+          <!-- 提示信息卡片 -->
+          <div style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1.5rem;">
+            <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
+              <i class="fa-solid fa-circle-info" style="color: #c084fc; font-size: 1.1rem; margin-top: 2px;"></i>
+              <div style="font-size: 0.85rem; color: #cbd5e1; line-height: 1.6;">
+                <strong>说明：</strong>此处配置的是外部音乐机器人 Web 面板服务的远程接口。保存后系统将即时与新平台握手，前台用户兑换创建机器人及管理后台均会自动同步切换。
+              </div>
+            </div>
+          </div>
+
+          <form id="botConfigForm" onsubmit="handleSaveBotConfig(event)">
+            <div style="margin-bottom: 1.25rem;">
+              <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
+                <i class="fa-solid fa-globe" style="color: #60a5fa;"></i> 机器人网站地址 (URL)
+              </label>
+              <input type="text" id="cfgBotUrl" class="form-control" style="width: 100%; padding: 0.65rem 0.9rem;" placeholder="如 http://103.71.69.156:23467" required>
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.35rem;">
+                包含协议前缀（<code>http://</code> 或 <code>https://</code>）及端口号，末尾无需斜杠
+              </div>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem;">
+              <div>
+                <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
+                  <i class="fa-solid fa-user" style="color: #34d399;"></i> 平台管理员账号 (Username)
+                </label>
+                <input type="text" id="cfgBotUser" class="form-control" style="width: 100%; padding: 0.65rem 0.9rem;" placeholder="如 huasjj" required>
+              </div>
+
+              <div>
+                <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
+                  <i class="fa-solid fa-lock" style="color: #facc15;"></i> 平台管理员密码 (Password)
+                </label>
+                <div style="position: relative; display: flex; align-items: center;">
+                  <input type="password" id="cfgBotPass" class="form-control" style="width: 100%; padding: 0.65rem 2.5rem 0.65rem 0.9rem;" placeholder="输入对接平台的登录密码" required>
+                  <button type="button" class="btn-action" style="position: absolute; right: 6px; padding: 0.3rem 0.5rem; border: none; background: transparent;" onclick="toggleBotPassVisibility()">
+                    <i class="fa-regular fa-eye" id="toggleBotPassIcon" style="color: var(--text-muted);"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- 操作按钮组 -->
+            <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.25rem;">
+              <button type="submit" id="saveBotConfigBtn" class="btn-primary" style="background: linear-gradient(135deg, #a855f7, #6366f1); padding: 0.65rem 1.5rem;">
+                <i class="fa-solid fa-floppy-disk"></i> 保存对接配置
+              </button>
+              <button type="button" id="testBotConfigBtn" class="btn-action btn-purple" style="padding: 0.65rem 1.25rem;" onclick="handleTestBotConfig()">
+                <span class="spinner" id="testConfigSpinner" style="display: none; width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;"></span>
+                <i class="fa-solid fa-network-wired" id="testConfigIcon"></i> 测试连通性与鉴权
+              </button>
+            </div>
+          </form>
+
+          <!-- 测试结果与当前连通状态反馈 -->
+          <div id="testResultBox" style="display: none; padding: 1rem 1.25rem; border-radius: 10px; font-size: 0.88rem; margin-top: 1rem;"></div>
         </div>
       </div>
     </div>
@@ -757,9 +839,11 @@
       document.getElementById('tabBtnInstances').classList.remove('active');
       document.getElementById('tabBtnBots').classList.remove('active');
       document.getElementById('tabBtnCdks').classList.remove('active');
+      document.getElementById('tabBtnBotConfig').classList.remove('active');
       document.getElementById('tabContentInstances').style.display = 'none';
       document.getElementById('tabContentBots').style.display = 'none';
       document.getElementById('tabContentCdks').style.display = 'none';
+      document.getElementById('tabContentBotConfig').style.display = 'none';
 
       if (tab === 'instances') {
         document.getElementById('tabBtnInstances').classList.add('active');
@@ -769,10 +853,14 @@
         document.getElementById('tabBtnBots').classList.add('active');
         document.getElementById('tabContentBots').style.display = 'block';
         loadBots();
-      } else {
+      } else if (tab === 'cdks') {
         document.getElementById('tabBtnCdks').classList.add('active');
         document.getElementById('tabContentCdks').style.display = 'block';
         loadCdks();
+      } else if (tab === 'bot_config') {
+        document.getElementById('tabBtnBotConfig').classList.add('active');
+        document.getElementById('tabContentBotConfig').style.display = 'block';
+        loadBotConfig();
       }
     }
 
@@ -1137,6 +1225,136 @@
 
     function closeLogsModal() {
       document.getElementById('logsModal').style.display = 'none';
+    }
+
+    // --- 音乐机器人对接配置管理 ---
+
+    function toggleBotPassVisibility() {
+      const passInput = document.getElementById('cfgBotPass');
+      const icon = document.getElementById('toggleBotPassIcon');
+      if (passInput.type === 'password') {
+        passInput.type = 'text';
+        icon.className = 'fa-regular fa-eye-slash';
+      } else {
+        passInput.type = 'password';
+        icon.className = 'fa-regular fa-eye';
+      }
+    }
+
+    async function loadBotConfig() {
+      const resultBox = document.getElementById('testResultBox');
+      resultBox.style.display = 'none';
+      try {
+        const res = await fetch('/api/admin/bot-config', {
+          headers: { 'X-Admin-Password': adminToken }
+        });
+        const data = await res.json();
+        if (data.success && data.config) {
+          document.getElementById('cfgBotUrl').value = data.config.url || '';
+          document.getElementById('cfgBotUser').value = data.config.user || '';
+          document.getElementById('cfgBotPass').value = data.config.password || '';
+        }
+      } catch (e) {
+        showToast('读取机器人平台配置失败', 'error');
+      }
+    }
+
+    async function handleSaveBotConfig(e) {
+      e.preventDefault();
+      const url = document.getElementById('cfgBotUrl').value.trim();
+      const user = document.getElementById('cfgBotUser').value.trim();
+      const password = document.getElementById('cfgBotPass').value.trim();
+
+      if (!url || !user || !password) {
+        showToast('请完整填写网站地址、账号和密码', 'error');
+        return;
+      }
+
+      const saveBtn = document.getElementById('saveBotConfigBtn');
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在保存...';
+
+      try {
+        const res = await fetch('/api/admin/bot-config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify({ url, user, password })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('🎉 对接配置保存成功并已即时生效！', 'success');
+          loadStats();
+        } else {
+          showToast(data.message || data.detail || '保存失败', 'error');
+        }
+      } catch (err) {
+        showToast('请求异常，保存失败', 'error');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> 保存对接配置';
+      }
+    }
+
+    async function handleTestBotConfig() {
+      const url = document.getElementById('cfgBotUrl').value.trim();
+      const user = document.getElementById('cfgBotUser').value.trim();
+      const password = document.getElementById('cfgBotPass').value.trim();
+
+      if (!url || !user || !password) {
+        showToast('请先输入网站地址、账号和密码后再测试', 'error');
+        return;
+      }
+
+      const testBtn = document.getElementById('testBotConfigBtn');
+      const spinner = document.getElementById('testConfigSpinner');
+      const icon = document.getElementById('testConfigIcon');
+      const resultBox = document.getElementById('testResultBox');
+
+      testBtn.disabled = true;
+      spinner.style.display = 'inline-block';
+      icon.style.display = 'none';
+      resultBox.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/admin/bot-config/test', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify({ url, user, password })
+        });
+        const data = await res.json();
+
+        resultBox.style.display = 'block';
+        if (data.success) {
+          resultBox.style.background = 'rgba(16, 185, 129, 0.15)';
+          resultBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+          resultBox.style.color = '#34d399';
+          resultBox.innerHTML = `<i class="fa-solid fa-circle-check" style="font-size: 1.1rem; margin-right: 6px;"></i> <strong>测试成功：</strong>${data.message}`;
+          showToast('对接平台连接与鉴权测试通过！', 'success');
+        } else {
+          resultBox.style.background = 'rgba(239, 68, 68, 0.15)';
+          resultBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+          resultBox.style.color = '#f87171';
+          resultBox.innerHTML = `<i class="fa-solid fa-circle-xmark" style="font-size: 1.1rem; margin-right: 6px;"></i> <strong>测试失败：</strong>${data.message || data.detail || '无法连接到该机器人平台'}`;
+          showToast('连通性测试失败，请检查配置', 'error');
+        }
+      } catch (err) {
+        resultBox.style.display = 'block';
+        resultBox.style.background = 'rgba(239, 68, 68, 0.15)';
+        resultBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+        resultBox.style.color = '#f87171';
+        resultBox.innerHTML = `<i class="fa-solid fa-circle-xmark" style="font-size: 1.1rem; margin-right: 6px;"></i> <strong>请求异常：</strong>网络请求失败，请检查服务器网络与后台日志`;
+        showToast('测试请求异常', 'error');
+      } finally {
+        testBtn.disabled = false;
+        spinner.style.display = 'none';
+        icon.style.display = 'inline-block';
+      }
     }
   </script>
 </body>

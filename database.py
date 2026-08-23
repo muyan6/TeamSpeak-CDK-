@@ -124,6 +124,30 @@ def get_admin_password() -> str:
 def set_admin_password(new_password: str):
     set_setting("admin_password", new_password.strip())
 
+def get_bot_config() -> Dict[str, str]:
+    from config import BOT_PANEL_URL, BOT_PANEL_USER, BOT_PANEL_PASS
+    url = get_setting("bot_panel_url", BOT_PANEL_URL) or BOT_PANEL_URL
+    user = get_setting("bot_panel_user", BOT_PANEL_USER) or BOT_PANEL_USER
+    pwd = get_setting("bot_panel_pass", BOT_PANEL_PASS) or BOT_PANEL_PASS
+    return {
+        "bot_panel_url": url.rstrip("/"),
+        "bot_panel_user": user,
+        "bot_panel_pass": pwd
+    }
+
+def set_bot_config(url: str, user: str, password: str) -> Dict[str, str]:
+    cleaned_url = url.strip().rstrip("/")
+    cleaned_user = user.strip()
+    cleaned_pass = password.strip()
+    set_setting("bot_panel_url", cleaned_url)
+    set_setting("bot_panel_user", cleaned_user)
+    set_setting("bot_panel_pass", cleaned_pass)
+    return {
+        "bot_panel_url": cleaned_url,
+        "bot_panel_user": cleaned_user,
+        "bot_panel_pass": cleaned_pass
+    }
+
 # --- CDK 管理 ---
 
 def generate_random_cdk(prefix: str = "TS-", length: int = 12) -> str:

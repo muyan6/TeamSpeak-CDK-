@@ -205,5 +205,62 @@ class TestTeamSpeakManager(unittest.TestCase):
         database.set_admin_password(default_pwd)
         self.assertEqual(database.get_admin_password(), default_pwd)
 
+    def test_bot_config_management(self):
+        # 1. 初始读取默认配置
+        cfg = database.get_bot_config()
+        self.assertIn("bot_panel_url", cfg)
+        self.assertIn("bot_panel_user", cfg)
+        self.assertIn("bot_panel_pass", cfg)
+
+        # 2. 修改配置
+        new_url = "http://127.0.0.1:23467"
+        new_user = "test_admin"
+        new_pass = "TestPass123"
+        database.set_bot_config(new_url, new_user, new_pass)
+
+        updated_cfg = database.get_bot_config()
+        self.assertEqual(updated_cfg["bot_panel_url"], new_url)
+        self.assertEqual(updated_cfg["bot_panel_user"], new_user)
+        self.assertEqual(updated_cfg["bot_panel_pass"], new_pass)
+
+        # 3. 恢复配置
+        database.set_bot_config(cfg["bot_panel_url"], cfg["bot_panel_user"], cfg["bot_panel_pass"])
+
+    def test_music_bot_test_connection(self):
+        # 1. 正常连接测试（测试当前在线机器人平台）
+        cfg = database.get_bot_config()
+        ok, msg, data = music_bot_client.test_connection(cfg["bot_panel_url"], cfg["bot_panel_user"], cfg["bot_panel_pass"])
+        self.assertTrue(ok)
+        self.assertIn("bot_count", data)
+
+        # 2. 错误密码测试
+        ok_fail, msg_fail, _ = music_bot_client.test_connection(cfg["bot_panel_url"], cfg["bot_panel_user"], "WrongPasswordXYZ")
+        self.assertFalse(ok_fail)
+        self.assertIn("鉴权失败", msg_fail)
+
+        # 3. 错误 URL 测试
+        ok_inv, msg_inv, _ = music_bot_client.test_connection("not_a_valid_url", "user", "pass")
+        self.assertFalse(ok_inv)
+
+    def test_bot_config_client_sync_and_persistence(self):
+        # 1. 验证修改配置与持久化
+        saved = database.set_bot_config("http://127.0.0.1:9999/", "new_admin", "new_password")
+        self.assertEqual(saved["bot_panel_url"], "http://127.0.0.1:9999")
+        self.assertEqual(saved["bot_panel_user"], "new_admin")
+        self.assertEqual(saved["bot_panel_pass"], "new_password")
+
+        # 2. 验证 MusicBotClient 同步机制
+        music_bot_client.reload_config()
+        self.assertEqual(music_bot_client.base_url, "http://127.0.0.1:9999")
+        self.assertEqual(music_bot_client.username, "new_admin")
+        self.assertEqual(music_bot_client.password, "new_password")
+
+        # 3. 恢复配置
+        database.set_bot_config("http://103.71.69.156:23467", "huasjj", "Fanxing6")
+        music_bot_client.reload_config()
+        self.assertEqual(music_bot_client.base_url, "http://103.71.69.156:23467")
+        self.assertEqual(music_bot_client.username, "huasjj")
+        self.assertEqual(music_bot_client.password, "Fanxing6")
+
 if __name__ == "__main__":
     unittest.main()

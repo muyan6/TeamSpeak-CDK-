@@ -34,7 +34,9 @@ from database import (
     get_expired_active_bots,
     renew_bot_instance,
     get_admin_password,
-    set_admin_password
+    set_admin_password,
+    get_bot_config,
+    set_bot_config
 )
 from port_manager import allocate_ports_for_instance
 from docker_service import (
@@ -83,7 +85,7 @@ async def lifespan(app: FastAPI):
 
     print(f"[*] TeamSpeak 管理服务已启动，监听端口: {config.SERVER_PORT}")
     print(f"[*] 数据存储根目录: {config.DATA_BASE_DIR}")
-    print(f"[*] 音乐机器人对接中心: {config.BOT_PANEL_URL}")
+    print(f"[*] 音乐机器人对接中心: {get_bot_config()['bot_panel_url']}")
     
     # 启动到期自动停机监控后台任务
     checker_task = asyncio.create_task(bot_expiry_checker())
@@ -142,6 +144,16 @@ class ChangePasswordRequest(BaseModel):
     old_password: str
     new_password: str
 
+class BotConfigRequest(BaseModel):
+    url: str
+    user: str
+    password: str
+
+class TestBotConfigRequest(BaseModel):
+    url: Optional[str] = None
+    user: Optional[str] = None
+    password: Optional[str] = None
+
 # --- 权限校验依赖 ---
 
 def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
@@ -196,7 +208,7 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                     "type": "music_bot",
                     "message": f"该音乐机器人 CDK 已于 {cdk_info['used_at']} 激活",
                     "instance": bot,
-                    "bot_panel_url": config.BOT_PANEL_URL
+                    "bot_panel_url": get_bot_config()["bot_panel_url"]
                 }
 
         # 未使用：返回需要前端填写机器人连接配置
@@ -345,7 +357,7 @@ def redeem_bot_instance(req: RedeemBotRequest):
         "type": "music_bot",
         "message": f"🎉 音乐机器人已成功创建并对接！到期时间: {expire_at}",
         "instance": bot_inst,
-        "bot_panel_url": config.BOT_PANEL_URL
+        "bot_panel_url": get_bot_config()["bot_panel_url"]
     }
 
 @app.post("/api/bot-instances/{bot_id}/action")
@@ -422,7 +434,7 @@ def renew_bot_endpoint(req: RenewBotRequest):
         "type": "music_bot",
         "message": f"🎉 续费成功！机器人有效期已顺延至: {renewed_bot['expire_at']}",
         "instance": renewed_bot,
-        "bot_panel_url": config.BOT_PANEL_URL
+        "bot_panel_url": get_bot_config()["bot_panel_url"]
     }
 
 # --- 管理员 API ---
@@ -445,7 +457,7 @@ def get_system_status(_: bool = Depends(verify_admin)):
         "unused_cdks": len([c for c in cdks if c["status"] == "unused"]),
         "voice_ports_summary": port_range_str,
         "data_base_dir": config.DATA_BASE_DIR,
-        "bot_panel_url": config.BOT_PANEL_URL
+        "bot_panel_url": get_bot_config()["bot_panel_url"]
     }
 
 @app.get("/api/admin/instances")
@@ -487,7 +499,7 @@ def list_admin_bots(_: bool = Depends(verify_admin)):
             bot["days_left"] = "永久"
             bot["is_expired"] = False
 
-    return {"success": True, "bots": bots, "bot_panel_url": config.BOT_PANEL_URL}
+    return {"success": True, "bots": bots, "bot_panel_url": get_bot_config()["bot_panel_url"]}
 
 @app.post("/api/admin/bots/{bot_id}/action")
 def manage_admin_bot(bot_id: str, req: BotActionRequest, _: bool = Depends(verify_admin)):
@@ -627,6 +639,66 @@ def change_admin_password_api(req: ChangePasswordRequest, _: bool = Depends(veri
 
     set_admin_password(new_pwd)
     return {"success": True, "message": "管理员密码修改成功！请使用新密码重新登录"}
+
+@app.get("/api/admin/bot-config")
+def get_bot_config_api(_: bool = Depends(verify_admin)):
+    cfg = get_bot_config()
+    return {
+        "success": True,
+        "config": {
+            "url": cfg["bot_panel_url"],
+            "user": cfg["bot_panel_user"],
+            "password": cfg["bot_panel_pass"]
+        }
+    }
+
+@app.post("/api/admin/bot-config")
+def update_bot_config_api(req: BotConfigRequest, _: bool = Depends(verify_admin)):
+    url = req.url.strip()
+    user = req.user.strip()
+    password = req.password.strip()
+
+    if not url:
+        raise HTTPException(status_code=400, detail="机器人网站地址 (URL) 不能为空")
+    if not url.startswith("http://") and not url.startswith("https://"):
+        raise HTTPException(status_code=400, detail="网站地址格式不正确，必须以 http:// 或 https:// 开头")
+    if not user:
+        raise HTTPException(status_code=400, detail="管理员登录账号不能为空")
+    if not password:
+        raise HTTPException(status_code=400, detail="管理员登录密码不能为空")
+
+    saved_cfg = set_bot_config(url, user, password)
+    music_bot_client.update_config(saved_cfg["bot_panel_url"], saved_cfg["bot_panel_user"], saved_cfg["bot_panel_pass"])
+
+    return {
+        "success": True,
+        "message": "音乐机器人平台对接配置已成功保存并即时生效！",
+        "config": {
+            "url": saved_cfg["bot_panel_url"],
+            "user": saved_cfg["bot_panel_user"],
+            "password": saved_cfg["bot_panel_pass"]
+        }
+    }
+
+@app.post("/api/admin/bot-config/test")
+def test_bot_config_api(req: Optional[TestBotConfigRequest] = None, _: bool = Depends(verify_admin)):
+    url = req.url if req else None
+    user = req.user if req else None
+    password = req.password if req else None
+
+    ok, msg, data = music_bot_client.test_connection(url, user, password)
+    if ok:
+        return {
+            "success": True,
+            "message": msg,
+            "data": data
+        }
+    else:
+        return JSONResponse(status_code=400, content={
+            "success": False,
+            "message": msg,
+            "data": data
+        })
 
 if __name__ == "__main__":
     import uvicorn
