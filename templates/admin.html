@@ -293,6 +293,74 @@
       border-color: #60a5fa;
     }
 
+    /* CDK Grouping & Filter Styles */
+    .cdk-filter-group {
+      display: inline-flex;
+      background: rgba(15, 23, 42, 0.6);
+      padding: 0.25rem;
+      border-radius: 10px;
+      border: 1px solid var(--border-color);
+      gap: 0.25rem;
+    }
+    .cdk-filter-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      padding: 0.42rem 0.85rem;
+      border-radius: 7px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+    .cdk-filter-btn:hover {
+      color: #fff;
+      background: rgba(255, 255, 255, 0.06);
+    }
+    .cdk-filter-btn.active {
+      background: rgba(59, 130, 246, 0.25);
+      color: #60a5fa;
+      border: 1px solid rgba(59, 130, 246, 0.4);
+      box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
+    }
+    .cdk-filter-btn.active.btn-filter-unused {
+      background: rgba(16, 185, 129, 0.22);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.45);
+      box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
+    }
+    .cdk-filter-btn.active.btn-filter-used {
+      background: rgba(245, 158, 11, 0.22);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.45);
+      box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);
+    }
+    .filter-count {
+      display: inline-block;
+      padding: 0.1rem 0.45rem;
+      border-radius: 999px;
+      font-size: 0.75rem;
+      background: rgba(255, 255, 255, 0.1);
+      color: #cbd5e1;
+      font-weight: 700;
+    }
+    .cdk-filter-btn.active .filter-count {
+      background: rgba(255, 255, 255, 0.22);
+      color: #fff;
+    }
+    .count-unused-badge {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+    }
+    .count-used-badge {
+      background: rgba(245, 158, 11, 0.2);
+      color: #fbbf24;
+    }
+
     /* Floating Toast */
     #toastContainer {
       position: fixed;
@@ -544,17 +612,43 @@
           </div>
         </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.75rem;">
-          <h3 style="font-size: 1.15rem; font-weight: 700;"><i class="fa-solid fa-list-check"></i> CDK 激活码清单</h3>
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.85rem;">
+          <!-- 分组切换与辅助筛选 -->
+          <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
+            <!-- 状态分组 Tabs -->
+            <div class="cdk-filter-group">
+              <button class="cdk-filter-btn active" id="cdkFilterAll" onclick="setCdkStatusFilter('all')">
+                <i class="fa-solid fa-layer-group"></i> 全部 CDK <span class="filter-count" id="countCdkAll">0</span>
+              </button>
+              <button class="cdk-filter-btn btn-filter-unused" id="cdkFilterUnused" onclick="setCdkStatusFilter('unused')">
+                <i class="fa-solid fa-circle-check" style="color: #34d399;"></i> 未使用 <span class="filter-count count-unused-badge" id="countCdkUnused">0</span>
+              </button>
+              <button class="cdk-filter-btn btn-filter-used" id="cdkFilterUsed" onclick="setCdkStatusFilter('used')">
+                <i class="fa-solid fa-clock-rotate-left" style="color: #fbbf24;"></i> 已使用 <span class="filter-count count-used-badge" id="countCdkUsed">0</span>
+              </button>
+            </div>
+
+            <!-- 类型细分筛选 -->
+            <select id="cdkTypeFilter" class="form-control" onchange="applyCdkFilters()" style="padding: 0.42rem 0.75rem; font-size: 0.85rem;">
+              <option value="all">所有类型</option>
+              <option value="teamspeak">TS 语音服务器</option>
+              <option value="music_bot">音乐机器人</option>
+            </select>
+
+            <!-- 搜索框 -->
+            <div style="position: relative;">
+              <input type="text" id="cdkSearchInput" class="form-control" placeholder="搜索卡密 / 备注..." oninput="applyCdkFilters()" style="padding: 0.42rem 0.75rem 0.42rem 2rem; font-size: 0.85rem; width: 170px;">
+              <i class="fa-solid fa-magnifying-glass" style="position: absolute; left: 0.65rem; top: 50%; transform: translateY(-50%); color: var(--text-muted); font-size: 0.8rem;"></i>
+            </div>
+          </div>
+
+          <!-- 操作按钮组 -->
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-            <button class="btn-action" style="background: rgba(59, 130, 246, 0.2); border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;" onclick="downloadCdksTxt('unused')">
-              <i class="fa-solid fa-file-arrow-down"></i> 导出未使用 (.txt)
+            <button class="btn-action" style="background: rgba(59, 130, 246, 0.2); border-color: rgba(59, 130, 246, 0.4); color: #93c5fd;" onclick="exportCurrentCdksTxt()">
+              <i class="fa-solid fa-file-arrow-down"></i> 导出当前列表 (.txt)
             </button>
-            <button class="btn-action" onclick="downloadCdksTxt('all')">
-              <i class="fa-solid fa-file-lines"></i> 导出全部 (.txt)
-            </button>
-            <button class="btn-action" onclick="copyUnusedCdks()">
-              <i class="fa-regular fa-copy"></i> 复制未使用
+            <button class="btn-action" onclick="copyCurrentCdks()">
+              <i class="fa-regular fa-copy"></i> 复制当前卡密
             </button>
             <button class="btn-action" onclick="loadCdks()">
               <i class="fa-solid fa-rotate"></i> 刷新
@@ -571,7 +665,7 @@
                 <th>使用状态</th>
                 <th>绑定对象</th>
                 <th>备注信息</th>
-                <th>生成时间</th>
+                <th>时间信息</th>
                 <th style="text-align: right;">操作</th>
               </tr>
             </thead>
@@ -1018,6 +1112,115 @@
       }
     }
 
+    let currentCdkStatusFilter = 'all'; // 'all', 'unused', 'used'
+    let currentFilteredCdks = [];
+
+    function setCdkStatusFilter(status) {
+      currentCdkStatusFilter = status;
+      const btnAll = document.getElementById('cdkFilterAll');
+      const btnUnused = document.getElementById('cdkFilterUnused');
+      const btnUsed = document.getElementById('cdkFilterUsed');
+      if (btnAll) btnAll.classList.toggle('active', status === 'all');
+      if (btnUnused) btnUnused.classList.toggle('active', status === 'unused');
+      if (btnUsed) btnUsed.classList.toggle('active', status === 'used');
+      applyCdkFilters();
+    }
+
+    function applyCdkFilters() {
+      if (!window._allCdks) return;
+      const typeEl = document.getElementById('cdkTypeFilter');
+      const searchEl = document.getElementById('cdkSearchInput');
+      const typeVal = typeEl ? typeEl.value : 'all';
+      const searchVal = searchEl ? searchEl.value.trim().toLowerCase() : '';
+
+      currentFilteredCdks = window._allCdks.filter(c => {
+        // 1. 状态分组筛选
+        if (currentCdkStatusFilter !== 'all') {
+          if (c.status !== currentCdkStatusFilter) return false;
+        }
+        // 2. 类型筛选
+        if (typeVal !== 'all') {
+          if (c.cdk_type !== typeVal) return false;
+        }
+        // 3. 关键字搜索
+        if (searchVal) {
+          const matchCode = (c.code || '').toLowerCase().includes(searchVal);
+          const matchRemark = (c.remark || '').toLowerCase().includes(searchVal);
+          const matchInstance = c.instance_id && (`ts${c.instance_id}`.toLowerCase().includes(searchVal));
+          const matchBot = c.bot_id && (c.bot_id.toLowerCase().includes(searchVal));
+          if (!matchCode && !matchRemark && !matchInstance && !matchBot) return false;
+        }
+        return true;
+      });
+
+      renderCdksTable(currentFilteredCdks);
+    }
+
+    function renderCdksTable(cdks) {
+      const tbody = document.getElementById('cdksTableBody');
+      if (!cdks || cdks.length === 0) {
+        let emptyDesc = '暂无 CDK 数据';
+        if (currentCdkStatusFilter === 'unused') emptyDesc = '暂无未使用的 CDK 激活码';
+        else if (currentCdkStatusFilter === 'used') emptyDesc = '暂无已使用的 CDK 激活码';
+        tbody.innerHTML = `<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2.5rem 1rem;">
+          <div style="font-size: 1.5rem; margin-bottom: 0.5rem; opacity: 0.4;"><i class="fa-solid fa-inbox"></i></div>
+          <div>${emptyDesc}</div>
+        </td></tr>`;
+        return;
+      }
+
+      tbody.innerHTML = cdks.map(c => {
+        const isUsed = c.status === 'used';
+        const isUnused = c.status === 'unused';
+
+        let statusBadge = '';
+        if (isUnused) {
+          statusBadge = '<span class="badge badge-success"><i class="fa-solid fa-circle-check"></i> 未使用</span>';
+        } else if (isUsed) {
+          statusBadge = '<span class="badge badge-warning"><i class="fa-solid fa-clock-rotate-left"></i> 已激活使用</span>';
+        } else {
+          statusBadge = '<span class="badge badge-danger"><i class="fa-solid fa-ban"></i> 已禁用</span>';
+        }
+
+        let boundTarget = '<span style="color:var(--text-muted)">-</span>';
+        if (c.instance_id) {
+          boundTarget = `<strong style="color:#60a5fa"><i class="fa-solid fa-server" style="font-size: 0.75rem;"></i> ts${c.instance_id}</strong>`;
+        } else if (c.bot_id) {
+          boundTarget = `<strong style="color:#c084fc"><i class="fa-solid fa-robot" style="font-size: 0.75rem;"></i> 音乐机器人</strong>`;
+        }
+
+        let timeHtml = `<div style="font-size: 0.78rem; color: var(--text-muted);" title="生成时间"><i class="fa-regular fa-clock" style="font-size: 0.72rem;"></i> 生成: ${c.created_at || '-'}</div>`;
+        if (c.used_at) {
+          timeHtml += `<div style="font-size: 0.78rem; color: #fbbf24; margin-top: 3px;" title="兑换使用时间"><i class="fa-solid fa-bolt" style="font-size: 0.72rem;"></i> 使用: ${c.used_at}</div>`;
+        }
+
+        return `
+          <tr>
+            <td>
+              <div style="display: flex; align-items: center; gap: 0.35rem;">
+                <code style="font-size: 0.92rem; font-weight: 700; color: #38bdf8;">${c.code}</code>
+                <button class="btn-action btn-action-sm" title="复制卡密" onclick="navigator.clipboard.writeText('${c.code}'); showToast('已复制 CDK: ${c.code}', 'success')"><i class="fa-regular fa-copy"></i></button>
+              </div>
+            </td>
+            <td>
+              <span class="badge ${c.cdk_type === 'music_bot' ? 'badge-purple' : 'badge-info'}">
+                ${c.cdk_type === 'music_bot' ? ('音乐机器人 · ' + (c.duration_months ? c.duration_months + '个月' : '永久')) : 'TS 语音服务器'}
+              </span>
+            </td>
+            <td>${statusBadge}</td>
+            <td>${boundTarget}</td>
+            <td style="color: #cbd5e1; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${c.remark || ''}">
+              ${c.remark || '<span style="color:var(--text-muted)">-</span>'}
+            </td>
+            <td>${timeHtml}</td>
+            <td style="text-align: right;">
+              <button class="btn-action btn-action-sm btn-danger" onclick="deleteCdk('${c.code}')"><i class="fa-solid fa-trash"></i> 删除</button>
+            </td>
+          </tr>
+        `;
+      }).join('');
+    }
+
     async function loadCdks() {
       const tbody = document.getElementById('cdksTableBody');
       tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
@@ -1026,39 +1229,30 @@
           headers: { 'X-Admin-Password': adminToken }
         });
         const data = await res.json();
-        if (!data.success || data.cdks.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无 CDK 数据</td></tr>';
+        if (!data.success) {
+          tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
           return;
         }
 
-        window._allCdks = data.cdks;
+        const cdks = data.cdks || [];
+        window._allCdks = cdks;
 
-        tbody.innerHTML = data.cdks.map(c => `
-          <tr>
-            <td>
-              <code style="font-size: 0.95rem; font-weight: 700; color: #38bdf8;">${c.code}</code>
-              <button class="btn-action btn-action-sm" style="margin-left: 0.4rem;" onclick="navigator.clipboard.writeText('${c.code}'); showToast('已复制 CDK', 'success')"><i class="fa-regular fa-copy"></i></button>
-            </td>
-            <td>
-              <span class="badge ${c.cdk_type === 'music_bot' ? 'badge-purple' : 'badge-info'}">
-                ${c.cdk_type === 'music_bot' ? ('音乐机器人 · ' + (c.duration_months ? c.duration_months + '个月' : '永久')) : 'TS服务器'}
-              </span>
-            </td>
-            <td>
-              <span class="badge ${c.status === 'unused' ? 'badge-success' : (c.status === 'used' ? 'badge-warning' : 'badge-danger')}">
-                ${c.status === 'unused' ? '未使用' : (c.status === 'used' ? '已激活使用' : '已禁用')}
-              </span>
-            </td>
-            <td>${c.instance_id ? `<strong style="color:#60a5fa">ts${c.instance_id}</strong>` : (c.bot_id ? `<strong style="color:#c084fc">机器人</strong>` : '<span style="color:var(--text-muted)">-</span>')}</td>
-            <td style="color: #cbd5e1;">${c.remark || '<span style="color:var(--text-muted)">无</span>'}</td>
-            <td style="font-size: 0.8rem; color: var(--text-muted);">${c.created_at}</td>
-            <td style="text-align: right;">
-              <button class="btn-action btn-action-sm btn-danger" onclick="deleteCdk('${c.code}')"><i class="fa-solid fa-trash"></i> 删除</button>
-            </td>
-          </tr>
-        `).join('');
+        // 更新各分组统计数量角标
+        const totalCount = cdks.length;
+        const unusedCount = cdks.filter(c => c.status === 'unused').length;
+        const usedCount = cdks.filter(c => c.status === 'used').length;
+
+        const countAllEl = document.getElementById('countCdkAll');
+        const countUnusedEl = document.getElementById('countCdkUnused');
+        const countUsedEl = document.getElementById('countCdkUsed');
+
+        if (countAllEl) countAllEl.innerText = totalCount;
+        if (countUnusedEl) countUnusedEl.innerText = unusedCount;
+        if (countUsedEl) countUsedEl.innerText = usedCount;
+
+        applyCdkFilters();
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="7" style="text-align: center; color: #f87171; padding: 2rem;">加载异常</td></tr>';
       }
     }
 
@@ -1110,6 +1304,27 @@
       URL.revokeObjectURL(url);
     }
 
+    function exportCurrentCdksTxt() {
+      const list = currentFilteredCdks && currentFilteredCdks.length > 0 ? currentFilteredCdks : (window._allCdks || []);
+      if (list.length === 0) {
+        showToast('当前筛选条件下没有可导出的 CDK', 'error');
+        return;
+      }
+      const dateStr = new Date().toISOString().slice(0, 10);
+      const groupLabel = currentCdkStatusFilter === 'unused' ? 'unused' : (currentCdkStatusFilter === 'used' ? 'used' : 'all');
+      const filename = `ts_cdks_${groupLabel}_${dateStr}.txt`;
+      
+      const text = list.map(c => {
+        if (c.status === 'unused') {
+          return `${c.code}\t类型: ${c.cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器'}\t备注: ${c.remark || '无'}\t生成时间: ${c.created_at}`;
+        }
+        return `${c.code}\t类型: ${c.cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器'}\t状态: ${c.status === 'used' ? '已使用' : c.status}\t绑定: ${c.instance_id ? 'ts'+c.instance_id : (c.bot_id || '-')}\t生成时间: ${c.created_at}\t使用时间: ${c.used_at || '-'}\t备注: ${c.remark || '无'}`;
+      }).join('\n');
+
+      downloadTextFile(filename, text);
+      showToast(`已成功导出 ${list.length} 个 CDK 文本文件！`, 'success');
+    }
+
     function downloadCdksTxt(type) {
       if (!window._allCdks || window._allCdks.length === 0) {
         showToast('当前没有可导出的 CDK 数据', 'error');
@@ -1141,6 +1356,31 @@
       showToast(`已成功导出 ${filtered.length} 个 CDK 文本文件！`, 'success');
     }
 
+    function copyCurrentCdks() {
+      const list = currentFilteredCdks && currentFilteredCdks.length > 0 ? currentFilteredCdks : (window._allCdks || []);
+      if (list.length === 0) {
+        showToast('当前筛选列表中没有卡密可复制', 'error');
+        return;
+      }
+      const text = list.map(c => c.code).join('\n');
+      navigator.clipboard.writeText(text).then(() => {
+        showToast(`已复制当前列表的 ${list.length} 个卡密到剪贴板！`, 'success');
+      });
+    }
+
+    function copyUnusedCdks() {
+      if (!window._allCdks) return;
+      const unused = window._allCdks.filter(c => c.status === 'unused').map(c => c.code);
+      if (unused.length === 0) {
+        showToast('没有未使用的 CDK 可复制', 'error');
+        return;
+      }
+      const text = unused.join('\n');
+      navigator.clipboard.writeText(text).then(() => {
+        showToast(`已复制 ${unused.length} 个未使用的 CDK 到剪贴板！`, 'success');
+      });
+    }
+
     async function deleteCdk(code) {
       if (!confirm(`确定要删除 CDK: ${code} 吗？`)) return;
       try {
@@ -1157,19 +1397,6 @@
       } catch (e) {
         showToast('删除失败', 'error');
       }
-    }
-
-    function copyUnusedCdks() {
-      if (!window._allCdks) return;
-      const unused = window._allCdks.filter(c => c.status === 'unused').map(c => c.code);
-      if (unused.length === 0) {
-        showToast('没有未使用的 CDK 可复制', 'error');
-        return;
-      }
-      const text = unused.join('\n');
-      navigator.clipboard.writeText(text).then(() => {
-        showToast(`已复制 ${unused.length} 个未使用的 CDK 到剪贴板！`, 'success');
-      });
     }
 
     async function instanceAction(id, action) {
