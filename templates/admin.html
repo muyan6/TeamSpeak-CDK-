@@ -520,13 +520,15 @@
                 <th>语音端口 (UDP)</th>
                 <th>文件 / 查询端口 (TCP)</th>
                 <th>管理员 Token & Query 凭据</th>
+                <th>到期时间</th>
+                <th>剩余时长</th>
                 <th>容器状态</th>
                 <th>创建时间</th>
                 <th style="text-align: right;">管理操作</th>
               </tr>
             </thead>
             <tbody id="instancesTableBody">
-              <tr><td colspan="8" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
+              <tr><td colspan="10" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
             </tbody>
           </table>
         </div>
@@ -586,7 +588,7 @@
                 <option value="music_bot">TeamSpeak 音乐机器人</option>
               </select>
             </div>
-            <div id="durationSelectGroup" style="display: none;">
+            <div id="durationSelectGroup">
               <label class="info-label" style="display: block; margin-bottom: 0.35rem;">卡密有效时长</label>
               <select id="genDuration" class="form-control" style="width: 100%; color: #facc15;">
                 <option value="1">1 个月 (月卡)</option>
@@ -1044,7 +1046,7 @@
         });
         const data = await res.json();
         if (!data.success || data.instances.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无 TeamSpeak 实例</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无 TeamSpeak 实例</td></tr>';
           return;
         }
 
@@ -1073,8 +1075,14 @@
                 ${inst.query_password ? `<button class="btn-action btn-action-sm" onclick="copyToClipboard('${inst.query_password}', '已复制 Query 密码')"><i class="fa-regular fa-copy"></i></button>` : ''}
               </div>
             </td>
+            <td style="font-size: 0.85rem; color: #facc15;">${inst.expire_at || '永久有效'}</td>
             <td>
-              <span class="badge ${inst.live_status === 'running' ? 'badge-success' : 'badge-warning'}">
+              <span class="badge ${inst.is_expired ? 'badge-danger' : 'badge-success'}">
+                ${inst.is_expired ? '已到期' : (typeof inst.days_left === 'number' ? inst.days_left + ' 天' : inst.days_left)}
+              </span>
+            </td>
+            <td>
+              <span class="badge ${inst.live_status === 'running' ? 'badge-success' : (inst.status === 'expired' ? 'badge-danger' : 'badge-warning')}">
                 <i class="fa-solid ${inst.live_status === 'running' ? 'fa-circle-play' : 'fa-circle-pause'}"></i>
                 ${inst.live_status || inst.status}
               </span>
@@ -1092,7 +1100,7 @@
           </tr>
         `).join('');
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
       }
     }
 
@@ -1257,7 +1265,7 @@
             </td>
             <td>
               <span class="badge ${c.cdk_type === 'music_bot' ? 'badge-purple' : 'badge-info'}">
-                ${c.cdk_type === 'music_bot' ? ('音乐机器人 · ' + (c.duration_months ? c.duration_months + '个月' : '永久')) : 'TS 语音服务器'}
+                ${c.cdk_type === 'music_bot' ? ('音乐机器人 · ' + (c.duration_months ? c.duration_months + '个月' : '永久')) : ('TS 语音服务器 · ' + (c.duration_months ? c.duration_months + '个月' : '永久'))}
               </span>
             </td>
             <td>${statusBadge}</td>
@@ -1313,7 +1321,7 @@
       const count = parseInt(document.getElementById('genCount').value) || 1;
       const remark = document.getElementById('genRemark').value.trim();
       const cdk_type = document.getElementById('genType').value;
-      const duration_months = cdk_type === 'music_bot' ? (parseInt(document.getElementById('genDuration').value) || 0) : 0;
+      const duration_months = parseInt(document.getElementById('genDuration').value) || 0;
 
       try {
         const res = await fetch('/api/admin/cdks/generate', {
@@ -1368,10 +1376,12 @@
       const filename = `ts_cdks_${groupLabel}_${dateStr}.txt`;
       
       const text = list.map(c => {
+        const durStr = c.duration_months ? (c.duration_months + '个月') : '永久';
+        const typeStr = c.cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器';
         if (c.status === 'unused') {
-          return `${c.code}\t类型: ${c.cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器'}\t备注: ${c.remark || '无'}\t生成时间: ${c.created_at}`;
+          return `${c.code}\t类型: ${typeStr}\t时长: ${durStr}\t备注: ${c.remark || '无'}\t生成时间: ${c.created_at}`;
         }
-        return `${c.code}\t类型: ${c.cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器'}\t状态: ${c.status === 'used' ? '已使用' : c.status}\t绑定: ${c.instance_id ? 'ts'+c.instance_id : (c.bot_id || '-')}\t生成时间: ${c.created_at}\t使用时间: ${c.used_at || '-'}\t备注: ${c.remark || '无'}`;
+        return `${c.code}\t类型: ${typeStr}\t时长: ${durStr}\t状态: ${c.status === 'used' ? '已使用' : c.status}\t绑定: ${c.instance_id ? 'ts'+c.instance_id : (c.bot_id || '-')}\t生成时间: ${c.created_at}\t使用时间: ${c.used_at || '-'}\t备注: ${c.remark || '无'}`;
       }).join('\n');
 
       downloadTextFile(filename, text);

@@ -23,6 +23,9 @@ from database import (
     create_instance,
     update_instance_token,
     update_instance_status,
+    update_instance_expiry,
+    get_expired_active_instances,
+    renew_instance,
     delete_instance,
     get_all_used_ports,
     create_bot_instance,
@@ -53,19 +56,27 @@ from firewall_service import auto_open_firewall_ports, open_single_instance_port
 
 from contextlib import asynccontextmanager
 
-async def bot_expiry_checker():
+async def system_expiry_checker():
     """
-    后台守护任务：定期扫描所有已到期的音乐机器人，自动向远程平台发送停止命令并标记状态为 expired
+    后台守护任务：定期扫描所有已到期的音乐机器人和 TeamSpeak 服务器实例，自动停机下线并标记状态为 expired
     """
     while True:
         try:
-            expired_list = get_expired_active_bots()
-            for b in expired_list:
+            # 1. 扫描已到期的音乐机器人
+            expired_bots = get_expired_active_bots()
+            for b in expired_bots:
                 print(f"[*] ⏰ 监测到机器人 [{b['name']}] (ID: {b['bot_id']}) 已到达有效期限 ({b['expire_at']})，正在执行自动停机下线...")
                 music_bot_client.stop_bot(b["bot_id"])
                 update_bot_instance_status(b["bot_id"], "expired")
+
+            # 2. 扫描已到期的 TeamSpeak 语音服务器
+            expired_instances = get_expired_active_instances()
+            for inst in expired_instances:
+                print(f"[*] ⏰ 监测到 TeamSpeak 服务器 [{inst['name']}] (ID: {inst['id']}) 已到达有效期限 ({inst['expire_at']})，正在执行自动停机下线...")
+                stop_instance_container(inst["id"])
+                update_instance_status(inst["id"], "expired")
         except Exception as err:
-            print(f"[Error in bot_expiry_checker]: {err}")
+            print(f"[Error in system_expiry_checker]: {err}")
         await asyncio.sleep(30)
 
 @asynccontextmanager
@@ -88,7 +99,7 @@ async def lifespan(app: FastAPI):
     print(f"[*] 音乐机器人对接中心: {get_bot_config()['bot_panel_url']}")
     
     # 启动到期自动停机监控后台任务
-    checker_task = asyncio.create_task(bot_expiry_checker())
+    checker_task = asyncio.create_task(system_expiry_checker())
     yield
     checker_task.cancel()
 
@@ -139,6 +150,10 @@ class BotActionRequest(BaseModel):
 class RenewBotRequest(BaseModel):
     cdk: str
     bot_id: str
+
+class RenewInstanceRequest(BaseModel):
+    cdk: str
+    instance_id: int
 
 class ChangePasswordRequest(BaseModel):
     old_password: str
@@ -260,6 +275,12 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     query_password = creds.get("query_password", "")
     query_apikey = creds.get("query_apikey", "")
 
+    duration_m = cdk_info.get("duration_months", 0)
+    if duration_m > 0:
+        expire_at = (datetime.now() + timedelta(days=30 * duration_m)).strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        expire_at = "permanent"
+
     # 记录到数据库
     instance = create_instance(
         instance_id=instance_id,
@@ -273,6 +294,9 @@ def redeem_cdk(req: RedeemRequest, request: Request):
         admin_token=admin_token,
         query_password=query_password,
         query_apikey=query_apikey,
+        cdk_code=code,
+        duration_months=duration_m,
+        expire_at=expire_at,
         status="running"
     )
 
@@ -286,10 +310,11 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     except Exception:
         pass
 
+    expire_desc = f"到期时间: {expire_at}" if expire_at != "permanent" else "永久有效"
     return {
         "success": True,
         "type": "teamspeak",
-        "message": f"恭喜！TeamSpeak 服务器 ({name}) 已成功开通并启动！",
+        "message": f"恭喜！TeamSpeak 服务器 ({name}) 已成功开通并启动！({expire_desc})",
         "instance": instance
     }
 
@@ -437,6 +462,40 @@ def renew_bot_endpoint(req: RenewBotRequest):
         "bot_panel_url": get_bot_config()["bot_panel_url"]
     }
 
+@app.post("/api/renew-instance")
+def renew_instance_endpoint(req: RenewInstanceRequest):
+    code = req.cdk.strip().upper()
+    cdk_info = get_cdk(code)
+    if not cdk_info:
+        return JSONResponse(status_code=400, content={"success": False, "message": "CDK 无效或不存在"})
+
+    if cdk_info["status"] != "unused":
+        return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 已经使用或不可用"})
+
+    if cdk_info.get("cdk_type") != "teamspeak":
+        return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 不是 TeamSpeak 服务器兑换码"})
+
+    instance = get_instance_by_id(req.instance_id)
+    if not instance:
+        return JSONResponse(status_code=404, content={"success": False, "message": "未找到要续费的 TeamSpeak 实例"})
+
+    add_m = cdk_info.get("duration_months", 0)
+    renewed_inst = renew_instance(req.instance_id, add_m)
+    bind_cdk_instance(code, req.instance_id)
+
+    # 尝试重新拉起/启动 TS 容器
+    start_instance_container(req.instance_id)
+
+    client_host = config.PUBLIC_SERVER_IP or "127.0.0.1"
+    renewed_inst["public_host"] = client_host
+
+    return {
+        "success": True,
+        "type": "teamspeak",
+        "message": f"🎉 续费成功！TeamSpeak 服务器有效期已顺延至: {renewed_inst['expire_at']}",
+        "instance": renewed_inst
+    }
+
 # --- 管理员 API ---
 
 @app.get("/api/admin/system-status")
@@ -463,9 +522,22 @@ def get_system_status(_: bool = Depends(verify_admin)):
 @app.get("/api/admin/instances")
 def list_instances(_: bool = Depends(verify_admin)):
     instances = get_all_instances()
-    # 动态探测 Docker 实际状态
+    now_dt = datetime.now()
+    # 动态探测 Docker 实际状态与到期天数
     for inst in instances:
         inst["live_status"] = get_container_status(inst["id"])
+        if inst.get("expire_at") and inst["expire_at"] != "permanent":
+            try:
+                exp_dt = datetime.strptime(inst["expire_at"], "%Y-%m-%d %H:%M:%S")
+                delta = exp_dt - now_dt
+                inst["days_left"] = max(0, delta.days)
+                inst["is_expired"] = delta.total_seconds() < 0
+            except Exception:
+                inst["days_left"] = 0
+                inst["is_expired"] = False
+        else:
+            inst["days_left"] = "永久"
+            inst["is_expired"] = False
     return {"success": True, "instances": instances}
 
 @app.get("/api/admin/bots")

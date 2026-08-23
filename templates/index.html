@@ -79,6 +79,12 @@
             </div>
           </div>
           <div class="info-item">
+            <div class="info-label">到期时间 (Expiration)</div>
+            <div class="info-value" style="color: #facc15;">
+              <span id="resExpire">永久有效</span>
+            </div>
+          </div>
+          <div class="info-item">
             <div class="info-label">文件传输端口 (File Port)</div>
             <div class="info-value">
               <span id="resFilePort">-</span>
@@ -151,6 +157,22 @@
           <button class="btn-primary" style="background: var(--bg-secondary); border: 1px solid var(--border-color);" onclick="copyVoiceFull()">
             <i class="fa-regular fa-clipboard"></i> 复制完整连接串
           </button>
+        </div>
+
+        <!-- TS 服务器快捷续费卡片 -->
+        <div style="margin-top: 1.5rem; padding: 1.25rem; background: rgba(59, 130, 246, 0.08); border: 1px dashed rgba(59, 130, 246, 0.4); border-radius: 12px;">
+          <div style="font-size: 0.95rem; font-weight: 600; color: #60a5fa; margin-bottom: 0.35rem;">
+            <i class="fa-solid fa-clock-rotate-left"></i> TS 服务器卡密续费延期
+          </div>
+          <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.85rem;">
+            持有新的 TeamSpeak 服务器 CDK？输入新卡密可直接在原有到期时间上累加时长，并自动恢复运行：
+          </p>
+          <form onsubmit="handleRenewInstance(event)" style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
+            <input type="text" id="renewTsCdkInput" placeholder="输入新 TS CDK (TS-xxxx-...)" style="flex: 1; min-width: 220px; padding: 0.6rem 0.85rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff; text-transform: uppercase;" required>
+            <button type="submit" class="btn-primary" style="background: linear-gradient(135deg, #3b82f6, #6366f1); padding: 0.6rem 1.25rem;">
+              <i class="fa-solid fa-bolt"></i> 立即续费
+            </button>
+          </form>
         </div>
       </div>
 
@@ -289,7 +311,7 @@
               <span>开通专属 TS 语音服务器</span>
             </div>
             <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.7;">
-              输入 <code>TS-</code> 开头的卡密点击开通，系统会自动在服务器后台通过独立 Docker 容器秒级部署，并分配独立的专属语音与查询端口。
+              输入 <code>TS-</code> 开头的卡密开通，系统会自动在后台通过独立 Docker 容器秒级部署，支持月卡/季卡/年卡或永久服务器，并分配专属语音端口。
             </p>
           </div>
 
@@ -322,7 +344,7 @@
               <span>到期保护与快捷续费</span>
             </div>
             <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.7;">
-              机器人到期后自动停机断开，<strong>绝不会删除您的任何歌单与配置</strong>。随时在控制面板输入新 CDK 即可秒级延期并重新上线。
+              TS 服务器与音乐机器人到期后自动停机，<strong>绝不会删除您的任何配置与频道数据</strong>。随时输入新 CDK 即可秒级延期并重新上线。
             </p>
           </div>
         </div>
@@ -576,6 +598,7 @@
     }
 
     function renderResult(inst, msg) {
+      currentInstance = inst;
       const resultCard = document.getElementById('resultCard');
       resultCard.style.display = 'block';
 
@@ -587,10 +610,23 @@
       document.getElementById('resCreatedAt').innerText = `开通时间: ${inst.created_at || '刚刚'}`;
       document.getElementById('resVoiceAddr').innerText = voiceAddr;
       document.getElementById('resVoicePort').innerText = `${inst.voice_port} (UDP)`;
+      document.getElementById('resExpire').innerText = inst.expire_at || '永久有效';
       document.getElementById('resFilePort').innerText = `${inst.file_port} (TCP)`;
       document.getElementById('resQueryPort').innerText = `${inst.query_port} (TCP)`;
       document.getElementById('resAdminToken').innerText = inst.admin_token || '（容器已启动，可在客户端首次加入时获取或在日志中查看）';
       document.getElementById('resQueryPassword').innerText = inst.query_password || '（已设置在容器日志中）';
+
+      const statusBadge = document.getElementById('resStatusBadge');
+      if (inst.status === 'expired') {
+        statusBadge.className = 'badge badge-danger';
+        statusBadge.innerText = '已到期 (Expired)';
+      } else if (inst.status === 'stopped') {
+        statusBadge.className = 'badge badge-warning';
+        statusBadge.innerText = '已停止 (Stopped)';
+      } else {
+        statusBadge.className = 'badge badge-success';
+        statusBadge.innerText = '运行中 (Active)';
+      }
 
       if (inst.query_apikey) {
         document.getElementById('apiKeyContainer').style.display = 'block';
@@ -605,6 +641,37 @@
 
       // 平滑滚动
       resultCard.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    async function handleRenewInstance(e) {
+      e.preventDefault();
+      if (!currentInstance || !currentInstance.id) {
+        alert('缺少当前服务器信息，无法续费');
+        return;
+      }
+      const renewInput = document.getElementById('renewTsCdkInput');
+      const cdk = renewInput.value.trim().toUpperCase();
+      if (!cdk) return;
+
+      try {
+        const response = await fetch('/api/renew-instance', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ cdk: cdk, instance_id: currentInstance.id })
+        });
+
+        const res = await response.json();
+        if (!response.ok || !res.success) {
+          throw new Error(res.message || '续费失败');
+        }
+
+        renewInput.value = '';
+        renderResult(res.instance, res.message);
+        showToast(res.message || '续费成功！', 'success');
+        alert(res.message || '续费成功！');
+      } catch (err) {
+        alert(err.message || '续费异常');
+      }
     }
 
     // Toast 浮动通知提示

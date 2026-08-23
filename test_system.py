@@ -262,5 +262,106 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertEqual(music_bot_client.username, "huasjj")
         self.assertEqual(music_bot_client.password, "Fanxing6")
 
+    def test_ts_instance_duration_expiration_and_renewal(self):
+        # 1. 生成带有 1 个月时长的 TS 卡密
+        ts_cdks = database.create_cdks(count=1, remark="TS月卡", cdk_type="teamspeak", duration_months=1)
+        self.assertEqual(len(ts_cdks), 1)
+        cdk = ts_cdks[0]
+        cdk_info = database.get_cdk(cdk)
+        self.assertEqual(cdk_info["duration_months"], 1)
+        self.assertEqual(cdk_info["cdk_type"], "teamspeak")
+
+        # 2. 创建一个已过期的 TS 实例
+        inst = database.create_instance(
+            instance_id=10,
+            name="ts10",
+            container_name="ts-teamspeak-10",
+            dir_path="/data/teamspeak/ts10",
+            voice_port=60010,
+            file_port=20010,
+            query_port=30010,
+            tsdns_port=40010,
+            admin_token="mock-token-10",
+            cdk_code=cdk,
+            duration_months=1,
+            expire_at="2020-01-01 00:00:00",
+            status="running"
+        )
+        self.assertIsNotNone(inst)
+        self.assertEqual(inst["expire_at"], "2020-01-01 00:00:00")
+        self.assertEqual(inst["duration_months"], 1)
+
+        # 3. 扫描已到期的 TS 服务器
+        expired = database.get_expired_active_instances()
+        self.assertTrue(any(i["id"] == 10 for i in expired))
+
+        # 4. 使用 1 个月进行续费
+        renewed = database.renew_instance(10, 1)
+        self.assertIsNotNone(renewed)
+        self.assertEqual(renewed["status"], "running")
+        self.assertGreater(renewed["expire_at"], "2026-01-01 00:00:00")
+
+        # 5. 再次扫描已不再判定为过期
+        expired_after = database.get_expired_active_instances()
+        self.assertFalse(any(i["id"] == 10 for i in expired_after))
+
+        # 6. 测试续费为永久有效
+        perm_renewed = database.renew_instance(10, 0)
+        self.assertEqual(perm_renewed["expire_at"], "permanent")
+
+    def test_renew_instance_api_and_admin_list(self):
+        try:
+            from fastapi.testclient import TestClient
+            import app as ts_app
+            client = TestClient(ts_app.app)
+        except Exception:
+            # 如果未安装 fastapi 测试客户端依赖则跳过此集成测试
+            return
+
+        # 1. 创建初始实例
+        inst = database.create_instance(
+            instance_id=20,
+            name="ts20",
+            container_name="ts-teamspeak-20",
+            dir_path="/data/teamspeak/ts20",
+            voice_port=60020,
+            file_port=20020,
+            query_port=30020,
+            tsdns_port=40020,
+            admin_token="mock-token-20",
+            cdk_code="TS-INIT-CODE",
+            duration_months=1,
+            expire_at="2020-01-01 00:00:00",
+            status="running"
+        )
+
+        # 2. 生成一张 3 个月的续费卡密
+        renew_cdks = database.create_cdks(count=1, remark="3个月续费卡", cdk_type="teamspeak", duration_months=3)
+        renew_cdk = renew_cdks[0]
+
+        # 3. 请求 /api/renew-instance 接口
+        resp = client.post("/api/renew-instance", json={"cdk": renew_cdk, "instance_id": 20})
+        self.assertEqual(resp.status_code, 200)
+        res_data = resp.json()
+        self.assertTrue(res_data["success"])
+        self.assertEqual(res_data["type"], "teamspeak")
+        self.assertGreater(res_data["instance"]["expire_at"], "2026-01-01 00:00:00")
+
+        # 4. 验证 CDK 状态变为 used
+        cdk_info = database.get_cdk(renew_cdk)
+        self.assertEqual(cdk_info["status"], "used")
+        self.assertEqual(cdk_info["instance_id"], 20)
+
+        # 5. 请求 /api/admin/instances 接口验证 days_left 属性
+        admin_pwd = database.get_admin_password()
+        admin_resp = client.get("/api/admin/instances", headers={"X-Admin-Password": admin_pwd})
+        self.assertEqual(admin_resp.status_code, 200)
+        admin_data = admin_resp.json()
+        self.assertTrue(admin_data["success"])
+        found = next((i for i in admin_data["instances"] if i["id"] == 20), None)
+        self.assertIsNotNone(found)
+        self.assertIn("days_left", found)
+        self.assertFalse(found["is_expired"])
+
 if __name__ == "__main__":
     unittest.main()

@@ -46,7 +46,10 @@ def init_db():
                 admin_token TEXT,
                 query_password TEXT,                   -- serveradmin 密码
                 query_apikey TEXT,                     -- serveradmin apikey
-                status TEXT NOT NULL DEFAULT 'running', -- 'running', 'stopped', 'error'
+                cdk_code TEXT,                         -- 绑定的初始激活 CDK
+                duration_months INTEGER NOT NULL DEFAULT 0, -- 0 为永久, 1 为 1个月, 3 为 3个月...
+                expire_at TEXT DEFAULT 'permanent',    -- 'YYYY-MM-DD HH:MM:SS' 或 'permanent'
+                status TEXT NOT NULL DEFAULT 'running', -- 'running', 'stopped', 'expired', 'error'
                 created_at TEXT NOT NULL
             )
         ''')
@@ -83,6 +86,12 @@ def init_db():
             cursor.execute("ALTER TABLE instances ADD COLUMN query_password TEXT")
         if "query_apikey" not in cols:
             cursor.execute("ALTER TABLE instances ADD COLUMN query_apikey TEXT")
+        if "cdk_code" not in cols:
+            cursor.execute("ALTER TABLE instances ADD COLUMN cdk_code TEXT")
+        if "duration_months" not in cols:
+            cursor.execute("ALTER TABLE instances ADD COLUMN duration_months INTEGER NOT NULL DEFAULT 0")
+        if "expire_at" not in cols:
+            cursor.execute("ALTER TABLE instances ADD COLUMN expire_at TEXT DEFAULT 'permanent'")
 
         cursor.execute("PRAGMA table_info(cdks)")
         cdk_cols = [col["name"] for col in cursor.fetchall()]
@@ -265,6 +274,9 @@ def create_instance(
     admin_token: str = "",
     query_password: str = "",
     query_apikey: str = "",
+    cdk_code: Optional[str] = None,
+    duration_months: int = 0,
+    expire_at: Optional[str] = None,
     status: str = "running"
 ) -> Dict[str, Any]:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -274,12 +286,14 @@ def create_instance(
             INSERT INTO instances (
                 id, name, container_name, dir_path, 
                 voice_port, file_port, query_port, tsdns_port, 
-                admin_token, query_password, query_apikey, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                admin_token, query_password, query_apikey,
+                cdk_code, duration_months, expire_at, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             instance_id, name, container_name, dir_path,
             voice_port, file_port, query_port, tsdns_port,
-            admin_token, query_password, query_apikey, status, now
+            admin_token, query_password, query_apikey,
+            cdk_code, duration_months, expire_at or "permanent", status, now
         ))
         conn.commit()
     return get_instance_by_id(instance_id)
@@ -317,6 +331,62 @@ def update_instance_status(instance_id: int, status: str):
         cursor = conn.cursor()
         cursor.execute("UPDATE instances SET status = ? WHERE id = ?", (status, instance_id))
         conn.commit()
+
+def update_instance_expiry(instance_id: int, expire_at: str):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE instances SET expire_at = ?, status = 'running' WHERE id = ?", (expire_at, instance_id))
+        conn.commit()
+
+def get_expired_active_instances() -> List[Dict[str, Any]]:
+    """
+    获取所有已超过有效时间但仍处于 running 状态的 TeamSpeak 服务器实例
+    """
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM instances 
+            WHERE status = 'running' 
+              AND expire_at != 'permanent' 
+              AND expire_at < ?
+        """, (now_str,))
+        return [dict(row) for row in cursor.fetchall()]
+
+def renew_instance(instance_id: int, add_months: int) -> Optional[Dict[str, Any]]:
+    """
+    为已有 TeamSpeak 实例续期
+    """
+    inst = get_instance_by_id(instance_id)
+    if not inst:
+        return None
+
+    if add_months == 0:
+        new_expire = "permanent"
+    else:
+        now = datetime.now()
+        current_exp_str = inst.get("expire_at")
+        if current_exp_str and current_exp_str != "permanent":
+            try:
+                curr_exp = datetime.strptime(current_exp_str, "%Y-%m-%d %H:%M:%S")
+                # 如果当前还没过期，在原到期时间上累加；如果已过期，从现在开始计算
+                base_time = curr_exp if curr_exp > now else now
+                new_expire = (base_time + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
+            except Exception:
+                new_expire = (now + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
+        else:
+            new_expire = (now + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            UPDATE instances 
+            SET expire_at = ?, status = 'running' 
+            WHERE id = ?
+        """, (new_expire, instance_id))
+        conn.commit()
+
+    return get_instance_by_id(instance_id)
 
 def delete_instance(instance_id: int) -> bool:
     with get_connection() as conn:
