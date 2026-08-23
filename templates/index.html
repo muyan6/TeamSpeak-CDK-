@@ -8,6 +8,9 @@
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
 <body>
+  <!-- 浮动通知容器 -->
+  <div id="toastContainer"></div>
+
   <div class="container">
     <!-- 导航栏 -->
     <header class="navbar">
@@ -604,24 +607,89 @@
       resultCard.scrollIntoView({ behavior: 'smooth' });
     }
 
+    // Toast 浮动通知提示
+    function showToast(msg, type = 'info') {
+      const container = document.getElementById('toastContainer');
+      if (!container) return;
+      const toast = document.createElement('div');
+      toast.className = 'toast-msg';
+      const icon = type === 'success' ? 'fa-circle-check' : (type === 'error' ? 'fa-circle-xmark' : 'fa-circle-info');
+      const iconColor = type === 'success' ? '#34d399' : (type === 'error' ? '#f87171' : '#60a5fa');
+      toast.innerHTML = `<i class="fa-solid ${icon}" style="color: ${iconColor};"></i> <span>${msg}</span>`;
+      container.appendChild(toast);
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(-10px)';
+        toast.style.transition = 'all 0.3s ease';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+
+    // 通用兼容剪贴板复制（支持 HTTP / HTTPS / 手机端）
+    function copyToClipboard(text, successMsg = '已复制到剪贴板') {
+      if (!text) return;
+
+      // 方式 1: 优先尝试 navigator.clipboard（仅安全上下文 HTTPS/localhost 可用）
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(text).then(() => {
+          showToast(successMsg, 'success');
+        }).catch(() => {
+          fallbackCopy(text, successMsg);
+        });
+        return;
+      }
+
+      // 方式 2: HTTP 与通用环境回退机制
+      fallbackCopy(text, successMsg);
+    }
+
+    function fallbackCopy(text, successMsg = '已复制到剪贴板') {
+      try {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.top = '0';
+        textArea.style.left = '0';
+        textArea.style.width = '2em';
+        textArea.style.height = '2em';
+        textArea.style.padding = '0';
+        textArea.style.border = 'none';
+        textArea.style.outline = 'none';
+        textArea.style.boxShadow = 'none';
+        textArea.style.background = 'transparent';
+        textArea.style.opacity = '0';
+        textArea.setAttribute('readonly', '');
+
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        textArea.setSelectionRange(0, text.length);
+
+        const successful = document.execCommand('copy');
+        document.body.removeChild(textArea);
+
+        if (successful) {
+          showToast(successMsg, 'success');
+        } else {
+          prompt('自动复制受限，请按 Ctrl+C 手动复制：', text);
+        }
+      } catch (err) {
+        prompt('自动复制受限，请按 Ctrl+C 手动复制：', text);
+      }
+    }
+
     function copyText(elementId) {
       const el = document.getElementById(elementId);
       if (!el) return;
-      const text = el.innerText;
-      navigator.clipboard.writeText(text).then(() => {
-        alert('已复制到剪贴板: ' + text);
-      }).catch(() => {
-        alert('复制失败，请手动选择复制');
-      });
+      const text = el.innerText.trim();
+      copyToClipboard(text, `已复制: ${text}`);
     }
 
     function copyVoiceFull() {
       if (!currentInstance) return;
       const host = currentInstance.public_host || window.location.hostname;
       const voiceAddr = `${host}:${currentInstance.voice_port}`;
-      navigator.clipboard.writeText(voiceAddr).then(() => {
-        alert('已复制连接串: ' + voiceAddr);
-      });
+      copyToClipboard(voiceAddr, `已复制连接串: ${voiceAddr}`);
     }
   </script>
 </body>
