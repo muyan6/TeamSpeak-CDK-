@@ -317,8 +317,7 @@ class TestTeamSpeakManager(unittest.TestCase):
             import app as ts_app
             client = TestClient(ts_app.app)
         except Exception:
-            # 如果未安装 fastapi 测试客户端依赖则跳过此集成测试
-            return
+            self.skipTest("FastAPI TestClient 依赖不可用")
 
         # 1. 创建初始实例
         inst = database.create_instance(
@@ -477,7 +476,7 @@ class TestTeamSpeakManager(unittest.TestCase):
             import app as ts_app
             client = TestClient(ts_app.app)
         except Exception:
-            return
+            self.skipTest("FastAPI TestClient 依赖不可用")
 
         # 1. 生成 2 张音乐机器人体验卡和 1 张普通月卡
         trial_cdks = database.create_cdks(count=2, remark="体验卡批次", cdk_type="music_bot", is_trial=1)
@@ -553,7 +552,7 @@ class TestTeamSpeakManager(unittest.TestCase):
             import app as ts_app
             client = TestClient(ts_app.app)
         except Exception:
-            return
+            self.skipTest("FastAPI TestClient 依赖不可用")
 
         admin_pwd = database.get_admin_password()
 
@@ -599,7 +598,7 @@ class TestTeamSpeakManager(unittest.TestCase):
             import app as ts_app
             client = TestClient(ts_app.app)
         except Exception:
-            return
+            self.skipTest("FastAPI TestClient 依赖不可用")
 
         # 创建一个已使用的 CDK 但不创建对应的 instance
         cdks = database.create_cdks(count=1, remark="已用卡", cdk_type="teamspeak", duration_months=1)

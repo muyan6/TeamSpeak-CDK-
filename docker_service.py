@@ -12,14 +12,14 @@ def get_compose_cmd() -> list:
     检查系统支持的 docker compose 命令（优先使用 docker compose，其次 docker-compose）
     """
     try:
-        res = subprocess.run(["docker", "compose", "version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        res = subprocess.run(["docker", "compose", "version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
         if res.returncode == 0:
             return ["docker", "compose"]
     except Exception:
         pass
 
     try:
-        res = subprocess.run(["docker-compose", "version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        res = subprocess.run(["docker-compose", "version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
         if res.returncode == 0:
             return ["docker-compose"]
     except Exception:
@@ -165,7 +165,13 @@ def deploy_teamspeak_instance(instance_id: int, ports: Dict[str, int]) -> Tuple[
         except Exception:
             pass
 
-    return True, creds, "部署成功"
+    live_status = get_container_status(instance_id)
+    if live_status != "running":
+        return False, creds, f"容器启动后状态异常: {live_status}"
+
+    if creds["admin_token"] or creds["query_password"] or creds["query_apikey"]:
+        return True, creds, "部署成功，首次启动凭据已提取"
+    return True, creds, "部署成功，但首次启动凭据尚未从日志提取"
 
 def get_container_status(instance_id: int) -> str:
     """
@@ -217,10 +223,23 @@ def destroy_instance_container(instance_id: int, delete_files: bool = True) -> b
     instance_dir = get_instance_dir(instance_id)
     cmd = get_compose_cmd() + ["down", "-v"]
     try:
-        if os.path.exists(instance_dir):
-            subprocess.run(cmd, cwd=instance_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
-            if delete_files:
-                shutil.rmtree(instance_dir, ignore_errors=True)
+        if not os.path.exists(instance_dir):
+            return True
+
+        res = subprocess.run(
+            cmd,
+            cwd=instance_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=30
+        )
+        if res.returncode != 0:
+            return False
+        if delete_files:
+            shutil.rmtree(instance_dir, ignore_errors=False)
+            if os.path.exists(instance_dir):
+                return False
         return True
     except Exception:
         return False

@@ -969,6 +969,20 @@
     let adminToken = localStorage.getItem('ts_admin_pwd') || '';
     let currentLogInstanceId = null;
 
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[char]));
+    }
+
+    function jsString(value) {
+      return JSON.stringify(String(value ?? '')).replace(/"/g, '&quot;');
+    }
+
     // Toast 浮动提示
     function showToast(msg, type = 'info') {
       const container = document.getElementById('toastContainer');
@@ -976,7 +990,12 @@
       toast.className = 'toast-msg';
       const icon = type === 'success' ? 'fa-circle-check' : (type === 'error' ? 'fa-circle-xmark' : 'fa-circle-info');
       const iconColor = type === 'success' ? '#34d399' : (type === 'error' ? '#f87171' : '#60a5fa');
-      toast.innerHTML = `<i class="fa-solid ${icon}" style="color: ${iconColor};"></i> <span>${msg}</span>`;
+      const iconEl = document.createElement('i');
+      iconEl.className = `fa-solid ${icon}`;
+      iconEl.style.color = iconColor;
+      const textEl = document.createElement('span');
+      textEl.textContent = String(msg ?? '');
+      toast.append(iconEl, document.createTextNode(' '), textEl);
       container.appendChild(toast);
       setTimeout(() => {
         toast.style.opacity = '0';
@@ -1221,32 +1240,32 @@
         tbody.innerHTML = data.instances.map(inst => `
           <tr>
             <td style="text-align: center;">
-              <input type="checkbox" class="inst-row-cb" value="${inst.id}" onchange="onInstanceRowCheckboxChange()">
+              <input type="checkbox" class="inst-row-cb" value="${escapeHtml(inst.id)}" onchange="onInstanceRowCheckboxChange()">
             </td>
             <td>
-              <div style="font-weight: 700; color: #60a5fa; font-size: 1rem;">${inst.name}</div>
-              <div style="font-size: 0.75rem; color: var(--text-muted);">ID: ${inst.id}</div>
+              <div style="font-weight: 700; color: #60a5fa; font-size: 1rem;">${escapeHtml(inst.name)}</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">ID: ${escapeHtml(inst.id)}</div>
             </td>
             <td>
-              <div style="font-family: monospace; font-size: 0.8rem; color: #a78bfa;">${inst.dir_path}</div>
-              <div style="font-size: 0.75rem; color: var(--text-muted);">${inst.container_name}</div>
+              <div style="font-family: monospace; font-size: 0.8rem; color: #a78bfa;">${escapeHtml(inst.dir_path)}</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(inst.container_name)}</div>
             </td>
             <td><span class="badge badge-info"><i class="fa-solid fa-microphone"></i> ${inst.voice_port} / UDP</span></td>
             <td>
-              <div style="font-size: 0.8rem;">文件: <code style="color:#38bdf8">${inst.file_port}</code></div>
-              <div style="font-size: 0.8rem; color: var(--text-muted);">查询: <code style="color:#facc15">${inst.query_port}</code></div>
+              <div style="font-size: 0.8rem;">文件: <code style="color:#38bdf8">${escapeHtml(inst.file_port)}</code></div>
+              <div style="font-size: 0.8rem; color: var(--text-muted);">查询: <code style="color:#facc15">${escapeHtml(inst.query_port)}</code></div>
             </td>
             <td>
               <div style="font-size: 0.8rem; color: #fca5a5; display: flex; align-items: center; gap: 0.3rem;">
-                <span title="${inst.admin_token || ''}">Token: ${inst.admin_token ? inst.admin_token.slice(0, 10) + '...' : '无'}</span>
-                ${inst.admin_token ? `<button class="btn-action btn-action-sm" onclick="copyToClipboard('${inst.admin_token}', '已复制管理员 Token')"><i class="fa-regular fa-copy"></i></button>` : ''}
+                <span title="${escapeHtml(inst.admin_token || '')}">Token: ${inst.admin_token ? escapeHtml(inst.admin_token.slice(0, 10) + '...') : '无'}</span>
+                ${inst.admin_token ? `<button class="btn-action btn-action-sm" onclick="copyToClipboard(${jsString(inst.admin_token)}, '已复制管理员 Token')"><i class="fa-regular fa-copy"></i></button>` : ''}
               </div>
               <div style="font-size: 0.78rem; color: #facc15; margin-top: 3px; display: flex; align-items: center; gap: 0.3rem;">
-                <span title="${inst.query_password || ''}">密码: ${inst.query_password ? inst.query_password.slice(0, 10) + '...' : '无'}</span>
-                ${inst.query_password ? `<button class="btn-action btn-action-sm" onclick="copyToClipboard('${inst.query_password}', '已复制 Query 密码')"><i class="fa-regular fa-copy"></i></button>` : ''}
+                <span title="${escapeHtml(inst.query_password || '')}">密码: ${inst.query_password ? escapeHtml(inst.query_password.slice(0, 10) + '...') : '无'}</span>
+                ${inst.query_password ? `<button class="btn-action btn-action-sm" onclick="copyToClipboard(${jsString(inst.query_password)}, '已复制 Query 密码')"><i class="fa-regular fa-copy"></i></button>` : ''}
               </div>
             </td>
-            <td style="font-size: 0.85rem; color: #facc15;">${inst.expire_at || '永久有效'}</td>
+             <td style="font-size: 0.85rem; color: #facc15;">${escapeHtml(inst.expire_at || '永久有效')}</td>
             <td>
               <span class="badge ${inst.is_expired ? 'badge-danger' : 'badge-success'}">
                 ${inst.is_expired ? '已到期' : (typeof inst.days_left === 'number' ? inst.days_left + ' 天' : inst.days_left)}
@@ -1255,10 +1274,10 @@
             <td>
               <span class="badge ${inst.live_status === 'running' ? 'badge-success' : (inst.status === 'expired' ? 'badge-danger' : 'badge-warning')}">
                 <i class="fa-solid ${inst.live_status === 'running' ? 'fa-circle-play' : 'fa-circle-pause'}"></i>
-                ${inst.live_status || inst.status}
+                 ${escapeHtml(inst.live_status || inst.status)}
               </span>
             </td>
-            <td style="font-size: 0.8rem; color: var(--text-muted);">${inst.created_at}</td>
+             <td style="font-size: 0.8rem; color: var(--text-muted);">${escapeHtml(inst.created_at)}</td>
             <td style="text-align: right;">
               <div style="display: inline-flex; gap: 0.35rem;">
                 <button class="btn-action btn-action-sm" title="实时日志" onclick="showLogs(${inst.id})"><i class="fa-solid fa-terminal"></i></button>
@@ -1292,16 +1311,16 @@
         tbody.innerHTML = data.bots.map(b => `
           <tr>
             <td style="text-align: center;">
-              <input type="checkbox" class="bot-row-cb" value="${b.bot_id}" onchange="onBotRowCheckboxChange()">
+              <input type="checkbox" class="bot-row-cb" value="${escapeHtml(b.bot_id)}" onchange="onBotRowCheckboxChange()">
             </td>
             <td>
-              <strong style="color: #c084fc; font-size: 0.95rem;">${b.name}</strong>
-              <div style="font-size: 0.75rem; color: var(--text-muted);">${b.default_channel || '默认大厅'}</div>
+              <strong style="color: #c084fc; font-size: 0.95rem;">${escapeHtml(b.name)}</strong>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(b.default_channel || '默认大厅')}</div>
             </td>
-            <td><code style="color: #60a5fa; font-size: 0.85rem;">${b.server_address}:${b.server_port}</code></td>
-            <td><span style="color: #e2e8f0; font-weight: 500;">${b.nickname}</span></td>
-            <td><code style="color: #38bdf8; font-size: 0.85rem;">${b.cdk_code}</code></td>
-            <td style="font-size: 0.85rem; color: #facc15;">${b.expire_at || '永久有效'}</td>
+            <td><code style="color: #60a5fa; font-size: 0.85rem;">${escapeHtml(b.server_address)}:${escapeHtml(b.server_port)}</code></td>
+            <td><span style="color: #e2e8f0; font-weight: 500;">${escapeHtml(b.nickname)}</span></td>
+            <td><code style="color: #38bdf8; font-size: 0.85rem;">${escapeHtml(b.cdk_code)}</code></td>
+            <td style="font-size: 0.85rem; color: #facc15;">${escapeHtml(b.expire_at || '永久有效')}</td>
             <td>
               <span class="badge ${b.is_expired ? 'badge-danger' : 'badge-success'}">
                 ${b.is_expired ? '已到期' : (typeof b.days_left === 'number' ? b.days_left + ' 天' : b.days_left)}
@@ -1314,11 +1333,11 @@
             </td>
             <td style="text-align: right;">
               <div style="display: inline-flex; gap: 0.35rem;">
-                <a href="${data.bot_panel_url || 'http://103.71.69.156:23467/'}" target="_blank" class="btn-action btn-action-sm btn-purple" title="进入点歌后台"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
-                <button class="btn-action btn-action-sm" title="重启机器人" onclick="botAdminAction('${b.bot_id}', 'restart')"><i class="fa-solid fa-rotate-right"></i></button>
-                <button class="btn-action btn-action-sm" title="停止机器人" onclick="botAdminAction('${b.bot_id}', 'stop')"><i class="fa-solid fa-stop"></i></button>
-                <button class="btn-action btn-action-sm" title="启动机器人" onclick="botAdminAction('${b.bot_id}', 'start')"><i class="fa-solid fa-play"></i></button>
-                <button class="btn-action btn-action-sm btn-danger" title="删除机器人" onclick="botAdminAction('${b.bot_id}', 'delete')"><i class="fa-solid fa-trash"></i></button>
+                <a href="${escapeHtml(data.bot_panel_url || 'http://103.71.69.156:23467/')}" target="_blank" rel="noopener noreferrer" class="btn-action btn-action-sm btn-purple" title="进入点歌后台"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                <button class="btn-action btn-action-sm" title="重启机器人" onclick="botAdminAction(${jsString(b.bot_id)}, 'restart')"><i class="fa-solid fa-rotate-right"></i></button>
+                <button class="btn-action btn-action-sm" title="停止机器人" onclick="botAdminAction(${jsString(b.bot_id)}, 'stop')"><i class="fa-solid fa-stop"></i></button>
+                <button class="btn-action btn-action-sm" title="启动机器人" onclick="botAdminAction(${jsString(b.bot_id)}, 'start')"><i class="fa-solid fa-play"></i></button>
+                <button class="btn-action btn-action-sm btn-danger" title="删除机器人" onclick="botAdminAction(${jsString(b.bot_id)}, 'delete')"><i class="fa-solid fa-trash"></i></button>
               </div>
             </td>
           </tr>
@@ -1435,9 +1454,9 @@
           boundTarget = `<strong style="color:#c084fc"><i class="fa-solid fa-robot" style="font-size: 0.75rem;"></i> 音乐机器人</strong>`;
         }
 
-        let timeHtml = `<div style="font-size: 0.78rem; color: var(--text-muted);" title="生成时间"><i class="fa-regular fa-clock" style="font-size: 0.72rem;"></i> 生成: ${c.created_at || '-'}</div>`;
-        if (c.used_at) {
-          timeHtml += `<div style="font-size: 0.78rem; color: #fbbf24; margin-top: 3px;" title="兑换使用时间"><i class="fa-solid fa-bolt" style="font-size: 0.72rem;"></i> 使用: ${c.used_at}</div>`;
+         let timeHtml = `<div style="font-size: 0.78rem; color: var(--text-muted);" title="生成时间"><i class="fa-regular fa-clock" style="font-size: 0.72rem;"></i> 生成: ${escapeHtml(c.created_at || '-')}</div>`;
+         if (c.used_at) {
+           timeHtml += `<div style="font-size: 0.78rem; color: #fbbf24; margin-top: 3px;" title="兑换使用时间"><i class="fa-solid fa-bolt" style="font-size: 0.72rem;"></i> 使用: ${escapeHtml(c.used_at)}</div>`;
         }
 
         let typeBadgeHtml = '';
@@ -1454,23 +1473,23 @@
         return `
           <tr>
             <td style="text-align: center;">
-              <input type="checkbox" class="cdk-row-cb" value="${c.code}" onchange="onCdkRowCheckboxChange()">
+              <input type="checkbox" class="cdk-row-cb" value="${escapeHtml(c.code)}" onchange="onCdkRowCheckboxChange()">
             </td>
             <td>
               <div style="display: flex; align-items: center; gap: 0.35rem;">
-                <code style="font-size: 0.92rem; font-weight: 700; color: #38bdf8;">${c.code}</code>
-                <button class="btn-action btn-action-sm" title="复制卡密" onclick="copyToClipboard('${c.code}', '已复制 CDK: ${c.code}')"><i class="fa-regular fa-copy"></i></button>
+                <code style="font-size: 0.92rem; font-weight: 700; color: #38bdf8;">${escapeHtml(c.code)}</code>
+                <button class="btn-action btn-action-sm" title="复制卡密" onclick="copyToClipboard(${jsString(c.code)}, '已复制 CDK')"><i class="fa-regular fa-copy"></i></button>
               </div>
             </td>
             <td>${typeBadgeHtml}</td>
             <td>${statusBadge}</td>
             <td>${boundTarget}</td>
-            <td style="color: #cbd5e1; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${c.remark || ''}">
-              ${c.remark || '<span style="color:var(--text-muted)">-</span>'}
+            <td style="color: #cbd5e1; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(c.remark || '')}">
+              ${c.remark ? escapeHtml(c.remark) : '<span style="color:var(--text-muted)">-</span>'}
             </td>
             <td>${timeHtml}</td>
             <td style="text-align: right;">
-              <button class="btn-action btn-action-sm btn-danger" onclick="deleteCdk('${c.code}')"><i class="fa-solid fa-trash"></i> 删除</button>
+              <button class="btn-action btn-action-sm btn-danger" onclick="deleteCdk(${jsString(c.code)})"><i class="fa-solid fa-trash"></i> 删除</button>
             </td>
           </tr>
         `;
@@ -2004,13 +2023,13 @@
       tbody.innerHTML = records.map(r => `
         <tr>
           <td style="color: var(--text-muted); font-size: 0.82rem;">#${r.id}</td>
-          <td><strong style="color: #38bdf8; font-size: 0.9rem;">${r.server_key}</strong></td>
-          <td><code style="color: #a78bfa; font-size: 0.85rem;">${r.resolved_ip ? (r.resolved_ip + ':' + r.server_port) : (r.server_address + ':' + r.server_port)}</code></td>
-          <td><code style="color: #f472b6; font-size: 0.85rem;">${r.cdk_code}</code></td>
+          <td><strong style="color: #38bdf8; font-size: 0.9rem;">${escapeHtml(r.server_key)}</strong></td>
+          <td><code style="color: #a78bfa; font-size: 0.85rem;">${escapeHtml(r.resolved_ip ? (r.resolved_ip + ':' + r.server_port) : (r.server_address + ':' + r.server_port))}</code></td>
+          <td><code style="color: #f472b6; font-size: 0.85rem;">${escapeHtml(r.cdk_code)}</code></td>
           <td><span class="badge ${r.cdk_type === 'music_bot' ? 'badge-purple' : 'badge-info'}">${r.cdk_type === 'music_bot' ? '音乐机器人' : 'TS服务器'}</span></td>
-          <td style="font-size: 0.8rem; color: var(--text-muted);">${r.used_at}</td>
+          <td style="font-size: 0.8rem; color: var(--text-muted);">${escapeHtml(r.used_at)}</td>
           <td style="text-align: right;">
-            <button class="btn-action btn-action-sm btn-danger" onclick="deleteTrialRecord(${r.id}, '${r.server_key}')" title="重置该服务器体验资格">
+            <button class="btn-action btn-action-sm btn-danger" onclick="deleteTrialRecord(${Number(r.id)}, ${jsString(r.server_key)})" title="重置该服务器体验资格">
               <i class="fa-solid fa-rotate-left"></i> 重置资格
             </button>
           </td>
@@ -2233,13 +2252,19 @@
           resultBox.style.background = 'rgba(16, 185, 129, 0.15)';
           resultBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
           resultBox.style.color = '#34d399';
-          resultBox.innerHTML = `<i class="fa-solid fa-circle-check" style="font-size: 1.1rem; margin-right: 6px;"></i> <strong>测试成功：</strong>${data.message}`;
+          resultBox.replaceChildren(
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-check' }),
+            document.createTextNode(' 测试成功：' + String(data.message || ''))
+          );
           showToast('对接平台连接与鉴权测试通过！', 'success');
         } else {
           resultBox.style.background = 'rgba(239, 68, 68, 0.15)';
           resultBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
           resultBox.style.color = '#f87171';
-          resultBox.innerHTML = `<i class="fa-solid fa-circle-xmark" style="font-size: 1.1rem; margin-right: 6px;"></i> <strong>测试失败：</strong>${data.message || data.detail || '无法连接到该机器人平台'}`;
+          resultBox.replaceChildren(
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark' }),
+            document.createTextNode(' 测试失败：' + String(data.message || data.detail || '无法连接到该机器人平台'))
+          );
           showToast('连通性测试失败，请检查配置', 'error');
         }
       } catch (err) {

@@ -3,6 +3,7 @@ import secrets
 import string
 import socket
 import ipaddress
+from urllib.parse import urlsplit
 from contextlib import contextmanager
 from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
@@ -10,8 +11,9 @@ from config import DB_PATH
 
 @contextmanager
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA busy_timeout = 30000")
     try:
         yield conn
     finally:
@@ -127,6 +129,14 @@ def init_db():
         if "bot_id" not in cdk_cols:
             cursor.execute("ALTER TABLE cdks ADD COLUMN bot_id TEXT")
 
+        # 进程在外部部署期间异常退出时，释放超过 10 分钟的临时占用。
+        stale_claim_before = (datetime.now() - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            "UPDATE cdks SET status = 'unused', used_at = NULL "
+            "WHERE status = 'processing' AND used_at < ?",
+            (stale_claim_before,)
+        )
+
         conn.commit()
 
 # --- 系统配置与密码管理 ---
@@ -200,6 +210,15 @@ def create_cdks(
     duration_months: int = 0,
     is_trial: int = 0
 ) -> List[str]:
+    if count < 1 or count > 200:
+        raise ValueError("生成数量必须在 1 到 200 之间")
+    if cdk_type not in ("teamspeak", "music_bot"):
+        raise ValueError("不支持的 CDK 类型")
+    if duration_months not in (0, 1, 3, 6, 12):
+        raise ValueError("CDK 时长必须为 0、1、3、6 或 12 个月")
+    if is_trial not in (0, 1):
+        raise ValueError("体验卡标记必须为 0 或 1")
+
     created = []
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     prefix = "BOT-" if cdk_type == "music_bot" else "TS-"
@@ -282,6 +301,33 @@ def delete_cdks_by_filter(
         conn.commit()
         return cursor.rowcount
 
+def claim_cdk(code: str, cdk_type: str) -> Optional[Dict[str, Any]]:
+    """以数据库条件更新原子占用一个未使用 CDK，防止并发重复兑换。"""
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE cdks SET status = 'processing', used_at = ? "
+            "WHERE code = ? AND status = 'unused' AND cdk_type = ?",
+            (now, code.strip(), cdk_type)
+        )
+        if cursor.rowcount != 1:
+            return None
+        conn.commit()
+    return get_cdk(code)
+
+def release_cdk_claim(code: str) -> bool:
+    """释放外部部署失败时的临时 CDK 占用。"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE cdks SET status = 'unused', used_at = NULL "
+            "WHERE code = ? AND status = 'processing'",
+            (code.strip(),)
+        )
+        conn.commit()
+        return cursor.rowcount == 1
+
 # --- 体验卡与服务器地址指纹检测记录 ---
 
 def normalize_server_target(addr: str, port: Optional[int] = 9987) -> Tuple[str, str, int, Optional[str], Optional[str]]:
@@ -290,23 +336,36 @@ def normalize_server_target(addr: str, port: Optional[int] = 9987) -> Tuple[str,
     返回: (server_key, clean_addr, target_port, resolved_ip, resolved_key)
     例如: ("103.71.69.156:9987", "103.71.69.156", 9987, "103.71.69.156", "103.71.69.156:9987")
     """
-    clean_addr = str(addr or "").strip().lower()
-    if clean_addr.startswith("http://"):
-        clean_addr = clean_addr[7:]
-    elif clean_addr.startswith("https://"):
-        clean_addr = clean_addr[8:]
-    clean_addr = clean_addr.rstrip("/")
+    raw_addr = str(addr or "").strip()
+    if not raw_addr:
+        raise ValueError("服务器地址不能为空")
 
     target_port = int(port) if port else 9987
-    if ":" in clean_addr:
-        parts = clean_addr.split(":", 1)
-        clean_addr = parts[0].strip()
+    direct_ip = None
+    if "://" not in raw_addr:
         try:
-            target_port = int(parts[1].strip())
+            direct_ip = ipaddress.ip_address(raw_addr)
         except ValueError:
-            pass
+            raw_addr = f"//{raw_addr}"
 
-    server_key = f"{clean_addr}:{target_port}"
+    if direct_ip is not None:
+        clean_addr = str(direct_ip).lower()
+    else:
+        parsed = urlsplit(raw_addr)
+        clean_addr = (parsed.hostname or "").strip().lower().rstrip(".")
+        if not clean_addr:
+            raise ValueError("服务器地址格式不正确")
+        try:
+            parsed_port = parsed.port
+        except ValueError as e:
+            raise ValueError("服务器地址中的端口格式不正确") from e
+        if parsed_port is not None:
+            target_port = parsed_port
+    if target_port < 1 or target_port > 65535:
+        raise ValueError("服务器端口必须在 1 到 65535 之间")
+
+    key_addr = f"[{clean_addr}]" if ":" in clean_addr else clean_addr
+    server_key = f"{key_addr}:{target_port}"
 
     resolved_ip = None
     resolved_key = None
@@ -315,10 +374,11 @@ def normalize_server_target(addr: str, port: Optional[int] = 9987) -> Tuple[str,
             ipaddress.ip_address(clean_addr)
             resolved_ip = clean_addr
         except ValueError:
-            # 域名解析真实公网 IP
-            resolved_ip = socket.gethostbyname(clean_addr)
+            # 域名解析真实 IP，兼容 IPv4/IPv6
+            resolved_ip = socket.getaddrinfo(clean_addr, None, type=socket.SOCK_STREAM)[0][4][0]
         if resolved_ip:
-            resolved_key = f"{resolved_ip}:{target_port}"
+            resolved_addr = f"[{resolved_ip}]" if ":" in resolved_ip else resolved_ip
+            resolved_key = f"{resolved_addr}:{target_port}"
     except Exception:
         pass
 
@@ -331,6 +391,13 @@ def has_server_used_trial(addr: str, port: Optional[int] = 9987) -> Tuple[bool, 
     server_key, clean_addr, target_port, resolved_ip, resolved_key = normalize_server_target(addr, port)
     with get_connection() as conn:
         cursor = conn.cursor()
+        stale_pending_before = (datetime.now() - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            "DELETE FROM trial_server_records "
+            "WHERE target_id LIKE 'pending:%' AND used_at < ?",
+            (stale_pending_before,)
+        )
+        conn.commit()
         # 1. 检查 server_key 匹配
         cursor.execute("SELECT * FROM trial_server_records WHERE server_key = ?", (server_key,))
         row = cursor.fetchone()
@@ -348,6 +415,72 @@ def has_server_used_trial(addr: str, port: Optional[int] = 9987) -> Tuple[bool, 
                 return True, dict(row)
 
         return False, None
+
+def reserve_trial_server(
+    addr: str,
+    port: int,
+    cdk_code: str,
+    cdk_type: str,
+    raw_input: Optional[str] = None
+) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """为体验卡目标建立唯一预约，阻止并发请求同时创建多个实例。"""
+    server_key, clean_addr, target_port, resolved_ip, resolved_key = normalize_server_target(addr, port)
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    reservation_id = f"pending:{secrets.token_hex(12)}"
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        stale_pending_before = (datetime.now() - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+        cursor.execute(
+            "DELETE FROM trial_server_records "
+            "WHERE target_id LIKE 'pending:%' AND used_at < ?",
+            (stale_pending_before,)
+        )
+        cursor.execute(
+            "SELECT * FROM trial_server_records WHERE server_key = ? "
+            "OR (? IS NOT NULL AND resolved_key = ?)",
+            (server_key, resolved_key, resolved_key)
+        )
+        existing = cursor.fetchone()
+        if existing:
+            conn.rollback()
+            return False, dict(existing)
+        try:
+            cursor.execute("""
+                INSERT INTO trial_server_records (
+                    server_key, server_address, server_port, resolved_ip, resolved_key,
+                    raw_input, cdk_code, cdk_type, target_id, used_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                server_key, clean_addr, target_port, resolved_ip, resolved_key,
+                raw_input or f"{addr}:{port}", cdk_code, cdk_type, reservation_id, now
+            ))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            cursor.execute("SELECT * FROM trial_server_records WHERE server_key = ?", (server_key,))
+            row = cursor.fetchone()
+            conn.rollback()
+            return False, dict(row) if row else None
+    return True, get_trial_record_by_key(server_key)
+
+def release_trial_reservation(addr: str, port: int, cdk_code: str) -> bool:
+    server_key, _, _, _, _ = normalize_server_target(addr, port)
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM trial_server_records "
+            "WHERE server_key = ? AND cdk_code = ? AND target_id LIKE 'pending:%'",
+            (server_key, cdk_code)
+        )
+        conn.commit()
+        return cursor.rowcount == 1
+
+def get_trial_record_by_key(server_key: str) -> Optional[Dict[str, Any]]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM trial_server_records WHERE server_key = ?", (server_key,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
 
 def record_trial_server(
     addr: str,
@@ -396,25 +529,69 @@ def delete_trial_record(record_id: int) -> bool:
         conn.commit()
         return cursor.rowcount > 0
 
+def delete_trial_record_for_target(addr: str, port: int, cdk_code: str, target_id: Optional[str] = None) -> bool:
+    server_key, _, _, _, _ = normalize_server_target(addr, port)
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        if target_id is None:
+            cursor.execute(
+                "DELETE FROM trial_server_records WHERE server_key = ? AND cdk_code = ?",
+                (server_key, cdk_code)
+            )
+        else:
+            cursor.execute(
+                "DELETE FROM trial_server_records "
+                "WHERE server_key = ? AND cdk_code = ? AND target_id = ?",
+                (server_key, cdk_code, str(target_id))
+            )
+        conn.commit()
+        return cursor.rowcount > 0
+
 def bind_cdk_instance(code: str, instance_id: int):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE cdks SET status = 'used', instance_id = ?, used_at = ? WHERE code = ?",
+            "UPDATE cdks SET status = 'used', instance_id = ?, used_at = ? "
+            "WHERE code = ? AND status IN ('unused', 'processing') AND cdk_type = 'teamspeak'",
             (instance_id, now, code)
         )
         conn.commit()
+        return cursor.rowcount == 1
 
 def bind_cdk_bot(code: str, bot_id: str):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE cdks SET status = 'used', bot_id = ?, used_at = ? WHERE code = ?",
+            "UPDATE cdks SET status = 'used', bot_id = ?, used_at = ? "
+            "WHERE code = ? AND status IN ('unused', 'processing') AND cdk_type = 'music_bot'",
             (bot_id, now, code)
         )
         conn.commit()
+        return cursor.rowcount == 1
+
+def unbind_cdk_instance(code: str, instance_id: int) -> bool:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE cdks SET status = 'unused', instance_id = NULL, used_at = NULL "
+            "WHERE code = ? AND instance_id = ? AND status = 'used'",
+            (code, instance_id)
+        )
+        conn.commit()
+        return cursor.rowcount == 1
+
+def unbind_cdk_bot(code: str, bot_id: str) -> bool:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE cdks SET status = 'unused', bot_id = NULL, used_at = NULL "
+            "WHERE code = ? AND bot_id = ? AND status = 'used'",
+            (code, bot_id)
+        )
+        conn.commit()
+        return cursor.rowcount == 1
 
 # --- 实例管理 ---
 

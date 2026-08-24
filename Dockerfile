@@ -19,7 +19,9 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY . .
+COPY app.py config.py database.py docker_service.py firewall_service.py music_bot_service.py port_manager.py requirements.txt ./
+COPY templates ./templates
+COPY static ./static
 
 EXPOSE 12345
 

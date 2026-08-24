@@ -23,8 +23,9 @@ echo "[*] 激活虚拟环境并安装依赖..."
 source venv/bin/activate
 pip install -r requirements.txt
 
-# 创建数据目录
-mkdir -p /data/teamspeak
+# 创建配置指定的数据目录
+DATA_DIR="${TS_DATA_DIR:-/data/teamspeak}"
+mkdir -p "$DATA_DIR"
 
 # 自动放行 Linux 本地防火墙端口（如果已开启 firewalld / ufw）
 if command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld; then
@@ -43,4 +44,4 @@ elif command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
 fi
 
 echo "[*] 正在启动管理服务，监听端口 12345..."
-python app.py
+"$PYTHON_CMD" app.py

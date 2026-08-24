@@ -12,11 +12,15 @@ services:
       - SERVER_PORT=12345
       - ADMIN_PASSWORD=admin123456
       - TS_DATA_DIR=/data/teamspeak
+      - DB_PATH=/app/db/teamspeak_manager.db
       - PUBLIC_SERVER_IP=
     volumes:
       # 挂载宿主机 Docker 套接字，允许容器内调度宿主机的 Docker
       - /var/run/docker.sock:/var/run/docker.sock
       # 挂载宿主机 TS 数据目录与生成的 compose 文件
       - /data/teamspeak:/data/teamspeak
-      # 挂载数据库
-      - ./teamspeak_manager.db:/app/teamspeak_manager.db
+      # 使用命名卷保存数据库，避免宿主机文件不存在时被 Docker 创建成目录
+      - ts_manager_db:/app/db
+
+volumes:
+  ts_manager_db:

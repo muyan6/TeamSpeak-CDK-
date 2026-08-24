@@ -592,7 +592,7 @@
         const res = await fetch(`/api/bot-instances/${currentBotInstance.bot_id}/action`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action })
+          body: JSON.stringify({ action, cdk: currentBotInstance.cdk_code || '' })
         });
         const data = await res.json();
         alert(data.message || '操作完成');
@@ -687,7 +687,12 @@
       toast.className = 'toast-msg';
       const icon = type === 'success' ? 'fa-circle-check' : (type === 'error' ? 'fa-circle-xmark' : 'fa-circle-info');
       const iconColor = type === 'success' ? '#34d399' : (type === 'error' ? '#f87171' : '#60a5fa');
-      toast.innerHTML = `<i class="fa-solid ${icon}" style="color: ${iconColor};"></i> <span>${msg}</span>`;
+      const iconEl = document.createElement('i');
+      iconEl.className = `fa-solid ${icon}`;
+      iconEl.style.color = iconColor;
+      const textEl = document.createElement('span');
+      textEl.textContent = String(msg ?? '');
+      toast.append(iconEl, document.createTextNode(' '), textEl);
       container.appendChild(toast);
       setTimeout(() => {
         toast.style.opacity = '0';

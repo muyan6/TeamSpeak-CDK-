@@ -265,7 +265,12 @@ class MusicBotClient:
         if ok and auto_start and isinstance(res, dict) and "id" in res:
             # 确保启动机器人
             bot_id = res["id"]
-            self.start_bot(bot_id)
+            start_ok, start_res = self.start_bot(bot_id)
+            if not start_ok:
+                return False, {
+                    "id": bot_id,
+                    "error": f"机器人已创建，但自动启动失败: {start_res}"
+                }
         return ok, res
 
     def start_bot(self, bot_id: str) -> Tuple[bool, Any]:
