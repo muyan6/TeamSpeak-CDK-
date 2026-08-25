@@ -62,7 +62,11 @@ from database import (
     unbind_cdk_bot,
     reserve_trial_server,
     release_trial_reservation,
-    normalize_server_target
+    normalize_server_target,
+    get_dns_config,
+    set_dns_config,
+    is_subdomain_available,
+    update_instance_domain
 )
 from port_manager import allocate_ports_for_instance
 from docker_service import (
@@ -76,6 +80,7 @@ from docker_service import (
 )
 from music_bot_service import music_bot_client
 from firewall_service import auto_open_firewall_ports, open_single_instance_ports
+from dns_service import dns_service, validate_subdomain_format, clean_subdomain_prefix
 
 from contextlib import asynccontextmanager
 
@@ -148,6 +153,33 @@ templates = Jinja2Templates(directory=str(templates_path))
 
 class RedeemRequest(BaseModel):
     cdk: str = Field(min_length=1, max_length=128)
+    subdomain: Optional[str] = Field(default=None, max_length=64)
+
+class CheckSubdomainRequest(BaseModel):
+    subdomain: str = Field(min_length=1, max_length=64)
+
+class DnsConfigRequest(BaseModel):
+    dns_enabled: bool = False
+    dns_provider: Literal["disabled", "cloudflare", "aliyun", "tencent"] = "disabled"
+    dns_root_domain: str = Field(default="", max_length=253)
+    dns_target_host: Optional[str] = Field(default="", max_length=253)
+    dns_cf_token: Optional[str] = Field(default="", max_length=500)
+    dns_cf_zone_id: Optional[str] = Field(default="", max_length=500)
+    dns_aliyun_ak: Optional[str] = Field(default="", max_length=500)
+    dns_aliyun_sk: Optional[str] = Field(default="", max_length=500)
+    dns_tencent_id: Optional[str] = Field(default="", max_length=500)
+    dns_tencent_key: Optional[str] = Field(default="", max_length=500)
+
+class TestDnsConfigRequest(BaseModel):
+    dns_provider: Literal["disabled", "cloudflare", "aliyun", "tencent"] = "disabled"
+    dns_root_domain: Optional[str] = Field(default="", max_length=253)
+    dns_target_host: Optional[str] = Field(default="", max_length=253)
+    dns_cf_token: Optional[str] = Field(default="", max_length=500)
+    dns_cf_zone_id: Optional[str] = Field(default="", max_length=500)
+    dns_aliyun_ak: Optional[str] = Field(default="", max_length=500)
+    dns_aliyun_sk: Optional[str] = Field(default="", max_length=500)
+    dns_tencent_id: Optional[str] = Field(default="", max_length=500)
+    dns_tencent_key: Optional[str] = Field(default="", max_length=500)
 
 class RedeemBotRequest(BaseModel):
     cdk: str = Field(min_length=1, max_length=128)
@@ -483,6 +515,28 @@ def parse_ts_target_endpoint(req: ParseTsTargetRequest):
         "message": message
     })
 
+@app.get("/api/dns-info")
+def get_dns_info_endpoint():
+    cfg = get_dns_config()
+    return {
+        "success": True,
+        "dns_enabled": cfg.get("dns_enabled", False),
+        "dns_provider": cfg.get("dns_provider", "disabled"),
+        "root_domain": cfg.get("dns_root_domain", "")
+    }
+
+@app.post("/api/check-subdomain")
+def check_subdomain_endpoint(req: CheckSubdomainRequest):
+    sub = (req.subdomain or "").strip()
+    available, msg, full_domain = is_subdomain_available(sub)
+    return {
+        "success": True,
+        "available": available,
+        "message": msg,
+        "full_domain": full_domain,
+        "subdomain": sub
+    }
+
 @app.post("/api/redeem")
 def redeem_cdk(req: RedeemRequest, request: Request):
     code = req.cdk.strip().upper()
@@ -542,7 +596,8 @@ def redeem_cdk(req: RedeemRequest, request: Request):
         instance_id = cdk_info.get("instance_id")
         instance = get_instance_by_id(instance_id) if instance_id else None
         if instance:
-            instance["public_host"] = client_host
+            instance["public_host"] = instance.get("subdomain") or client_host
+            instance["has_domain"] = bool(instance.get("subdomain"))
             return {
                 "success": True,
                 "type": "teamspeak",
@@ -553,6 +608,16 @@ def redeem_cdk(req: RedeemRequest, request: Request):
 
     if cdk_info["status"] != "unused":
         return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 状态异常或不可用"})
+
+    dns_cfg = get_dns_config()
+    dns_enabled = dns_cfg.get("dns_enabled", False)
+    subdomain_input = (req.subdomain or "").strip()
+
+    # 如果系统开启了 DNS 自动化绑定且用户填写了二级域名，先做严格校验与查重
+    if dns_enabled and subdomain_input:
+        avail, err_msg, full_domain = is_subdomain_available(subdomain_input)
+        if not avail:
+            return JSONResponse(status_code=400, content={"success": False, "message": f"二级域名不可用: {err_msg}"})
 
     claimed_cdk = claim_cdk(code, "teamspeak")
     if not claimed_cdk:
@@ -600,6 +665,24 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     else:
         expire_at = "permanent"
 
+    # 执行 DNS 自动绑定 (SRV 记录)
+    bound_subdomain = None
+    domain_record_id = None
+    dns_bind_msg = ""
+    if dns_enabled and subdomain_input:
+        ok_dns, rec_id, full_domain, err_dns = dns_service.create_ts_srv_record(
+            subdomain_prefix=subdomain_input,
+            target_host=client_host,
+            voice_port=ports["voice"],
+            dns_cfg=dns_cfg
+        )
+        if ok_dns:
+            bound_subdomain = full_domain
+            domain_record_id = rec_id
+            dns_bind_msg = f"（已自动绑定二级域名: {bound_subdomain}，客户端直连无需输入端口）"
+        else:
+            dns_bind_msg = f"（DNS 自动绑定提示: {err_dns}）"
+
     # 记录到数据库；数据库失败时回收已经启动的容器和临时 CDK 占用。
     try:
         instance = create_instance(
@@ -617,30 +700,43 @@ def redeem_cdk(req: RedeemRequest, request: Request):
             cdk_code=code,
             duration_months=duration_m,
             expire_at=expire_at,
-            status="running"
+            status="running",
+            subdomain=bound_subdomain,
+            domain_record_id=domain_record_id
         )
         if not instance or not bind_cdk_instance(code, instance_id):
             raise RuntimeError("CDK 绑定失败")
     except Exception as e:
+        if domain_record_id:
+            try:
+                dns_service.delete_ts_srv_record(domain_record_id, dns_cfg=dns_cfg)
+            except Exception:
+                pass
         delete_instance(instance_id)
         destroy_instance_container(instance_id, delete_files=True)
         release_cdk_claim(code)
         return JSONResponse(status_code=500, content={"success": False, "message": f"服务器记录失败: {str(e)}"})
-    instance["public_host"] = client_host
+    instance["public_host"] = bound_subdomain or client_host
+    instance["has_domain"] = bool(bound_subdomain)
     instance["credentials_ready"] = bool(admin_token or query_password or query_apikey)
 
     # 如果是体验卡开通，记录该服务器地址
     if is_trial:
         try:
             record_trial_server(
-                addr=client_host,
+                addr=bound_subdomain or client_host,
                 port=ports["voice"],
                 cdk_code=code,
                 cdk_type="teamspeak",
                 target_id=str(instance_id),
-                raw_input=f"{client_host}:{ports['voice']}"
+                raw_input=f"{bound_subdomain or client_host}:{ports['voice']}"
             )
         except Exception as e:
+            if domain_record_id:
+                try:
+                    dns_service.delete_ts_srv_record(domain_record_id, dns_cfg=dns_cfg)
+                except Exception:
+                    pass
             delete_instance(instance_id)
             destroy_instance_container(instance_id, delete_files=True)
             unbind_cdk_instance(code, instance_id)
@@ -658,7 +754,7 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     return {
         "success": True,
         "type": "teamspeak",
-        "message": f"恭喜！TeamSpeak 服务器 ({name}) 已成功开通并启动！({expire_desc}；{credential_desc})",
+        "message": f"恭喜！TeamSpeak 服务器 ({name}) 已成功开通并启动！{dns_bind_msg} ({expire_desc}；{credential_desc})",
         "instance": instance
     }
 
@@ -1156,6 +1252,11 @@ def manage_instance(instance_id: int, req: InstanceActionRequest, _: bool = Depe
         return JSONResponse(status_code=500, content={"success": False, "message": "重启失败"})
 
     elif action == "destroy":
+        if instance.get("domain_record_id"):
+            try:
+                dns_service.delete_ts_srv_record(instance["domain_record_id"])
+            except Exception as e:
+                print(f"[Warning] 删除 DNS 记录异常: {e}")
         ok = destroy_instance_container(instance_id, delete_files=True)
         if not ok:
             return JSONResponse(status_code=500, content={
@@ -1186,6 +1287,12 @@ def batch_manage_instances_api(req: BatchActionInstancesRequest, _: bool = Depen
                 update_instance_status(instance_id, "running")
                 success_count += 1
         elif action == "destroy":
+            inst = get_instance_by_id(instance_id)
+            if inst and inst.get("domain_record_id"):
+                try:
+                    dns_service.delete_ts_srv_record(inst["domain_record_id"])
+                except Exception:
+                    pass
             if destroy_instance_container(instance_id, delete_files=True) and delete_instance(instance_id):
                 success_count += 1
     return {"success": True, "count": success_count, "message": f"已成功对 {success_count} 个 TS 实例执行【{action}】操作"}
@@ -1375,6 +1482,35 @@ def test_bot_config_api(req: Optional[TestBotConfigRequest] = None, _: bool = De
             "message": msg,
             "data": data
         })
+
+# --- DNS 自动化绑定配置 API ---
+
+@app.get("/api/admin/dns-config")
+def get_dns_config_admin_api(_: bool = Depends(verify_admin)):
+    cfg = get_dns_config()
+    return {
+        "success": True,
+        "config": cfg
+    }
+
+@app.post("/api/admin/dns-config")
+def update_dns_config_admin_api(req: DnsConfigRequest, _: bool = Depends(verify_admin)):
+    data = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+    saved = set_dns_config(data)
+    return {
+        "success": True,
+        "message": "DNS 自动化绑定配置已成功保存！",
+        "config": saved
+    }
+
+@app.post("/api/admin/dns-config/test")
+def test_dns_config_admin_api(req: TestDnsConfigRequest, _: bool = Depends(verify_admin)):
+    data = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+    ok, msg = dns_service.test_connection(data)
+    if ok:
+        return {"success": True, "message": msg}
+    else:
+        return JSONResponse(status_code=400, content={"success": False, "message": msg})
 
 if __name__ == "__main__":
     import uvicorn

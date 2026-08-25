@@ -55,6 +55,8 @@ def init_db():
                 duration_months INTEGER NOT NULL DEFAULT 0, -- 0 为永久, 1 为 1个月, 3 为 3个月...
                 expire_at TEXT DEFAULT 'permanent',    -- 'YYYY-MM-DD HH:MM:SS' 或 'permanent'
                 status TEXT NOT NULL DEFAULT 'running', -- 'running', 'stopped', 'expired', 'error'
+                subdomain TEXT,                        -- 绑定的专属二级域名 (如 play.yourdomain.com)
+                domain_record_id TEXT,                 -- DNS 服务商记录 ID (用于自动销毁/删除)
                 created_at TEXT NOT NULL
             )
         ''')
@@ -117,6 +119,10 @@ def init_db():
             cursor.execute("ALTER TABLE instances ADD COLUMN duration_months INTEGER NOT NULL DEFAULT 0")
         if "expire_at" not in cols:
             cursor.execute("ALTER TABLE instances ADD COLUMN expire_at TEXT DEFAULT 'permanent'")
+        if "subdomain" not in cols:
+            cursor.execute("ALTER TABLE instances ADD COLUMN subdomain TEXT")
+        if "domain_record_id" not in cols:
+            cursor.execute("ALTER TABLE instances ADD COLUMN domain_record_id TEXT")
 
         cursor.execute("PRAGMA table_info(cdks)")
         cdk_cols = [col["name"] for col in cursor.fetchall()]
@@ -191,6 +197,67 @@ def set_bot_config(url: str, user: str, password: str) -> Dict[str, str]:
         "bot_panel_user": cleaned_user,
         "bot_panel_pass": cleaned_pass
     }
+
+# --- DNS 自动化绑定配置 ---
+
+def get_dns_config() -> Dict[str, Any]:
+    return {
+        "dns_enabled": get_setting("dns_enabled", "0") == "1",
+        "dns_provider": get_setting("dns_provider", "disabled") or "disabled",
+        "dns_root_domain": get_setting("dns_root_domain", "") or "",
+        "dns_target_host": get_setting("dns_target_host", "") or "",
+        "dns_cf_token": get_setting("dns_cf_token", "") or "",
+        "dns_cf_zone_id": get_setting("dns_cf_zone_id", "") or "",
+        "dns_aliyun_ak": get_setting("dns_aliyun_ak", "") or "",
+        "dns_aliyun_sk": get_setting("dns_aliyun_sk", "") or "",
+        "dns_tencent_id": get_setting("dns_tencent_id", "") or "",
+        "dns_tencent_key": get_setting("dns_tencent_key", "") or ""
+    }
+
+def set_dns_config(data: Dict[str, Any]) -> Dict[str, Any]:
+    if "dns_enabled" in data:
+        set_setting("dns_enabled", "1" if data["dns_enabled"] else "0")
+    if "dns_provider" in data:
+        set_setting("dns_provider", str(data["dns_provider"]).strip().lower())
+    if "dns_root_domain" in data:
+        set_setting("dns_root_domain", str(data["dns_root_domain"]).strip().lower().rstrip("."))
+    if "dns_target_host" in data:
+        set_setting("dns_target_host", str(data["dns_target_host"]).strip())
+    if "dns_cf_token" in data:
+        set_setting("dns_cf_token", str(data["dns_cf_token"]).strip())
+    if "dns_cf_zone_id" in data:
+        set_setting("dns_cf_zone_id", str(data["dns_cf_zone_id"]).strip())
+    if "dns_aliyun_ak" in data:
+        set_setting("dns_aliyun_ak", str(data["dns_aliyun_ak"]).strip())
+    if "dns_aliyun_sk" in data:
+        set_setting("dns_aliyun_sk", str(data["dns_aliyun_sk"]).strip())
+    if "dns_tencent_id" in data:
+        set_setting("dns_tencent_id", str(data["dns_tencent_id"]).strip())
+    if "dns_tencent_key" in data:
+        set_setting("dns_tencent_key", str(data["dns_tencent_key"]).strip())
+    return get_dns_config()
+
+def is_subdomain_available(subdomain_prefix: str) -> Tuple[bool, str, str]:
+    from dns_service import validate_subdomain_format, clean_subdomain_prefix
+    p = clean_subdomain_prefix(subdomain_prefix)
+    valid, err = validate_subdomain_format(p)
+    if not valid:
+        return False, err, ""
+    
+    cfg = get_dns_config()
+    root_domain = cfg.get("dns_root_domain", "")
+    full_subdomain = f"{p}.{root_domain}" if root_domain else p
+
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT id, name, status FROM instances WHERE LOWER(subdomain) = ? OR LOWER(subdomain) LIKE ?",
+            (full_subdomain.lower(), f"{p}.%")
+        )
+        row = cursor.fetchone()
+        if row:
+            return False, f"二级域名 [{full_subdomain}] 已被服务器 ({row['name']}) 占用，请换一个名称", full_subdomain
+    return True, "该二级域名可用", full_subdomain
 
 # --- CDK 管理 ---
 
@@ -635,7 +702,9 @@ def create_instance(
     cdk_code: Optional[str] = None,
     duration_months: int = 0,
     expire_at: Optional[str] = None,
-    status: str = "running"
+    status: str = "running",
+    subdomain: Optional[str] = None,
+    domain_record_id: Optional[str] = None
 ) -> Dict[str, Any]:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
@@ -645,16 +714,27 @@ def create_instance(
                 id, name, container_name, dir_path, 
                 voice_port, file_port, query_port, tsdns_port, 
                 admin_token, query_password, query_apikey,
-                cdk_code, duration_months, expire_at, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                cdk_code, duration_months, expire_at, status, created_at,
+                subdomain, domain_record_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             instance_id, name, container_name, dir_path,
             voice_port, file_port, query_port, tsdns_port,
             admin_token, query_password, query_apikey,
-            cdk_code, duration_months, expire_at or "permanent", status, now
+            cdk_code, duration_months, expire_at or "permanent", status, now,
+            subdomain, domain_record_id
         ))
         conn.commit()
     return get_instance_by_id(instance_id)
+
+def update_instance_domain(instance_id: int, subdomain: Optional[str], domain_record_id: Optional[str]):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE instances SET subdomain = ?, domain_record_id = ? WHERE id = ?",
+            (subdomain, domain_record_id, instance_id)
+        )
+        conn.commit()
 
 def get_instance_by_id(instance_id: int) -> Optional[Dict[str, Any]]:
     with get_connection() as conn:

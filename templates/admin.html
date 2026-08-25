@@ -334,6 +334,9 @@
         <button class="tab-btn" id="tabBtnBotConfig" onclick="switchTab('bot_config')">
           <i class="fa-solid fa-sliders"></i> 机器人平台对接配置
         </button>
+        <button class="tab-btn" id="tabBtnDnsConfig" onclick="switchTab('dns_config')">
+          <i class="fa-solid fa-globe"></i> 域名与 DNS 自动绑定
+        </button>
       </div>
 
       <!-- Tab 1: TS 实例列表 -->
@@ -367,6 +370,7 @@
               <tr>
                 <th style="width: 36px; text-align: center;"><input type="checkbox" id="selectAllInstances" onchange="toggleSelectAllInstances(this)"></th>
                 <th>编号 / 实例名</th>
+                <th>绑定二级域名</th>
                 <th>存储目录 / 容器名</th>
                 <th>语音端口 (UDP)</th>
                 <th>文件 / 查询端口 (TCP)</th>
@@ -379,7 +383,7 @@
               </tr>
             </thead>
             <tbody id="instancesTableBody">
-              <tr><td colspan="11" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
+              <tr><td colspan="12" style="text-align: center; color: var(--text-muted);">加载中...</td></tr>
             </tbody>
           </table>
         </div>
@@ -652,6 +656,145 @@
 
           <!-- 测试结果与当前连通状态反馈 -->
           <div id="testResultBox" style="display: none; padding: 1rem 1.25rem; border-radius: 10px; font-size: 0.88rem; margin-top: 1rem;"></div>
+        </div>
+      </div>
+
+      <!-- Tab 5: 域名与 DNS 自动化绑定配置 -->
+      <div id="tabContentDnsConfig" class="card" style="display: none;">
+        <div style="margin-bottom: 1.5rem;">
+          <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 0.75rem;">
+            <div>
+              <h3 style="font-size: 1.2rem; font-weight: 700; color: #38bdf8;">
+                <i class="fa-solid fa-globe"></i> 域名与 DNS 自动化绑定配置
+              </h3>
+              <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.3rem;">
+                配置域名解析服务商 API（支持 Cloudflare、阿里云、腾讯云），开通服务器时自动绑定专属二级域名 (SRV 记录)，免输端口直连并隐藏 IP。
+              </p>
+            </div>
+            <button class="btn-action" onclick="loadDnsConfig()"><i class="fa-solid fa-rotate"></i> 重新载入</button>
+          </div>
+        </div>
+
+        <div style="max-width: 740px;">
+          <!-- 核心原理说明条 -->
+          <div style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 12px; padding: 1rem 1.25rem; margin-bottom: 1.5rem;">
+            <div style="display: flex; gap: 0.75rem; align-items: flex-start;">
+              <i class="fa-solid fa-bolt" style="color: #38bdf8; font-size: 1.2rem; margin-top: 2px;"></i>
+              <div style="font-size: 0.84rem; color: #cbd5e1; line-height: 1.65;">
+                <strong style="color: #60a5fa;">💡 为什么无需泛解析？</strong><br>
+                系统在用户输入 CDK 兑换时自选二级域名前缀（如 <code>play</code>），后台通过 DNS API <strong>只添加精准的 SRV 解析记录</strong>（<code>_ts3._udp.play.yourdomain.com</code>）。多台服务器可共用同一个主域名，互不影响；销毁服务器时自动回收记录。
+              </div>
+            </div>
+          </div>
+
+          <form id="dnsConfigForm" onsubmit="handleSaveDnsConfig(event)">
+            <!-- 开关与服务商选择 -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; margin-bottom: 1.25rem;">
+              <div>
+                <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
+                  <i class="fa-solid fa-toggle-on" style="color: #34d399;"></i> 功能开启状态
+                </label>
+                <select id="cfgDnsEnabled" class="form-control" style="width: 100%; padding: 0.65rem 0.9rem;">
+                  <option value="1">🟢 启用 DNS 自动化绑定</option>
+                  <option value="0">⚪ 禁用 (仅使用 IP:端口)</option>
+                </select>
+              </div>
+
+              <div>
+                <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
+                  <i class="fa-solid fa-server" style="color: #60a5fa;"></i> DNS 服务提供商
+                </label>
+                <select id="cfgDnsProvider" class="form-control" onchange="onDnsProviderChange()" style="width: 100%; padding: 0.65rem 0.9rem;">
+                  <option value="cloudflare">Cloudflare (全球高速/推荐)</option>
+                  <option value="aliyun">阿里云 DNS (Alibaba Cloud)</option>
+                  <option value="tencent">腾讯云 DNSPod (Tencent Cloud)</option>
+                  <option value="disabled">暂不配置 / 禁用</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- 主域名与目标节点 -->
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; margin-bottom: 1.25rem;">
+              <div>
+                <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
+                  <i class="fa-solid fa-globe" style="color: #38bdf8;"></i> 主域名 (Root Domain)
+                </label>
+                <input type="text" id="cfgDnsRootDomain" class="form-control" style="width: 100%; padding: 0.65rem 0.9rem;" placeholder="如 yourdomain.com" required>
+                <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 0.35rem;">
+                  您的顶级域名，无需 <code>http://</code>，末尾不带点
+                </div>
+              </div>
+
+              <div>
+                <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
+                  <i class="fa-solid fa-network-wired" style="color: #facc15;"></i> 物理节点主机/A记录 (可选)
+                </label>
+                <input type="text" id="cfgDnsTargetHost" class="form-control" style="width: 100%; padding: 0.65rem 0.9rem;" placeholder="如 node1.yourdomain.com 或 服务器IP">
+                <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 0.35rem;">
+                  SRV 指向的目标 A 记录；留空自动使用当前服务器公网 IP
+                </div>
+              </div>
+            </div>
+
+            <!-- Cloudflare 配置项 -->
+            <div id="dnsFieldsCloudflare" style="display: none; background: var(--bg-card-inner); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.2rem; margin-bottom: 1.25rem;">
+              <h4 style="font-size: 0.95rem; color: #f97316; margin-bottom: 0.85rem;"><i class="fa-brands fa-cloudflare"></i> Cloudflare API 配置凭据</h4>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem;">
+                <div>
+                  <label class="info-label" style="display: block; margin-bottom: 0.35rem;">API Token (区域 DNS 编辑权限)</label>
+                  <input type="password" id="cfgDnsCfToken" class="form-control" style="width: 100%;" placeholder="Bearer Token (具有 Zone.DNS Edit 权限)">
+                </div>
+                <div>
+                  <label class="info-label" style="display: block; margin-bottom: 0.35rem;">Zone ID (区域 ID)</label>
+                  <input type="text" id="cfgDnsCfZoneId" class="form-control" style="width: 100%;" placeholder="在域名概述右下角获取 32 位字符串">
+                </div>
+              </div>
+            </div>
+
+            <!-- 阿里云配置项 -->
+            <div id="dnsFieldsAliyun" style="display: none; background: var(--bg-card-inner); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.2rem; margin-bottom: 1.25rem;">
+              <h4 style="font-size: 0.95rem; color: #ff6a00; margin-bottom: 0.85rem;"><i class="fa-solid fa-cloud"></i> 阿里云 RAM AccessKey 配置</h4>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem;">
+                <div>
+                  <label class="info-label" style="display: block; margin-bottom: 0.35rem;">AccessKey ID</label>
+                  <input type="text" id="cfgDnsAliyunAk" class="form-control" style="width: 100%;" placeholder="LTAI5t...">
+                </div>
+                <div>
+                  <label class="info-label" style="display: block; margin-bottom: 0.35rem;">AccessKey Secret</label>
+                  <input type="password" id="cfgDnsAliyunSk" class="form-control" style="width: 100%;" placeholder="输入 AccessKey Secret">
+                </div>
+              </div>
+            </div>
+
+            <!-- 腾讯云配置项 -->
+            <div id="dnsFieldsTencent" style="display: none; background: var(--bg-card-inner); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.2rem; margin-bottom: 1.25rem;">
+              <h4 style="font-size: 0.95rem; color: #006eff; margin-bottom: 0.85rem;"><i class="fa-solid fa-cloud"></i> 腾讯云 DNSPod Secret 密钥配置</h4>
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1rem;">
+                <div>
+                  <label class="info-label" style="display: block; margin-bottom: 0.35rem;">SecretId</label>
+                  <input type="text" id="cfgDnsTencentId" class="form-control" style="width: 100%;" placeholder="AKID...">
+                </div>
+                <div>
+                  <label class="info-label" style="display: block; margin-bottom: 0.35rem;">SecretKey</label>
+                  <input type="password" id="cfgDnsTencentKey" class="form-control" style="width: 100%;" placeholder="输入 SecretKey">
+                </div>
+              </div>
+            </div>
+
+            <!-- 操作按钮组 -->
+            <div style="display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; margin-bottom: 1.25rem;">
+              <button type="submit" id="saveDnsConfigBtn" class="btn-primary" style="background: linear-gradient(135deg, #0ea5e9, #6366f1); padding: 0.65rem 1.5rem;">
+                <i class="fa-solid fa-floppy-disk"></i> 保存 DNS 配置
+              </button>
+              <button type="button" id="testDnsConfigBtn" class="btn-action" style="padding: 0.65rem 1.25rem;" onclick="handleTestDnsConfig()">
+                <span class="spinner" id="testDnsSpinner" style="display: none; width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;"></span>
+                <i class="fa-solid fa-vial" id="testDnsIcon"></i> 测试 DNS API 连通性
+              </button>
+            </div>
+          </form>
+
+          <!-- 测试结果反馈 -->
+          <div id="dnsTestResultBox" style="display: none; padding: 1rem 1.25rem; border-radius: 10px; font-size: 0.88rem; margin-top: 1rem;"></div>
         </div>
       </div>
     </div>
@@ -1033,10 +1176,12 @@
       document.getElementById('tabBtnBots').classList.remove('active');
       document.getElementById('tabBtnCdks').classList.remove('active');
       document.getElementById('tabBtnBotConfig').classList.remove('active');
+      document.getElementById('tabBtnDnsConfig').classList.remove('active');
       document.getElementById('tabContentInstances').style.display = 'none';
       document.getElementById('tabContentBots').style.display = 'none';
       document.getElementById('tabContentCdks').style.display = 'none';
       document.getElementById('tabContentBotConfig').style.display = 'none';
+      document.getElementById('tabContentDnsConfig').style.display = 'none';
 
       if (tab === 'instances') {
         document.getElementById('tabBtnInstances').classList.add('active');
@@ -1054,6 +1199,10 @@
         document.getElementById('tabBtnBotConfig').classList.add('active');
         document.getElementById('tabContentBotConfig').style.display = 'block';
         loadBotConfig();
+      } else if (tab === 'dns_config') {
+        document.getElementById('tabBtnDnsConfig').classList.add('active');
+        document.getElementById('tabContentDnsConfig').style.display = 'block';
+        loadDnsConfig();
       }
     }
 
@@ -1084,7 +1233,7 @@
 
     async function loadInstances() {
       const tbody = document.getElementById('instancesTableBody');
-      tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="12" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
       clearSelectedInstances();
       try {
         const res = await fetch('/api/admin/instances', {
@@ -1092,7 +1241,7 @@
         });
         const data = await res.json();
         if (!data.success || data.instances.length === 0) {
-          tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无 TeamSpeak 实例</td></tr>';
+          tbody.innerHTML = '<tr><td colspan="12" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无 TeamSpeak 实例</td></tr>';
           return;
         }
 
@@ -1104,6 +1253,9 @@
             <td>
               <div style="font-weight: 700; color: #60a5fa; font-size: 1rem;">${escapeHtml(inst.name)}</div>
               <div style="font-size: 0.75rem; color: var(--text-muted);">ID: ${escapeHtml(inst.id)}</div>
+            </td>
+            <td>
+              ${inst.subdomain ? `<div style="font-weight: 700; color: #38bdf8; font-family: monospace; font-size: 0.85rem;"><i class="fa-solid fa-globe"></i> ${escapeHtml(inst.subdomain)} <button class="btn-action btn-action-sm" onclick="copyToClipboard(${jsString(inst.subdomain)}, '已复制二级域名')"><i class="fa-regular fa-copy"></i></button></div><div style="font-size: 0.72rem; color: #34d399;"><i class="fa-solid fa-bolt"></i> SRV已绑定</div>` : '<span style="color: var(--text-muted); font-size: 0.78rem;">未绑定 (IP直连)</span>'}
             </td>
             <td>
               <div style="font-family: monospace; font-size: 0.8rem; color: #a78bfa;">${escapeHtml(inst.dir_path)}</div>
@@ -2132,6 +2284,166 @@
         resultBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
         resultBox.style.color = '#f87171';
         resultBox.innerHTML = `<i class="fa-solid fa-circle-xmark" style="font-size: 1.1rem; margin-right: 6px;"></i> <strong>请求异常：</strong>网络请求失败，请检查服务器网络与后台日志`;
+        showToast('测试请求异常', 'error');
+      } finally {
+        testBtn.disabled = false;
+        spinner.style.display = 'none';
+        icon.style.display = 'inline-block';
+      }
+    }
+
+    // --- 域名与 DNS 自动化绑定配置管理 ---
+
+    function onDnsProviderChange() {
+      const provider = document.getElementById('cfgDnsProvider').value;
+      const cfFields = document.getElementById('dnsFieldsCloudflare');
+      const aliyunFields = document.getElementById('dnsFieldsAliyun');
+      const tencentFields = document.getElementById('dnsFieldsTencent');
+
+      if (cfFields) cfFields.style.display = (provider === 'cloudflare') ? 'block' : 'none';
+      if (aliyunFields) aliyunFields.style.display = (provider === 'aliyun') ? 'block' : 'none';
+      if (tencentFields) tencentFields.style.display = (provider === 'tencent') ? 'block' : 'none';
+    }
+
+    async function loadDnsConfig() {
+      const resultBox = document.getElementById('dnsTestResultBox');
+      if (resultBox) resultBox.style.display = 'none';
+      try {
+        const res = await fetch('/api/admin/dns-config', {
+          headers: { 'X-Admin-Password': adminToken }
+        });
+        const data = await res.json();
+        if (data.success && data.config) {
+          const c = data.config;
+          document.getElementById('cfgDnsEnabled').value = c.dns_enabled ? '1' : '0';
+          document.getElementById('cfgDnsProvider').value = c.dns_provider || 'disabled';
+          document.getElementById('cfgDnsRootDomain').value = c.dns_root_domain || '';
+          document.getElementById('cfgDnsTargetHost').value = c.dns_target_host || '';
+          document.getElementById('cfgDnsCfToken').value = c.dns_cf_token || '';
+          document.getElementById('cfgDnsCfZoneId').value = c.dns_cf_zone_id || '';
+          document.getElementById('cfgDnsAliyunAk').value = c.dns_aliyun_ak || '';
+          document.getElementById('cfgDnsAliyunSk').value = c.dns_aliyun_sk || '';
+          document.getElementById('cfgDnsTencentId').value = c.dns_tencent_id || '';
+          document.getElementById('cfgDnsTencentKey').value = c.dns_tencent_key || '';
+          onDnsProviderChange();
+        }
+      } catch (e) {
+        showToast('读取 DNS 配置失败', 'error');
+      }
+    }
+
+    async function handleSaveDnsConfig(e) {
+      e.preventDefault();
+      const payload = {
+        dns_enabled: document.getElementById('cfgDnsEnabled').value === '1',
+        dns_provider: document.getElementById('cfgDnsProvider').value,
+        dns_root_domain: document.getElementById('cfgDnsRootDomain').value.trim(),
+        dns_target_host: document.getElementById('cfgDnsTargetHost').value.trim(),
+        dns_cf_token: document.getElementById('cfgDnsCfToken').value.trim(),
+        dns_cf_zone_id: document.getElementById('cfgDnsCfZoneId').value.trim(),
+        dns_aliyun_ak: document.getElementById('cfgDnsAliyunAk').value.trim(),
+        dns_aliyun_sk: document.getElementById('cfgDnsAliyunSk').value.trim(),
+        dns_tencent_id: document.getElementById('cfgDnsTencentId').value.trim(),
+        dns_tencent_key: document.getElementById('cfgDnsTencentKey').value.trim()
+      };
+
+      if (payload.dns_enabled && !payload.dns_root_domain) {
+        showToast('启用 DNS 绑定时，主域名 (Root Domain) 不能为空', 'error');
+        return;
+      }
+
+      const saveBtn = document.getElementById('saveDnsConfigBtn');
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在保存...';
+
+      try {
+        const res = await fetch('/api/admin/dns-config', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('🎉 DNS 自动化配置保存成功！', 'success');
+        } else {
+          showToast(data.message || '保存失败', 'error');
+        }
+      } catch (err) {
+        showToast('请求异常，保存失败', 'error');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> 保存 DNS 配置';
+      }
+    }
+
+    async function handleTestDnsConfig() {
+      const payload = {
+        dns_provider: document.getElementById('cfgDnsProvider').value,
+        dns_root_domain: document.getElementById('cfgDnsRootDomain').value.trim(),
+        dns_target_host: document.getElementById('cfgDnsTargetHost').value.trim(),
+        dns_cf_token: document.getElementById('cfgDnsCfToken').value.trim(),
+        dns_cf_zone_id: document.getElementById('cfgDnsCfZoneId').value.trim(),
+        dns_aliyun_ak: document.getElementById('cfgDnsAliyunAk').value.trim(),
+        dns_aliyun_sk: document.getElementById('cfgDnsAliyunSk').value.trim(),
+        dns_tencent_id: document.getElementById('cfgDnsTencentId').value.trim(),
+        dns_tencent_key: document.getElementById('cfgDnsTencentKey').value.trim()
+      };
+
+      if (!payload.dns_root_domain && payload.dns_provider !== 'disabled') {
+        showToast('请先输入主域名后再测试连通性', 'error');
+        return;
+      }
+
+      const testBtn = document.getElementById('testDnsConfigBtn');
+      const spinner = document.getElementById('testDnsSpinner');
+      const icon = document.getElementById('testDnsIcon');
+      const resultBox = document.getElementById('dnsTestResultBox');
+
+      testBtn.disabled = true;
+      spinner.style.display = 'inline-block';
+      icon.style.display = 'none';
+      resultBox.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/admin/dns-config/test', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+
+        resultBox.style.display = 'block';
+        if (data.success) {
+          resultBox.style.background = 'rgba(16, 185, 129, 0.15)';
+          resultBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+          resultBox.style.color = '#34d399';
+          resultBox.replaceChildren(
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-check' }),
+            document.createTextNode(' 连通性测试通过：' + String(data.message || ''))
+          );
+          showToast('DNS API 接口连通测试通过！', 'success');
+        } else {
+          resultBox.style.background = 'rgba(239, 68, 68, 0.15)';
+          resultBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+          resultBox.style.color = '#f87171';
+          resultBox.replaceChildren(
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark' }),
+            document.createTextNode(' 连通性测试失败：' + String(data.message || data.detail || '鉴权未通过'))
+          );
+          showToast('DNS 连通性测试失败，请检查密钥与域名', 'error');
+        }
+      } catch (err) {
+        resultBox.style.display = 'block';
+        resultBox.style.background = 'rgba(239, 68, 68, 0.15)';
+        resultBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+        resultBox.style.color = '#f87171';
+        resultBox.innerHTML = `<i class="fa-solid fa-circle-xmark" style="font-size: 1.1rem; margin-right: 6px;"></i> <strong>测试请求异常：</strong>无法连接到 DNS 服务商接口，请检查网络`;
         showToast('测试请求异常', 'error');
       } finally {
         testBtn.disabled = false;

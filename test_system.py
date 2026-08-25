@@ -662,5 +662,117 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertEqual(data["transit_host"], "114.114.114.114")
         self.assertEqual(data["transit_port"], 20345)
 
+    def test_dns_service_validation_and_subdomain_uniqueness(self):
+        from dns_service import dns_service
+
+        # 1. 域名前缀校验
+        ok, msg = dns_service.validate_subdomain_format("play")
+        self.assertTrue(ok)
+        ok, msg = dns_service.validate_subdomain_format("ts-room-1")
+        self.assertTrue(ok)
+        ok, msg = dns_service.validate_subdomain_format("a")
+        self.assertFalse(ok)
+        ok, msg = dns_service.validate_subdomain_format("invalid_domain!")
+        self.assertFalse(ok)
+        ok, msg = dns_service.validate_subdomain_format("admin")
+        self.assertFalse(ok)  # 保留关键词
+
+        # 2. 数据库配置与查重
+        database.set_dns_config({
+            "dns_enabled": True,
+            "dns_provider": "cloudflare",
+            "dns_root_domain": "myts.com",
+            "dns_target_host": "node1.myts.com",
+            "dns_cf_token": "mock-token",
+            "dns_cf_zone_id": "mock-zone"
+        })
+        cfg = database.get_dns_config()
+        self.assertTrue(cfg["dns_enabled"])
+        self.assertEqual(cfg["dns_root_domain"], "myts.com")
+
+        # 3. 初始可用性检查
+        avail, msg, full = database.is_subdomain_available("room101")
+        self.assertTrue(avail)
+        self.assertEqual(full, "room101.myts.com")
+
+        # 4. 创建已绑定该域名的实例
+        database.create_instance(
+            instance_id=50,
+            name="ts50",
+            container_name="ts-teamspeak-50",
+            dir_path="/data/teamspeak/ts50",
+            voice_port=60050,
+            file_port=20050,
+            query_port=30050,
+            tsdns_port=40050,
+            subdomain="room101.myts.com",
+            domain_record_id="rec-12345"
+        )
+
+        # 5. 再次查重 -> 判定为已被占用
+        avail_after, msg_after, full_after = database.is_subdomain_available("room101")
+        self.assertFalse(avail_after)
+        self.assertIn("已被服务器", msg_after)
+
+    def test_dns_admin_and_redeem_api_flow(self):
+        try:
+            from unittest.mock import patch
+            from fastapi.testclient import TestClient
+            import app as ts_app
+            client = TestClient(ts_app.app)
+        except Exception:
+            self.skipTest("FastAPI TestClient 依赖不可用")
+
+        admin_pwd = database.get_admin_password()
+
+        # 1. 保存 Admin DNS 配置
+        save_resp = client.post("/api/admin/dns-config", json={
+            "dns_enabled": True,
+            "dns_provider": "cloudflare",
+            "dns_root_domain": "voice.example.com",
+            "dns_target_host": "ts-node1.example.com",
+            "dns_cf_token": "mock-token-abc",
+            "dns_cf_zone_id": "mock-zone-xyz"
+        }, headers={"X-Admin-Password": admin_pwd})
+        self.assertEqual(save_resp.status_code, 200)
+        self.assertTrue(save_resp.json()["success"])
+
+        # 2. 读取公开 DNS 信息
+        info_resp = client.get("/api/dns-info")
+        self.assertEqual(info_resp.status_code, 200)
+        info_data = info_resp.json()
+        self.assertTrue(info_data["dns_enabled"])
+        self.assertEqual(info_data["root_domain"], "voice.example.com")
+
+        # 3. 检查子域名可用性 API
+        chk_resp = client.post("/api/check-subdomain", json={"subdomain": "playgame"})
+        self.assertEqual(chk_resp.status_code, 200)
+        self.assertTrue(chk_resp.json()["available"])
+        self.assertEqual(chk_resp.json()["full_domain"], "playgame.voice.example.com")
+
+        # 4. 生成 TS CDK
+        cdks = database.create_cdks(count=1, remark="域名测试卡", cdk_type="teamspeak", duration_months=1)
+        cdk = cdks[0]
+
+        # 5. 用户兑换 CDK 并指定自定义二级域名
+        with patch.object(ts_app.docker_service, "create_and_start_instance_container", return_value=(True, {"admin_token": "tok-dns", "query_password": "p", "query_apikey": "k"})), \
+             patch.object(ts_app.dns_service, "create_ts_srv_record", return_value=(True, "playgame.voice.example.com", "cf-rec-9999")):
+
+            redeem_resp = client.post("/api/redeem", json={"cdk": cdk, "subdomain": "playgame"})
+            self.assertEqual(redeem_resp.status_code, 200)
+            res_data = redeem_resp.json()
+            self.assertTrue(res_data["success"])
+            self.assertEqual(res_data["instance"]["subdomain"], "playgame.voice.example.com")
+            self.assertEqual(res_data["instance"]["public_host"], "playgame.voice.example.com")
+            self.assertTrue(res_data["instance"]["has_domain"])
+
+        # 6. 验证 Admin 获取实例列表中包含二级域名
+        admin_inst_resp = client.get("/api/admin/instances", headers={"X-Admin-Password": admin_pwd})
+        self.assertEqual(admin_inst_resp.status_code, 200)
+        inst_list = admin_inst_resp.json()["instances"]
+        created_inst = next((i for i in inst_list if i["subdomain"] == "playgame.voice.example.com"), None)
+        self.assertIsNotNone(created_inst)
+        self.assertEqual(created_inst["domain_record_id"], "cf-rec-9999")
+
 if __name__ == "__main__":
     unittest.main()

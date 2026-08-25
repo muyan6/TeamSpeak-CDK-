@@ -60,6 +60,35 @@
               <span id="btnText"><i class="fa-solid fa-bolt"></i> 立即开通 / 查询</span>
             </button>
           </div>
+
+          <!-- 自定义二级域名输入选区 (若管理员开启了 DNS 自动化绑定) -->
+          <div id="subdomainConfigBox" style="display: none; margin-top: 1.25rem; padding: 1.1rem 1.25rem; background: var(--bg-card-inner); border: 1px solid var(--border-color); border-radius: 14px; text-align: left;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; flex-wrap: wrap; gap: 0.5rem;">
+              <label class="info-label" style="font-weight: 700; margin-bottom: 0; color: #60a5fa; font-size: 0.9rem;">
+                <i class="fa-solid fa-globe"></i> 自定义专属二级域名 (选填 / 推荐)
+              </label>
+              <span id="subdomainCheckBadge" class="badge badge-info" style="display: none; font-size: 0.76rem;">检查中...</span>
+            </div>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.75rem; line-height: 1.5;">
+              系统将自动向 DNS 绑定专属 SRV 记录。开通后<strong>在 TeamSpeak 客户端直接输入该域名即可秒连，无需输端口与 IP</strong>！
+            </p>
+            <div style="display: flex; align-items: center; gap: 0.45rem;">
+              <input 
+                type="text" 
+                id="subdomainInput" 
+                class="form-control" 
+                placeholder="输入前缀（如 play / room / myts）" 
+                style="flex: 1; font-family: 'Consolas', 'Courier New', monospace; font-size: 0.95rem; text-transform: lowercase;"
+                autocomplete="off"
+                maxlength="32"
+                oninput="handleSubdomainInputDebounce()"
+              />
+              <span id="subdomainRootDomainSuffix" style="font-size: 0.92rem; font-weight: 700; color: #38bdf8; background: var(--bg-card); padding: 0.48rem 0.85rem; border-radius: 8px; border: 1px solid var(--border-color); white-space: nowrap;">
+                .yourdomain.com
+              </span>
+            </div>
+            <div id="subdomainFeedback" style="font-size: 0.78rem; margin-top: 0.45rem; display: none; line-height: 1.4;"></div>
+          </div>
         </form>
         <div id="statusAlert" style="margin-top: 1.25rem; display: none; padding: 0.85rem; border-radius: 10px; font-size: 0.9rem;"></div>
       </div>
@@ -74,11 +103,17 @@
           <span class="badge badge-success" id="resStatusBadge">运行中 (Active)</span>
         </div>
 
+        <!-- 二级域名专属免输端口直连提示条 -->
+        <div id="resDomainBanner" style="display: none; background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 10px; padding: 0.75rem 1rem; margin-bottom: 1.25rem; font-size: 0.85rem; color: #7dd3fc; line-height: 1.55;">
+          <i class="fa-solid fa-bolt" style="color: #38bdf8; margin-right: 4px;"></i>
+          <strong>已自动绑定专属二级域名！</strong> 客户端直连<strong>只需输入下方域名</strong>即可秒进语音，无需输入冒号与端口号。
+        </div>
+
         <!-- 服务器连接信息 -->
         <div class="info-grid">
-          <div class="info-item">
-            <div class="info-label">语音连接地址 (Voice Address)</div>
-            <div class="info-value">
+          <div class="info-item" id="resVoiceAddrBox" style="background: rgba(59, 130, 246, 0.08); border-color: rgba(59, 130, 246, 0.35);">
+            <div class="info-label" id="resVoiceAddrLabel" style="color: #60a5fa; font-weight: 700;">语音连接地址 (Voice Address)</div>
+            <div class="info-value" style="font-size: 1.15rem; color: #38bdf8; font-weight: 800;">
               <span id="resVoiceAddr">-</span>
               <button class="btn-copy" onclick="copyText('resVoiceAddr')" title="复制语音地址"><i class="fa-regular fa-copy"></i></button>
             </div>
@@ -564,6 +599,8 @@
     let currentInstance = null;
     let currentBotInstance = null;
     let currentPendingBotCdk = '';
+    let systemDnsConfig = { dns_enabled: false, root_domain: '' };
+    let checkSubdomainTimer = null;
 
     // === 主题切换引擎 ===
     function updateThemeUI(theme) {
@@ -586,9 +623,102 @@
       showToast(`已切换至${target === 'dark' ? '黑夜模式' : '白天模式'}`);
     }
 
+    async function fetchDnsInfo() {
+      try {
+        const resp = await fetch('/api/dns-info');
+        if (resp.ok) {
+          const data = await resp.json();
+          systemDnsConfig = data;
+          const box = document.getElementById('subdomainConfigBox');
+          const suffix = document.getElementById('subdomainRootDomainSuffix');
+          if (data.dns_enabled && data.root_domain) {
+            if (box) box.style.display = 'block';
+            if (suffix) suffix.innerText = '.' + data.root_domain;
+          } else {
+            if (box) box.style.display = 'none';
+          }
+        }
+      } catch (e) {
+        console.warn('获取 DNS 配置跳过:', e);
+      }
+    }
+
+    function handleSubdomainInputDebounce() {
+      const input = document.getElementById('subdomainInput');
+      const badge = document.getElementById('subdomainCheckBadge');
+      const feedback = document.getElementById('subdomainFeedback');
+      if (!input) return;
+
+      let val = input.value.trim().toLowerCase().replace(/[^a-z0-9\-]/g, '');
+      input.value = val;
+
+      clearTimeout(checkSubdomainTimer);
+      if (!val) {
+        if (badge) badge.style.display = 'none';
+        if (feedback) feedback.style.display = 'none';
+        return;
+      }
+
+      if (val.length < 2) {
+        if (badge) {
+          badge.style.display = 'inline-block';
+          badge.className = 'badge badge-warning';
+          badge.innerText = '长度至少 2 位';
+        }
+        if (feedback) {
+          feedback.style.display = 'block';
+          feedback.style.color = '#fbbf24';
+          feedback.innerText = '二级域名前缀长度至少为 2 位字母或数字';
+        }
+        return;
+      }
+
+      if (badge) {
+        badge.style.display = 'inline-block';
+        badge.className = 'badge badge-info';
+        badge.innerText = '正在查重...';
+      }
+
+      checkSubdomainTimer = setTimeout(async () => {
+        try {
+          const resp = await fetch('/api/check-subdomain', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ subdomain: val })
+          });
+          const data = await resp.json();
+          if (data.available) {
+            if (badge) {
+              badge.className = 'badge badge-success';
+              badge.innerText = '✓ 该域名可用';
+            }
+            if (feedback) {
+              feedback.style.display = 'block';
+              feedback.style.color = '#34d399';
+              feedback.innerHTML = `<i class="fa-solid fa-circle-check"></i> 专属域名：<strong style="color:#38bdf8;">${data.full_domain}</strong>（可直接用于免端口连接）`;
+            }
+          } else {
+            if (badge) {
+              badge.className = 'badge badge-danger';
+              badge.innerText = '✗ 不可用';
+            }
+            if (feedback) {
+              feedback.style.display = 'block';
+              feedback.style.color = '#f87171';
+              feedback.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> ${data.message}`;
+            }
+          }
+        } catch (e) {
+          if (badge) badge.style.display = 'none';
+        }
+      }, 300);
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
       const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
       updateThemeUI(currentTheme);
+
+      fetchDnsInfo();
 
       const addrInput = document.getElementById('botServerAddrInput');
       const portInput = document.getElementById('botServerPortInput');
@@ -612,6 +742,9 @@
       const cdk = cdkInput.value.trim();
       if (!cdk) return;
 
+      const subInput = document.getElementById('subdomainInput');
+      const subdomain = (subInput && systemDnsConfig.dns_enabled) ? subInput.value.trim() : null;
+
       const submitBtn = document.getElementById('submitBtn');
       const spinner = document.getElementById('loadingSpinner');
       const btnText = document.getElementById('btnText');
@@ -633,7 +766,7 @@
         const response = await fetch('/api/redeem', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cdk: cdk })
+          body: JSON.stringify({ cdk: cdk, subdomain: subdomain })
         });
 
         const res = await response.json();
@@ -820,13 +953,24 @@
       const resultCard = document.getElementById('resultCard');
       resultCard.style.display = 'block';
 
+      const hasSubdomain = Boolean(inst.subdomain);
       const host = inst.public_host || window.location.hostname;
-      const voiceAddr = `${host}:${inst.voice_port}`;
+      const voiceAddr = hasSubdomain ? inst.subdomain : `${host}:${inst.voice_port}`;
+
+      const domainBanner = document.getElementById('resDomainBanner');
+      const voiceAddrLabel = document.getElementById('resVoiceAddrLabel');
+      if (hasSubdomain) {
+        if (domainBanner) domainBanner.style.display = 'block';
+        if (voiceAddrLabel) voiceAddrLabel.innerHTML = '<i class="fa-solid fa-globe"></i> 语音连接地址 (专属二级域名·免输端口)';
+      } else {
+        if (domainBanner) domainBanner.style.display = 'none';
+        if (voiceAddrLabel) voiceAddrLabel.innerHTML = '语音连接地址 (Voice Address)';
+      }
 
       document.getElementById('resServerName').innerText = `TeamSpeak 实例 (${inst.name})`;
       document.getElementById('resCreatedAt').innerText = `开通时间: ${inst.created_at || '刚刚'}`;
       document.getElementById('resVoiceAddr').innerText = voiceAddr;
-      document.getElementById('resVoicePort').innerText = `${inst.voice_port} (UDP)`;
+      document.getElementById('resVoicePort').innerText = hasSubdomain ? `${inst.voice_port} (UDP / SRV已内置)` : `${inst.voice_port} (UDP)`;
       document.getElementById('resExpire').innerText = inst.expire_at || '永久有效';
       document.getElementById('resFilePort').innerText = `${inst.file_port} (TCP)`;
       document.getElementById('resQueryPort').innerText = `${inst.query_port} (TCP)`;
@@ -852,7 +996,7 @@
         document.getElementById('apiKeyContainer').style.display = 'none';
       }
 
-      const clientUrl = `ts3server://${host}?port=${inst.voice_port}`;
+      const clientUrl = hasSubdomain ? `ts3server://${inst.subdomain}` : `ts3server://${host}?port=${inst.voice_port}`;
       document.getElementById('tsClientLink').href = clientUrl;
 
       resultCard.scrollIntoView({ behavior: 'smooth' });
@@ -971,6 +1115,10 @@
 
     function copyVoiceFull() {
       if (!currentInstance) return;
+      if (currentInstance.subdomain) {
+        copyToClipboard(currentInstance.subdomain, `已复制专属域名: ${currentInstance.subdomain}`);
+        return;
+      }
       const host = currentInstance.public_host || window.location.hostname;
       const voiceAddr = `${host}:${currentInstance.voice_port}`;
       copyToClipboard(voiceAddr, `已复制连接串: ${voiceAddr}`);
