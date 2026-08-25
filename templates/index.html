@@ -513,8 +513,8 @@
 
           <!-- 境外源站 IP / 底层解析 IP -->
           <div class="info-item">
-            <div class="info-label">
-              <i class="fa-solid fa-earth-asia"></i> 境外源服务器 IP (Origin Direct IP)
+            <div class="info-label" id="parsedOriginIpLabel">
+              <i class="fa-solid fa-server"></i> 节点底层解析 IP
             </div>
             <div class="info-value" style="font-size: 0.92rem; color: #94a3b8;">
               <span id="parsedOriginIp">-</span>
@@ -1177,7 +1177,25 @@
       if (!result) return;
       document.getElementById('parsedTransitHost').innerText = result.transitHost || result.recommendedHost;
       document.getElementById('parsedResolvedPort').innerText = result.transitPort || result.resolvedPort;
-      document.getElementById('parsedOriginIp').innerText = result.originIp || result.resolvedIp;
+      
+      const ipLabel = document.getElementById('parsedOriginIpLabel');
+      const ipElem = document.getElementById('parsedOriginIp');
+      const isOverseas = result.is_overseas || result.isOverseas;
+      const locText = result.geoInfo?.location || result.geoInfo?.country || '';
+
+      if (ipLabel) {
+        if (isOverseas) {
+          ipLabel.innerHTML = '<i class="fa-solid fa-earth-asia" style="color: #f87171;"></i> 境外源服务器 IP (海外直连)';
+        } else {
+          ipLabel.innerHTML = '<i class="fa-solid fa-server" style="color: #38bdf8;"></i> 节点底层解析 IP (国内机房)';
+        }
+      }
+
+      if (ipElem) {
+        const rawIp = result.originIp || result.resolvedIp || '-';
+        ipElem.innerText = locText ? `${rawIp} [${locText}]` : rawIp;
+      }
+
       document.getElementById('parsedFullAddr').innerText = result.fullAddress;
 
       const badge = document.getElementById('parsedNodeBadge');

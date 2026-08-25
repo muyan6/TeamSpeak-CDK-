@@ -433,26 +433,38 @@ def parse_ts_target_endpoint(req: ParseTsTargetRequest):
 
     # 判断节点类型与提示
     is_overseas = geo_info.get("is_overseas", False)
+    loc_str = geo_info.get("location", "") or geo_info.get("country", "")
+    
     if srv_target_host:
         node_type = "srv_relay"
-        badge_text = "⚡ SRV 中转节点（已优选，免翻墙）"
-        badge_class = "badge badge-success"
-        message = "已成功提取 SRV 国内中转节点与真实端口，优先推荐用于国内连接以避免境外直连阻断。"
+        if is_overseas:
+            badge_text = "⚡ SRV 中转节点（已优选，免翻墙）"
+            badge_class = "badge badge-success"
+            message = f"检测到 SRV 中转节点 ({srv_target_host} ➔ {origin_ip} {loc_str})，已自动优选作为连接地址，避免境外直连阻断。"
+        else:
+            badge_text = "⚡ 国内中转节点（已优选，免翻墙）"
+            badge_class = "badge badge-success"
+            message = f"检测到目标已接入国内高速中转线路 ({srv_target_host} ➔ {origin_ip} {loc_str})，国内可直接免翻墙低延迟连接。"
     elif is_domain and is_overseas:
         node_type = "domain_relay"
         badge_text = "⚡ 域名中转入口（已避开境外直连阻断）"
         badge_class = "badge badge-success"
-        message = f"检测到目标底层为境外服务器 ({origin_ip} - {geo_info.get('location', '')})，已自动优选国内中转入口域名作为连接地址。"
+        message = f"检测到目标底层为境外服务器 ({origin_ip} - {loc_str})，已自动优选国内中转入口域名作为连接地址。"
+    elif is_domain and not is_overseas:
+        node_type = "domain_relay"
+        badge_text = "⚡ 国内中转入口（免翻墙直连）"
+        badge_class = "badge badge-success"
+        message = f"检测到目标为国内中转线路 ({origin_ip} - {loc_str})，已选用中转入口域名，国内可直接免翻墙低延迟连接。"
     elif is_overseas:
         node_type = "overseas_origin"
         badge_text = f"⚠️ 境外直连源站 ({geo_info.get('country', '境外')})"
         badge_class = "badge badge-warning"
-        message = f"检测到该地址为境外服务器直连 IP ({origin_ip} - {geo_info.get('location', '')})，国内直连可能受阻或丢包，建议使用中转地址。"
+        message = f"检测到该地址为境外服务器直连 IP ({origin_ip} - {loc_str})，国内直连可能受阻或丢包，建议使用中转地址。"
     else:
         node_type = "direct"
-        badge_text = "🟢 标准连接节点"
+        badge_text = f"🟢 国内直连节点 ({loc_str or '国内'})"
         badge_class = "badge badge-info"
-        message = "已成功提取目标服务器连接信息与语音端口。"
+        message = f"已成功提取国内服务器连接信息 ({origin_ip} - {loc_str}) 与语音端口。"
 
     return JSONResponse(status_code=200, content={
         "success": True,
