@@ -296,7 +296,7 @@ class TencentDnsProvider:
         http_request_method = "POST"
         canonical_uri = "/"
         canonical_querystring = ""
-        canonical_headers = f"content-type:application/json; charset=utf-8\nhost:{host}\nx-tc-action:{action.lower()}\n"
+        canonical_headers = f"content-type:application/json; charset=utf-8\nhost:{host}\nx-tc-action:{action.strip()}\n"
         signed_headers = "content-type;host;x-tc-action"
         payload_str = json.dumps(payload)
         hashed_request_payload = hashlib.sha256(payload_str.encode("utf-8")).hexdigest()
