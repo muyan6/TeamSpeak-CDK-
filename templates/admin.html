@@ -4,6 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TeamSpeak 管理员控制台</title>
+  <!-- 主题预先应用，避免白屏/黑屏闪烁 -->
+  <script>
+    (function() {
+      const savedTheme = localStorage.getItem('ts_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    })();
+  </script>
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <style>
@@ -23,31 +30,34 @@
       padding: 0.85rem 0;
       margin-bottom: 1.75rem;
       border-bottom: 1px solid var(--border-color);
+      gap: 1rem;
     }
     .brand {
       display: flex;
       align-items: center;
       gap: 0.85rem;
       font-size: 1.35rem;
-      font-weight: 700;
-      color: #fff;
+      font-weight: 800;
+      color: var(--text-main);
       text-decoration: none;
     }
     .brand-icon {
       width: 40px;
       height: 40px;
-      background: linear-gradient(135deg, #ec4899, #8b5cf6);
-      border-radius: 10px;
+      background: var(--accent-pink-gradient);
+      border-radius: 12px;
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 1.25rem;
+      color: #fff;
       box-shadow: 0 4px 14px rgba(236, 72, 153, 0.35);
     }
     .nav-actions {
       display: flex;
       align-items: center;
       gap: 0.65rem;
+      flex-wrap: wrap;
     }
     .stats-row {
       display: grid;
@@ -56,19 +66,21 @@
       margin-bottom: 1.75rem;
     }
     .stat-card {
-      background: rgba(15, 23, 42, 0.7);
-      backdrop-filter: blur(12px);
-      -webkit-backdrop-filter: blur(12px);
+      background: var(--bg-card);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
       border: 1px solid var(--border-color);
-      border-radius: 14px;
+      border-radius: 16px;
       padding: 1.25rem 1.5rem;
       position: relative;
       overflow: hidden;
-      transition: transform 0.2s, box-shadow 0.2s;
+      box-shadow: var(--card-shadow);
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
     }
     .stat-card:hover {
       transform: translateY(-2px);
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+      box-shadow: 0 10px 28px rgba(0, 0, 0, 0.15);
+      border-color: var(--border-color-hover);
     }
     .stat-card::after {
       content: '';
@@ -85,21 +97,21 @@
       align-items: center;
       color: var(--text-muted);
       font-size: 0.85rem;
-      font-weight: 600;
+      font-weight: 700;
     }
     .stat-icon {
       font-size: 1.35rem;
-      opacity: 0.85;
+      opacity: 0.9;
     }
     .stat-val {
-      font-size: 2rem;
+      font-size: 2.1rem;
       font-weight: 800;
-      color: #fff;
+      color: var(--text-main);
       margin-top: 0.4rem;
       letter-spacing: -0.5px;
     }
     .stat-desc {
-      font-size: 0.75rem;
+      font-size: 0.76rem;
       color: var(--text-muted);
       margin-top: 0.25rem;
     }
@@ -108,9 +120,9 @@
     .tab-nav {
       display: flex;
       gap: 0.5rem;
-      background: rgba(15, 23, 42, 0.5);
+      background: var(--bg-card-inner);
       padding: 0.35rem;
-      border-radius: 12px;
+      border-radius: 14px;
       border: 1px solid var(--border-color);
       margin-bottom: 1.5rem;
       overflow-x: auto;
@@ -125,180 +137,30 @@
       background: transparent;
       border: none;
       color: var(--text-muted);
-      font-size: 0.95rem;
-      font-weight: 600;
+      font-size: 0.92rem;
+      font-weight: 700;
       padding: 0.75rem 1rem;
-      border-radius: 8px;
+      border-radius: 10px;
       cursor: pointer;
       transition: all 0.2s ease;
       white-space: nowrap;
     }
     .tab-btn:hover {
-      color: #fff;
-      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-main);
+      background: var(--bg-subtle-hover);
     }
     .tab-btn.active {
-      background: linear-gradient(135deg, rgba(59, 130, 246, 0.25), rgba(139, 92, 246, 0.25));
-      color: #60a5fa;
-      border: 1px solid rgba(59, 130, 246, 0.4);
-      box-shadow: 0 4px 12px rgba(59, 130, 246, 0.2);
-    }
-
-    /* Buttons & Controls */
-    .btn-action {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      background: rgba(255, 255, 255, 0.08);
-      border: 1px solid var(--border-color);
-      color: #e2e8f0;
-      padding: 0.4rem 0.75rem;
-      border-radius: 7px;
-      cursor: pointer;
-      font-size: 0.85rem;
-      font-weight: 500;
-      transition: all 0.15s ease;
-      text-decoration: none;
-    }
-    .btn-action:hover {
-      background: rgba(255, 255, 255, 0.18);
+      background: var(--accent-gradient);
       color: #fff;
-      transform: translateY(-1px);
-    }
-    .btn-action-sm {
-      padding: 0.25rem 0.5rem;
-      font-size: 0.78rem;
-    }
-    .btn-primary {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.5rem;
-      background: linear-gradient(135deg, #3b82f6, #6366f1);
-      color: white;
-      border: none;
-      padding: 0.55rem 1.25rem;
-      border-radius: 8px;
-      font-size: 0.9rem;
-      font-weight: 600;
-      cursor: pointer;
-      transition: all 0.2s;
       box-shadow: 0 4px 12px var(--accent-glow);
-    }
-    .btn-primary:hover {
-      box-shadow: 0 6px 18px rgba(59, 130, 246, 0.5);
-      transform: translateY(-1px);
-    }
-    .btn-danger {
-      background: rgba(239, 68, 68, 0.18);
-      border-color: rgba(239, 68, 68, 0.4);
-      color: #f87171;
-    }
-    .btn-danger:hover {
-      background: rgba(239, 68, 68, 0.35);
-      color: #fff;
-    }
-    .btn-purple {
-      background: rgba(168, 85, 247, 0.18);
-      border-color: rgba(168, 85, 247, 0.4);
-      color: #c084fc;
-    }
-    .btn-purple:hover {
-      background: rgba(168, 85, 247, 0.35);
-      color: #fff;
-    }
-
-    /* Table Styles */
-    .table-responsive {
-      overflow-x: auto;
-      border-radius: 10px;
-      border: 1px solid var(--border-color);
-    }
-    .data-table {
-      width: 100%;
-      border-collapse: collapse;
-      font-size: 0.88rem;
-      text-align: left;
-    }
-    .data-table thead {
-      background: rgba(15, 23, 42, 0.85);
-      border-bottom: 1px solid var(--border-color);
-    }
-    .data-table th {
-      padding: 0.85rem 1rem;
-      font-weight: 600;
-      color: #94a3b8;
-      white-space: nowrap;
-    }
-    .data-table tbody tr {
-      border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-      transition: background 0.15s;
-    }
-    .data-table tbody tr:hover {
-      background: rgba(255, 255, 255, 0.035);
-    }
-    .data-table td {
-      padding: 0.85rem 1rem;
-      vertical-align: middle;
-    }
-
-    /* Badges */
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.3rem;
-      padding: 0.25rem 0.55rem;
-      border-radius: 6px;
-      font-size: 0.75rem;
-      font-weight: 600;
-      white-space: nowrap;
-    }
-    .badge-success {
-      background: rgba(16, 185, 129, 0.15);
-      color: #34d399;
-      border: 1px solid rgba(16, 185, 129, 0.35);
-    }
-    .badge-info {
-      background: rgba(59, 130, 246, 0.15);
-      color: #60a5fa;
-      border: 1px solid rgba(59, 130, 246, 0.35);
-    }
-    .badge-warning {
-      background: rgba(245, 158, 11, 0.15);
-      color: #fbbf24;
-      border: 1px solid rgba(245, 158, 11, 0.35);
-    }
-    .badge-danger {
-      background: rgba(239, 68, 68, 0.15);
-      color: #f87171;
-      border: 1px solid rgba(239, 68, 68, 0.35);
-    }
-    .badge-purple {
-      background: rgba(168, 85, 247, 0.15);
-      color: #c084fc;
-      border: 1px solid rgba(168, 85, 247, 0.35);
-    }
-
-    /* Inputs */
-    .form-control {
-      padding: 0.5rem 0.8rem;
-      border-radius: 8px;
-      border: 1px solid var(--border-color);
-      background: rgba(0, 0, 0, 0.35);
-      color: #fff;
-      font-size: 0.9rem;
-      outline: none;
-      transition: border-color 0.2s;
-    }
-    .form-control:focus {
-      border-color: #60a5fa;
     }
 
     /* CDK Grouping & Filter Styles */
     .cdk-filter-group {
       display: inline-flex;
-      background: rgba(15, 23, 42, 0.6);
+      background: var(--bg-card-inner);
       padding: 0.25rem;
-      border-radius: 10px;
+      border-radius: 12px;
       border: 1px solid var(--border-color);
       gap: 0.25rem;
     }
@@ -310,33 +172,33 @@
       border: 1px solid transparent;
       color: var(--text-muted);
       padding: 0.42rem 0.85rem;
-      border-radius: 7px;
+      border-radius: 8px;
       cursor: pointer;
       font-size: 0.85rem;
-      font-weight: 600;
+      font-weight: 700;
       transition: all 0.2s ease;
       white-space: nowrap;
     }
     .cdk-filter-btn:hover {
-      color: #fff;
-      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-main);
+      background: var(--bg-subtle-hover);
     }
     .cdk-filter-btn.active {
-      background: rgba(59, 130, 246, 0.25);
-      color: #60a5fa;
-      border: 1px solid rgba(59, 130, 246, 0.4);
+      background: var(--badge-info-bg);
+      color: var(--badge-info-text);
+      border: 1px solid var(--badge-info-border);
       box-shadow: 0 2px 8px rgba(59, 130, 246, 0.2);
     }
     .cdk-filter-btn.active.btn-filter-unused {
-      background: rgba(16, 185, 129, 0.22);
-      color: #34d399;
-      border: 1px solid rgba(16, 185, 129, 0.45);
+      background: var(--badge-success-bg);
+      color: var(--badge-success-text);
+      border: 1px solid var(--badge-success-border);
       box-shadow: 0 2px 8px rgba(16, 185, 129, 0.2);
     }
     .cdk-filter-btn.active.btn-filter-used {
-      background: rgba(245, 158, 11, 0.22);
-      color: #fbbf24;
-      border: 1px solid rgba(245, 158, 11, 0.45);
+      background: var(--badge-warning-bg);
+      color: var(--badge-warning-text);
+      border: 1px solid var(--badge-warning-border);
       box-shadow: 0 2px 8px rgba(245, 158, 11, 0.2);
     }
     .filter-count {
@@ -344,8 +206,8 @@
       padding: 0.1rem 0.45rem;
       border-radius: 999px;
       font-size: 0.75rem;
-      background: rgba(255, 255, 255, 0.1);
-      color: #cbd5e1;
+      background: var(--bg-subtle);
+      color: var(--text-muted);
       font-weight: 700;
     }
     .cdk-filter-btn.active .filter-count {
@@ -353,57 +215,26 @@
       color: #fff;
     }
     .count-unused-badge {
-      background: rgba(16, 185, 129, 0.2);
-      color: #34d399;
+      background: var(--badge-success-bg);
+      color: var(--badge-success-text);
     }
     .count-used-badge {
-      background: rgba(245, 158, 11, 0.2);
-      color: #fbbf24;
-    }
-
-    /* Floating Toast */
-    #toastContainer {
-      position: fixed;
-      top: 1.5rem;
-      right: 1.5rem;
-      z-index: 9999;
-      display: flex;
-      flex-direction: column;
-      gap: 0.5rem;
-      pointer-events: none;
-    }
-    .toast-msg {
-      background: rgba(15, 23, 42, 0.95);
-      backdrop-filter: blur(10px);
-      border: 1px solid var(--border-color);
-      color: #fff;
-      padding: 0.75rem 1.25rem;
-      border-radius: 10px;
-      font-size: 0.9rem;
-      box-shadow: 0 8px 24px rgba(0,0,0,0.5);
-      display: flex;
-      align-items: center;
-      gap: 0.6rem;
-      pointer-events: auto;
-      animation: toastSlideIn 0.3s ease-out;
-    }
-    @keyframes toastSlideIn {
-      from { transform: translateX(100%); opacity: 0; }
-      to { transform: translateX(0); opacity: 1; }
+      background: var(--badge-warning-bg);
+      color: var(--badge-warning-text);
     }
 
     pre.log-viewer {
-      background: #020617;
+      background: var(--bg-input);
       color: #38bdf8;
       padding: 1.25rem;
-      border-radius: 8px;
+      border-radius: 12px;
       font-family: 'Consolas', 'Courier New', monospace;
       font-size: 0.85rem;
       height: 440px;
       overflow-y: auto;
       white-space: pre-wrap;
       word-break: break-all;
-      border: 1px solid rgba(56, 189, 248, 0.2);
+      border: 1px solid var(--border-color);
     }
   </style>
 </head>
@@ -420,6 +251,10 @@
         <span>TS3 Admin Console</span>
       </a>
       <div class="nav-actions">
+        <button class="theme-toggle-btn" onclick="toggleTheme()" title="切换明亮/暗黑主题">
+          <i class="fa-solid fa-sun theme-toggle-icon" id="adminThemeIcon"></i>
+          <span class="theme-toggle-text" id="adminThemeText">白天模式</span>
+        </button>
         <a href="/" class="btn-action"><i class="fa-solid fa-arrow-left"></i> 前台兑换</a>
         <button class="btn-action" id="headerChangePwdBtn" style="display: none;" onclick="openPwdModal()"><i class="fa-solid fa-key"></i> 修改密码</button>
         <button class="btn-action btn-danger" id="headerLogoutBtn" style="display: none;" onclick="logout()"><i class="fa-solid fa-right-from-bracket"></i> 退出</button>
@@ -610,7 +445,7 @@
       <!-- Tab 3: CDK 管理 -->
       <div id="tabContentCdks" class="card" style="display: none;">
         <!-- 生成 CDK 工具栏 -->
-        <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); padding: 1.25rem 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;">
+        <div style="background: var(--bg-card-inner); border: 1px solid var(--border-color); padding: 1.25rem 1.5rem; border-radius: 14px; margin-bottom: 1.5rem;">
           <h4 style="margin-bottom: 1rem; font-size: 1rem; color: #60a5fa;"><i class="fa-solid fa-wand-magic-sparkles"></i> 批量生成与发放 CDK</h4>
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; align-items: flex-end;">
             <div>
@@ -910,8 +745,8 @@
         </div>
 
         <!-- 匹配统计预览 -->
-        <div style="background: rgba(15, 23, 42, 0.8); border: 1px solid var(--border-color); border-radius: 8px; padding: 0.85rem 1.1rem; margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center;">
-          <span style="font-size: 0.88rem; color: #cbd5e1;">当前符合条件的卡密数：</span>
+        <div style="background: var(--bg-card-inner); border: 1px solid var(--border-color); border-radius: 10px; padding: 0.85rem 1.1rem; margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center;">
+          <span style="font-size: 0.88rem; color: var(--text-secondary);">当前符合条件的卡密数：</span>
           <span class="badge badge-danger" style="font-size: 0.95rem; font-weight: 700;" id="batchDelPreviewCount">0 张</span>
         </div>
 
@@ -1058,7 +893,31 @@
       }
     }
 
+    // === 主题切换引擎 ===
+    function updateAdminThemeUI(theme) {
+      const icon = document.getElementById('adminThemeIcon');
+      const text = document.getElementById('adminThemeText');
+      if (icon) {
+        icon.className = theme === 'dark' ? 'fa-solid fa-sun theme-toggle-icon' : 'fa-solid fa-moon theme-toggle-icon';
+      }
+      if (text) {
+        text.innerText = theme === 'dark' ? '白天模式' : '黑夜模式';
+      }
+    }
+
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme') || 'dark';
+      const target = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', target);
+      localStorage.setItem('ts_theme', target);
+      updateAdminThemeUI(target);
+      showToast(`已切换至${target === 'dark' ? '黑夜模式' : '白天模式'}`);
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+      updateAdminThemeUI(currentTheme);
+
       if (adminToken) {
         checkAuth();
       } else {

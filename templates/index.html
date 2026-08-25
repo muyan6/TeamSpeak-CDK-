@@ -4,6 +4,13 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>TeamSpeak 自动化开通平台</title>
+  <!-- 主题预先应用，避免白屏/黑屏闪烁 -->
+  <script>
+    (function() {
+      const savedTheme = localStorage.getItem('ts_theme') || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+      document.documentElement.setAttribute('data-theme', savedTheme);
+    })();
+  </script>
   <link rel="stylesheet" href="/static/css/style.css">
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -21,7 +28,11 @@
         <span>TeamSpeak Cloud</span>
       </a>
       <nav class="nav-links">
-        <a href="/admin"><i class="fa-solid fa-lock"></i> 管理后台</a>
+        <button class="theme-toggle-btn" onclick="toggleTheme()" title="切换明亮/暗黑主题">
+          <i class="fa-solid fa-sun theme-toggle-icon" id="navThemeIcon"></i>
+          <span class="theme-toggle-text" id="navThemeText">白天模式</span>
+        </button>
+        <a href="/admin" class="btn-action"><i class="fa-solid fa-lock"></i> 管理后台</a>
       </nav>
     </header>
 
@@ -50,14 +61,14 @@
             </button>
           </div>
         </form>
-        <div id="statusAlert" style="margin-top: 1.25rem; display: none; padding: 0.85rem; border-radius: 8px; font-size: 0.9rem;"></div>
+        <div id="statusAlert" style="margin-top: 1.25rem; display: none; padding: 0.85rem; border-radius: 10px; font-size: 0.9rem;"></div>
       </div>
 
       <!-- 开通结果展示卡片 -->
       <div id="resultCard" class="card result-card">
         <div class="result-header">
           <div>
-            <h2 style="font-size: 1.4rem; font-weight: 700;" id="resServerName">TeamSpeak 服务器</h2>
+            <h2 style="font-size: 1.35rem; font-weight: 800;" id="resServerName">TeamSpeak 服务器</h2>
             <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;" id="resCreatedAt"></p>
           </div>
           <span class="badge badge-success" id="resStatusBadge">运行中 (Active)</span>
@@ -69,7 +80,7 @@
             <div class="info-label">语音连接地址 (Voice Address)</div>
             <div class="info-value">
               <span id="resVoiceAddr">-</span>
-              <button class="btn-copy" onclick="copyText('resVoiceAddr')"><i class="fa-regular fa-copy"></i></button>
+              <button class="btn-copy" onclick="copyText('resVoiceAddr')" title="复制语音地址"><i class="fa-regular fa-copy"></i></button>
             </div>
           </div>
           <div class="info-item">
@@ -104,43 +115,43 @@
             <i class="fa-solid fa-key"></i>
             <span>客户端管理员权限秘钥 (ServerAdmin Privilege Key)</span>
           </div>
-          <p style="font-size: 0.85rem; color: #fca5a5; margin-bottom: 0.6rem;">
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.6rem;">
             首次进入服务器时，TeamSpeak 客户端会提示输入秘钥以获取管理员 (Server Admin) 身份，请妥善保管：
           </p>
           <div class="token-code">
             <span id="resAdminToken">加载中...</span>
-            <button class="btn-copy" style="border-color: rgba(239, 68, 68, 0.4); color: #fff;" onclick="copyText('resAdminToken')">
+            <button class="btn-copy" onclick="copyText('resAdminToken')">
               <i class="fa-regular fa-copy"></i> 复制秘钥
             </button>
           </div>
         </div>
 
         <!-- ServerQuery 超级管理员账号与密码 -->
-        <div class="token-box" style="background: rgba(59, 130, 246, 0.1); border-color: rgba(59, 130, 246, 0.3);">
+        <div class="token-box" style="background: rgba(59, 130, 246, 0.08); border-color: rgba(59, 130, 246, 0.25);">
           <div class="token-box-header" style="color: #60a5fa;">
             <i class="fa-solid fa-user-shield"></i>
             <span>ServerQuery 超级管理员账户与密码 (ServerAdmin Query Account)</span>
           </div>
-          <p style="font-size: 0.85rem; color: #93c5fd; margin-bottom: 0.6rem;">
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.6rem;">
             用于 YatQA / WebQuery / 机器人等后台超级管理工具连接控制：
           </p>
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem;">
-            <div class="info-item" style="background: rgba(0, 0, 0, 0.4); border-color: rgba(59, 130, 246, 0.2);">
-              <div class="info-label" style="color: #94a3b8;">Query 登录账号</div>
+            <div class="info-item">
+              <div class="info-label">Query 登录账号</div>
               <div class="info-value" style="font-size: 1rem; color: #38bdf8;">
                 <span id="resQueryUser">serveradmin</span>
                 <button class="btn-copy" onclick="copyText('resQueryUser')"><i class="fa-regular fa-copy"></i></button>
               </div>
             </div>
-            <div class="info-item" style="background: rgba(0, 0, 0, 0.4); border-color: rgba(59, 130, 246, 0.2);">
-              <div class="info-label" style="color: #94a3b8;">Query 登录密码</div>
+            <div class="info-item">
+              <div class="info-label">Query 登录密码</div>
               <div class="info-value" style="font-size: 1rem; color: #facc15;">
                 <span id="resQueryPassword">-</span>
                 <button class="btn-copy" onclick="copyText('resQueryPassword')"><i class="fa-regular fa-copy"></i></button>
               </div>
             </div>
-            <div class="info-item" id="apiKeyContainer" style="background: rgba(0, 0, 0, 0.4); border-color: rgba(59, 130, 246, 0.2); display: none;">
-              <div class="info-label" style="color: #94a3b8;">API Key</div>
+            <div class="info-item" id="apiKeyContainer" style="display: none;">
+              <div class="info-label">API Key</div>
               <div class="info-value" style="font-size: 1rem; color: #a78bfa;">
                 <span id="resQueryApiKey">-</span>
                 <button class="btn-copy" onclick="copyText('resQueryApiKey')"><i class="fa-regular fa-copy"></i></button>
@@ -151,25 +162,25 @@
 
         <!-- 快捷连接按钮 -->
         <div class="action-btn-group" style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
-          <a id="tsClientLink" href="#" class="btn-primary" style="background: linear-gradient(135deg, #10b981, #059669); text-decoration: none;">
+          <a id="tsClientLink" href="#" class="btn-primary" style="background: var(--accent-green-gradient); text-decoration: none;">
             <i class="fa-solid fa-arrow-up-right-from-square"></i> 一键唤起 TeamSpeak 客户端连接
           </a>
-          <button class="btn-primary" style="background: var(--bg-secondary); border: 1px solid var(--border-color);" onclick="copyVoiceFull()">
+          <button class="btn-action" onclick="copyVoiceFull()">
             <i class="fa-regular fa-clipboard"></i> 复制完整连接串
           </button>
         </div>
 
         <!-- TS 服务器快捷续费卡片 -->
-        <div style="margin-top: 1.5rem; padding: 1.25rem; background: rgba(59, 130, 246, 0.08); border: 1px dashed rgba(59, 130, 246, 0.4); border-radius: 12px;">
-          <div style="font-size: 0.95rem; font-weight: 600; color: #60a5fa; margin-bottom: 0.35rem;">
+        <div style="margin-top: 1.5rem; padding: 1.25rem; background: rgba(59, 130, 246, 0.06); border: 1px dashed rgba(59, 130, 246, 0.35); border-radius: 14px;">
+          <div style="font-size: 0.95rem; font-weight: 700; color: #60a5fa; margin-bottom: 0.35rem;">
             <i class="fa-solid fa-clock-rotate-left"></i> TS 服务器卡密续费延期
           </div>
           <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.85rem;">
             持有新的 TeamSpeak 服务器 CDK？输入新卡密可直接在原有到期时间上累加时长，并自动恢复运行：
           </p>
           <form onsubmit="handleRenewInstance(event)" style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
-            <input type="text" id="renewTsCdkInput" placeholder="输入新 TS CDK (TS-xxxx-...)" style="flex: 1; min-width: 220px; padding: 0.6rem 0.85rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff; text-transform: uppercase;" required>
-            <button type="submit" class="btn-primary" style="background: linear-gradient(135deg, #3b82f6, #6366f1); padding: 0.6rem 1.25rem;">
+            <input type="text" id="renewTsCdkInput" placeholder="输入新 TS CDK (TS-xxxx-...)" class="form-control" style="flex: 1; min-width: 220px; text-transform: uppercase;" required>
+            <button type="submit" class="btn-primary">
               <i class="fa-solid fa-bolt"></i> 立即续费
             </button>
           </form>
@@ -180,7 +191,7 @@
       <div id="botConfigCard" class="card result-card">
         <div class="result-header">
           <div>
-            <h2 style="font-size: 1.35rem; font-weight: 700; color: #a78bfa;"><i class="fa-solid fa-music"></i> 开通 TeamSpeak 音乐机器人</h2>
+            <h2 style="font-size: 1.35rem; font-weight: 800; color: #a78bfa;"><i class="fa-solid fa-music"></i> 开通 TeamSpeak 音乐机器人</h2>
             <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;" id="botDurationTip">卡密有效时长: 1 个月</p>
           </div>
           <span class="badge badge-info">CDK 验证成功</span>
@@ -190,39 +201,39 @@
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; margin-bottom: 1.25rem;">
             <div>
               <label class="info-label">实例名称</label>
-              <input type="text" id="botNameInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" value="我的音乐机器人" required>
+              <input type="text" id="botNameInput" class="form-control" style="width: 100%;" value="我的音乐机器人" required>
             </div>
             <div>
               <label class="info-label">机器人昵称 (Nickname)</label>
-              <input type="text" id="botNickInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" value="MusicBot" required>
+              <input type="text" id="botNickInput" class="form-control" style="width: 100%;" value="MusicBot" required>
             </div>
             <div>
               <label class="info-label">目标 TS 服务器地址 (IP或域名)</label>
-              <input type="text" id="botServerAddrInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="如 123.45.67.89 或 example.ts3.com" required>
+              <input type="text" id="botServerAddrInput" class="form-control" style="width: 100%;" placeholder="如 123.45.67.89 或 example.ts3.com" required>
             </div>
             <div>
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
                 <label class="info-label" style="margin-bottom: 0;">目标 TS 语音端口 (Port)</label>
-                <button type="button" class="btn-action btn-action-sm" onclick="openLogParserModal()" style="font-size: 0.75rem; padding: 2px 8px; color: #c084fc; border-color: rgba(168, 85, 247, 0.4); background: rgba(168, 85, 247, 0.12); cursor: pointer;">
+                <button type="button" class="btn-action btn-action-sm" onclick="openLogParserModal()" style="font-size: 0.75rem; color: #c084fc;">
                   <i class="fa-solid fa-wand-magic-sparkles"></i> 提取真实端口
                 </button>
               </div>
-              <input type="number" id="botServerPortInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" value="9987" placeholder="9987" required>
-              <div style="font-size: 0.76rem; color: #94a3b8; margin-top: 0.35rem; line-height: 1.4;">
+              <input type="number" id="botServerPortInput" class="form-control" style="width: 100%;" value="9987" placeholder="9987" required>
+              <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 0.35rem; line-height: 1.4;">
                 <i class="fa-solid fa-circle-info" style="color: #60a5fa;"></i> 官方默认端口 <code>9987</code>；若在商家购买请根据<a href="javascript:void(0)" onclick="openLogParserModal()" style="color: #c084fc; text-decoration: underline; margin-left: 2px;">教程查询端口</a>
               </div>
             </div>
             <div>
               <label class="info-label">默认加入频道名称 (可选)</label>
-              <input type="text" id="botDefaultChannelInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="如 音乐大厅 (留空加入根频道)">
+              <input type="text" id="botDefaultChannelInput" class="form-control" style="width: 100%;" placeholder="如 音乐大厅 (留空加入根频道)">
             </div>
             <div>
               <label class="info-label">TS 服务器连接密码 (可选)</label>
-              <input type="password" id="botServerPassInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="无密码请留空">
+              <input type="password" id="botServerPassInput" class="form-control" style="width: 100%;" placeholder="无密码请留空">
             </div>
           </div>
 
-          <button type="submit" id="botSubmitBtn" class="btn-primary" style="background: linear-gradient(135deg, #8b5cf6, #6366f1); width: 100%; justify-content: center; padding: 0.85rem;">
+          <button type="submit" id="botSubmitBtn" class="btn-primary" style="background: var(--accent-purple-gradient); width: 100%; padding: 0.85rem;">
             <span class="spinner" id="botLoadingSpinner"></span>
             <span id="botBtnText"><i class="fa-solid fa-play"></i> 立即创建并连接音乐机器人</span>
           </button>
@@ -233,7 +244,7 @@
       <div id="botResultCard" class="card result-card">
         <div class="result-header">
           <div>
-            <h2 style="font-size: 1.4rem; font-weight: 700; color: #a78bfa;" id="resBotName">音乐机器人</h2>
+            <h2 style="font-size: 1.35rem; font-weight: 800; color: #a78bfa;" id="resBotName">音乐机器人</h2>
             <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;" id="resBotCreatedAt"></p>
           </div>
           <span class="badge badge-success" id="resBotStatusBadge">运行中 (Active)</span>
@@ -268,31 +279,31 @@
 
         <!-- 机器人操作控制栏 -->
         <div class="action-btn-group" style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem;">
-          <a id="botWebPanelLink" href="http://103.71.69.156:23467/" target="_blank" class="btn-primary" style="background: linear-gradient(135deg, #ec4899, #8b5cf6); text-decoration: none;">
+          <a id="botWebPanelLink" href="http://103.71.69.156:23467/" target="_blank" class="btn-primary" style="background: var(--accent-pink-gradient); text-decoration: none;">
             <i class="fa-solid fa-music"></i> 进入网页点歌 / 播放控制台
           </a>
-          <button class="btn-primary" style="background: var(--bg-secondary); border: 1px solid var(--border-color);" onclick="botAction('restart')">
+          <button class="btn-action" onclick="botAction('restart')">
             <i class="fa-solid fa-rotate"></i> 重启
           </button>
-          <button class="btn-primary" style="background: var(--bg-secondary); border: 1px solid var(--border-color);" onclick="botAction('stop')">
+          <button class="btn-action" onclick="botAction('stop')">
             <i class="fa-solid fa-stop"></i> 停止
           </button>
-          <button class="btn-primary" style="background: var(--bg-secondary); border: 1px solid var(--border-color);" onclick="botAction('start')">
+          <button class="btn-action" onclick="botAction('start')">
             <i class="fa-solid fa-play"></i> 启动
           </button>
         </div>
 
         <!-- 机器人快捷续费卡片 -->
-        <div style="margin-top: 1.5rem; padding: 1.25rem; background: rgba(139, 92, 246, 0.08); border: 1px dashed rgba(139, 92, 246, 0.4); border-radius: 12px;">
-          <div style="font-size: 0.95rem; font-weight: 600; color: #c084fc; margin-bottom: 0.35rem;">
+        <div style="margin-top: 1.5rem; padding: 1.25rem; background: rgba(139, 92, 246, 0.06); border: 1px dashed rgba(139, 92, 246, 0.35); border-radius: 14px;">
+          <div style="font-size: 0.95rem; font-weight: 700; color: #c084fc; margin-bottom: 0.35rem;">
             <i class="fa-solid fa-clock-rotate-left"></i> 机器人卡密续费延期
           </div>
           <p style="font-size: 0.82rem; color: var(--text-muted); margin-bottom: 0.85rem;">
             持有新的音乐机器人 CDK？输入新卡密可直接在原有到期时间上累加时长，并自动恢复连线播放：
           </p>
           <form onsubmit="handleRenewBot(event)" style="display: flex; gap: 0.75rem; flex-wrap: wrap;">
-            <input type="text" id="renewCdkInput" placeholder="输入新 CDK (BOT-xxxx-...)" style="flex: 1; min-width: 220px; padding: 0.6rem 0.85rem; border-radius: 8px; border: 1px solid var(--border-color); background: rgba(0,0,0,0.4); color: #fff; text-transform: uppercase;" required>
-            <button type="submit" class="btn-primary" style="background: linear-gradient(135deg, #a855f7, #6366f1); padding: 0.6rem 1.25rem;">
+            <input type="text" id="renewCdkInput" placeholder="输入新 CDK (BOT-xxxx-...)" class="form-control" style="flex: 1; min-width: 220px; text-transform: uppercase;" required>
+            <button type="submit" class="btn-primary" style="background: var(--accent-purple-gradient);">
               <i class="fa-solid fa-bolt"></i> 立即续费
             </button>
           </form>
@@ -301,85 +312,94 @@
 
       <!-- 新手入门与使用教程指南 -->
       <div class="card" style="margin-top: 1.5rem;">
-        <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.25rem;">
-          <div style="width: 32px; height: 32px; background: linear-gradient(135deg, #3b82f6, #6366f1); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1rem;">
+        <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 1.35rem;">
+          <div style="width: 34px; height: 34px; background: var(--accent-gradient); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1rem; color: #fff;">
             <i class="fa-solid fa-book-open"></i>
           </div>
-          <h3 style="font-size: 1.15rem; font-weight: 700;">使用帮助与基础教程指南</h3>
+          <h3 style="font-size: 1.2rem; font-weight: 800;">使用帮助与基础教程指南</h3>
         </div>
 
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; margin-bottom: 1.5rem;">
+        <!-- 4 块基础核心教程网格 -->
+        <div class="tutorial-grid">
           <!-- 教程卡片 1 -->
-          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem;">
-            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; color: #60a5fa; font-weight: 700;">
-              <i class="fa-solid fa-1" style="background: rgba(59, 130, 246, 0.2); padding: 4px 8px; border-radius: 6px;"></i>
+          <div class="tutorial-card">
+            <div class="tutorial-card-header" style="color: #60a5fa;">
+              <div class="tutorial-icon-badge" style="background: rgba(59, 130, 246, 0.18); color: #60a5fa;">1</div>
               <span>开通专属 TS 语音服务器</span>
             </div>
-            <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.7;">
-              输入 <code>TS-</code> 开头的卡密开通，系统会自动在后台通过独立 Docker 容器秒级部署，支持月卡/季卡/年卡或永久服务器，并分配专属语音端口。
+            <p>
+              输入 <code>TS-</code> 开头的卡密开通，系统会自动在后台通过独立 Docker 容器秒级部署，分配专属语音与管理端口。
             </p>
           </div>
 
           <!-- 教程卡片 2 -->
-          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem;">
-            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; color: #34d399; font-weight: 700;">
-              <i class="fa-solid fa-2" style="background: rgba(16, 185, 129, 0.2); padding: 4px 8px; border-radius: 6px;"></i>
+          <div class="tutorial-card">
+            <div class="tutorial-card-header" style="color: #34d399;">
+              <div class="tutorial-icon-badge" style="background: rgba(16, 185, 129, 0.18); color: #34d399;">2</div>
               <span>连接客户端与获取服主权限</span>
             </div>
-            <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.7;">
-              打开 TeamSpeak 客户端，在地址栏输入 <code style="color:#34d399">IP:端口</code> 连接。首次进入会弹出权限秘钥窗口，粘贴页面给出的 <strong>Token 秘钥</strong> 即可成为超级管理员。
+            <p>
+              打开 TeamSpeak 客户端输入 <code style="color:var(--success)">IP:端口</code> 连接。首次进入粘贴给出的 <strong>Token 秘钥</strong> 即可成为超级管理员。
             </p>
           </div>
 
           <!-- 教程卡片 3 -->
-          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem;">
-            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; color: #c084fc; font-weight: 700;">
-              <i class="fa-solid fa-3" style="background: rgba(168, 85, 247, 0.2); padding: 4px 8px; border-radius: 6px;"></i>
+          <div class="tutorial-card">
+            <div class="tutorial-card-header" style="color: #c084fc;">
+              <div class="tutorial-icon-badge" style="background: rgba(168, 85, 247, 0.18); color: #c084fc;">3</div>
               <span>音乐机器人接入与网页点歌</span>
             </div>
-            <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.7;">
-              使用 <code>BOT-</code> 开头的卡密开通。填入 TS 服务器 IP 与语音端口（官方默认 <strong>9987</strong>；若为商家购买服务器请根据卡片 5 提取），开通后点击控制台可在线点歌与播歌。
+            <p>
+              输入 <code>BOT-</code> 开头卡密开通，填入 TS 地址与端口（商家服请参考下方提取）。开通后点击控制台可在线点歌与播歌。
             </p>
           </div>
 
           <!-- 教程卡片 4 -->
-          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem;">
-            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; color: #facc15; font-weight: 700;">
-              <i class="fa-solid fa-4" style="background: rgba(250, 204, 21, 0.2); padding: 4px 8px; border-radius: 6px;"></i>
+          <div class="tutorial-card">
+            <div class="tutorial-card-header" style="color: #fbbf24;">
+              <div class="tutorial-icon-badge" style="background: rgba(245, 158, 11, 0.18); color: #fbbf24;">4</div>
               <span>到期保护与快捷续费</span>
             </div>
-            <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.7;">
-              TS 服务器与音乐机器人到期后自动停机，<strong>绝不会删除您的任何配置与频道数据</strong>。随时输入新 CDK 即可秒级延期并重新上线。
+            <p>
+              服务器与机器人到期后自动停机保护，<strong>绝不删除您的任何频道与配置</strong>。随时输入新 CDK 即可秒级延期恢复上线。
             </p>
           </div>
+        </div>
 
-          <!-- 教程卡片 5: 查询服务器真实端口 (商家购买必读) -->
-          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(168, 85, 247, 0.4); border-radius: 12px; padding: 1.25rem; position: relative; overflow: hidden;">
-            <div style="position: absolute; top: 0; right: 0; background: linear-gradient(135deg, #a855f7, #ec4899); color: #fff; font-size: 0.7rem; font-weight: 700; padding: 2px 10px; border-bottom-left-radius: 8px;">
-              商家服务器必读
+        <!-- 专题特色横幅：商家 TS 服务器真实端口提取指南 -->
+        <div class="featured-banner-card">
+          <div class="featured-banner-badge">
+            <i class="fa-solid fa-fire"></i> 商家购买必看
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.6rem; margin-bottom: 0.6rem; color: #c084fc; font-weight: 800; font-size: 1.05rem;">
+            <i class="fa-solid fa-network-wired"></i>
+            <span>第三方商家购买 TS 服务器真实端口查询指南</span>
+          </div>
+          <p style="font-size: 0.88rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 0.85rem;">
+            若您的 TeamSpeak 服务器是在第三方商家购买的，商家通常采用端口转发或 SRV / TSDNS 域名解析，<strong>实际语音端口大概率不是官方默认的 9987</strong>。若机器人填写错误的默认端口将无法连入您的语音频道。
+          </p>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; align-items: center; background: var(--bg-card-inner); padding: 1rem 1.25rem; border-radius: 12px; border: 1px solid var(--border-color);">
+            <div style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.7;">
+              <div style="font-weight: 700; color: #60a5fa; margin-bottom: 0.25rem;"><i class="fa-solid fa-list-check"></i> 4 步轻松提取真实端口：</div>
+              1. 连入 TS 软件，点击顶部菜单栏 <strong>「工具 (Tools)」 ➔ 「客户端日志 (Client Log)」</strong>（快捷键 <code>Ctrl+L</code>）；<br>
+              2. 顶部筛选 <strong>只勾选「信息 (Info)」</strong>（取消勾选警告与错误）；<br>
+              3. 按 <strong>Ctrl + A 全选</strong>并复制全部日志文本。
             </div>
-            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; color: #c084fc; font-weight: 700;">
-              <i class="fa-solid fa-5" style="background: rgba(168, 85, 247, 0.2); padding: 4px 8px; border-radius: 6px;"></i>
-              <span>查询服务器真实端口 (日志提取)</span>
+            <div>
+              <button type="button" class="btn-primary" onclick="openLogParserModal()" style="background: var(--accent-purple-gradient); width: 100%; padding: 0.75rem 1.25rem; font-size: 0.95rem;">
+                <i class="fa-solid fa-wand-magic-sparkles"></i> 粘贴日志一键智能提取真实端口
+              </button>
+              <div style="font-size: 0.76rem; color: var(--text-dim); text-align: center; margin-top: 0.45rem;">
+                无需手动计算，系统将秒级解析出真实连接 IP 与实际端口
+              </div>
             </div>
-            <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 0.6rem;">
-              如果在服务器商家购买 TS，商家通常采用端口转发或 SRV 域名解析，<strong>端口大概率不是官方默认 9987</strong>。
-            </p>
-            <div style="font-size: 0.82rem; color: #cbd5e1; line-height: 1.6; background: rgba(0,0,0,0.3); padding: 0.6rem 0.75rem; border-radius: 8px; margin-bottom: 0.75rem;">
-              <strong style="color: #60a5fa;"><i class="fa-solid fa-list-check"></i> 提取步骤：</strong><br>
-              1. 连入 TS 软件，点击右上角 <strong>「工具」 ➔ 「客户端日志」</strong> (Ctrl+L)；<br>
-              2. 顶部筛选 <strong>只勾选「信息」</strong>；<br>
-              3. 按 <strong>Ctrl+A</strong> 全选复制日志，粘贴至下方工具解析。
-            </div>
-            <button type="button" class="btn-primary" onclick="openLogParserModal()" style="width: 100%; justify-content: center; font-size: 0.85rem; padding: 0.6rem 0.85rem; background: linear-gradient(135deg, #a855f7, #6366f1); cursor: pointer;">
-              <i class="fa-solid fa-wand-magic-sparkles"></i> 智能解析客户端日志提取端口
-            </button>
           </div>
         </div>
 
         <!-- 常见问题提示 -->
-        <div style="background: rgba(59, 130, 246, 0.08); border-left: 4px solid #3b82f6; border-radius: 6px; padding: 0.85rem 1rem;">
-          <div style="font-size: 0.88rem; font-weight: 600; color: #93c5fd; margin-bottom: 0.25rem;">
+        <div style="background: rgba(59, 130, 246, 0.08); border-left: 4px solid #3b82f6; border-radius: 8px; padding: 0.85rem 1.15rem;">
+          <div style="font-size: 0.88rem; font-weight: 700; color: #60a5fa; margin-bottom: 0.35rem;">
             <i class="fa-solid fa-circle-question"></i> 温馨提示与常见问题
           </div>
           <ul style="color: var(--text-muted); font-size: 0.82rem; line-height: 1.7; padding-left: 1.2rem; margin-bottom: 0;">
@@ -395,12 +415,142 @@
     </footer>
   </div>
 
+  <!-- TS 客户端日志智能解析与端口提取模态框 -->
+  <div id="logParserModal" class="modal-overlay" onclick="handleLogModalBackdropClick(event)">
+    <div class="modal-content" onclick="event.stopPropagation()">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; padding-bottom: 0.85rem; border-bottom: 1px solid var(--border-color);">
+        <div style="display: flex; align-items: center; gap: 0.75rem;">
+          <div style="width: 38px; height: 38px; background: var(--accent-purple-gradient); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; color: #fff; box-shadow: 0 4px 12px rgba(168, 85, 247, 0.35);">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+          </div>
+          <div>
+            <h3 style="font-size: 1.2rem; font-weight: 800; color: var(--text-main);">TeamSpeak 客户端日志智能解析</h3>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">快速提取商家购买 TS 服务器的真实连接 IP 与语音端口</p>
+          </div>
+        </div>
+        <button class="modal-close-btn" onclick="closeLogParserModal()" title="关闭"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <!-- 操作步骤提示栏 -->
+      <div style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 12px; padding: 0.85rem 1rem; margin-bottom: 1.2rem;">
+        <div style="font-size: 0.84rem; color: #c084fc; font-weight: 700; margin-bottom: 0.4rem;">
+          <i class="fa-solid fa-circle-info"></i> 如何获取客户端日志（只需 30 秒）：
+        </div>
+        <div style="font-size: 0.8rem; color: var(--text-secondary); line-height: 1.65;">
+          ① 打开电脑上的 TeamSpeak 客户端并<strong>连接进入您的服务器</strong>；<br>
+          ② 点击顶部菜单栏 <strong>「工具 (Tools)」 ➔ 「客户端日志 (Client Log)」</strong>（或快捷键 <code>Ctrl + L</code>）；<br>
+          ③ 在弹出的日志窗口顶部，<strong>只勾选「信息 (Info)」</strong>；<br>
+          ④ 点击日志区域按 <strong>Ctrl + A 全选</strong>并复制，粘贴到下方输入框中点击解析。
+        </div>
+      </div>
+
+      <!-- 日志输入区 -->
+      <div style="margin-bottom: 1.2rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.45rem;">
+          <label class="info-label" style="font-weight: 700; margin-bottom: 0;">粘贴客户端日志或服务器地址：</label>
+          <div style="display: flex; gap: 0.4rem;">
+            <button type="button" class="btn-action btn-action-sm" onclick="loadSampleLog()" style="font-size: 0.76rem;">
+              <i class="fa-regular fa-lightbulb"></i> 载入测试示例
+            </button>
+            <button type="button" class="btn-action btn-action-sm" onclick="clearLogInput()" style="font-size: 0.76rem;">
+              <i class="fa-solid fa-eraser"></i> 清空
+            </button>
+          </div>
+        </div>
+        <textarea id="logParserInput" class="form-control" style="width: 100%; height: 140px; font-family: 'Consolas', 'Courier New', monospace; font-size: 0.82rem; resize: vertical; line-height: 1.5;" placeholder="请在此处按 Ctrl+V 粘贴从 TeamSpeak 客户端日志中复制的文本内容，如：&#10;2026-08-25 10:00:00|INFO |ClientUI |1 |Connect to server: example.ts3.com&#10;2026-08-25 10:00:00|INFO |ClientUI |1 |Resolve successful: 123.45.67.89:20345"></textarea>
+      </div>
+
+      <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-bottom: 1.2rem;">
+        <button type="button" class="btn-action" style="min-width: 90px; height: 38px;" onclick="closeLogParserModal()">取消关闭</button>
+        <button type="button" class="btn-primary" onclick="parseTsLogAction()" style="background: var(--accent-purple-gradient); min-width: 140px; height: 38px;">
+          <i class="fa-solid fa-bolt"></i> 立即解析提取
+        </button>
+      </div>
+
+      <!-- 错误警告提示 -->
+      <div id="logParserError" style="display: none; background: var(--badge-danger-bg); border: 1px solid var(--badge-danger-border); color: var(--badge-danger-text); padding: 0.85rem 1rem; border-radius: 10px; font-size: 0.82rem; line-height: 1.6; margin-bottom: 1.2rem;">
+        <i class="fa-solid fa-triangle-exclamation"></i> 未能在粘贴的内容中检测到有效的 TS 连接记录。请确认已连入服务器并在客户端日志中勾选「信息」，全选复制后再粘贴尝试；或者直接输入形如 <code>123.45.67.89:10086</code> 的地址。
+      </div>
+
+      <!-- 解析结果展示卡片 -->
+      <div id="logParserResult" style="display: none; background: var(--bg-card-inner); border: 1px solid var(--border-color); border-radius: 14px; padding: 1.25rem; animation: fadeIn 0.3s ease-out;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.65rem; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; gap: 0.5rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--success); font-weight: 800; font-size: 0.95rem;">
+            <i class="fa-solid fa-circle-check"></i> 成功提取到目标服务器连接信息！
+          </div>
+          <span id="parsedPortBadge" class="badge badge-success">已解析</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem; margin-bottom: 1.25rem;">
+          <div class="info-item">
+            <div class="info-label">目标域名 / 原始输入</div>
+            <div class="info-value" style="font-size: 0.95rem; color: #60a5fa;">
+              <span id="parsedTargetHost">-</span>
+              <button class="btn-copy" onclick="copyText('parsedTargetHost')"><i class="fa-regular fa-copy"></i></button>
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">服务器真实 IP (Address)</div>
+            <div class="info-value" style="font-size: 0.95rem; color: #38bdf8;">
+              <span id="parsedResolvedIp">-</span>
+              <button class="btn-copy" onclick="copyText('parsedResolvedIp')"><i class="fa-regular fa-copy"></i></button>
+            </div>
+          </div>
+          <div class="info-item" style="background: rgba(168, 85, 247, 0.12); border-color: rgba(168, 85, 247, 0.35);">
+            <div class="info-label" style="color: #c084fc;">真实语音端口 (Real Port)</div>
+            <div class="info-value" style="font-size: 1.2rem; color: #facc15; font-weight: 800;">
+              <span id="parsedResolvedPort">9987</span>
+              <button class="btn-copy" onclick="copyText('parsedResolvedPort')"><i class="fa-regular fa-copy"></i></button>
+            </div>
+          </div>
+          <div class="info-item">
+            <div class="info-label">完整连接串 (IP:端口)</div>
+            <div class="info-value" style="font-size: 0.95rem; color: var(--success);">
+              <span id="parsedFullAddr">-</span>
+              <button class="btn-copy" onclick="copyText('parsedFullAddr')"><i class="fa-regular fa-copy"></i></button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end;">
+          <button type="button" class="btn-primary" onclick="applyParsedToBot()" style="background: var(--accent-green-gradient); font-size: 0.88rem; padding: 0.55rem 1.15rem;">
+            <i class="fa-solid fa-check"></i> 一键填入开通机器人表单
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     let currentInstance = null;
     let currentBotInstance = null;
     let currentPendingBotCdk = '';
 
+    // === 主题切换引擎 ===
+    function updateThemeUI(theme) {
+      const icon = document.getElementById('navThemeIcon');
+      const text = document.getElementById('navThemeText');
+      if (icon) {
+        icon.className = theme === 'dark' ? 'fa-solid fa-sun theme-toggle-icon' : 'fa-solid fa-moon theme-toggle-icon';
+      }
+      if (text) {
+        text.innerText = theme === 'dark' ? '白天模式' : '黑夜模式';
+      }
+    }
+
+    function toggleTheme() {
+      const current = document.documentElement.getAttribute('data-theme') || 'dark';
+      const target = current === 'dark' ? 'light' : 'dark';
+      document.documentElement.setAttribute('data-theme', target);
+      localStorage.setItem('ts_theme', target);
+      updateThemeUI(target);
+      showToast(`已切换至${target === 'dark' ? '黑夜模式' : '白天模式'}`);
+    }
+
     window.addEventListener('DOMContentLoaded', () => {
+      const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
+      updateThemeUI(currentTheme);
+
       const addrInput = document.getElementById('botServerAddrInput');
       const portInput = document.getElementById('botServerPortInput');
       if (addrInput && portInput) {
@@ -431,7 +581,6 @@
       const botConfigCard = document.getElementById('botConfigCard');
       const botResultCard = document.getElementById('botResultCard');
 
-      // 隐藏旧卡片
       resultCard.style.display = 'none';
       botConfigCard.style.display = 'none';
       botResultCard.style.display = 'none';
@@ -457,25 +606,23 @@
         // === 分支 1: 音乐机器人 ===
         if (res.type === 'music_bot') {
           if (res.need_config) {
-            // 需要填写机器人配置
             currentPendingBotCdk = res.cdk;
             document.getElementById('botDurationTip').innerText = `卡密类型: 音乐机器人 | 有效时长: ${res.duration_desc || (res.duration_months + '个月')}`;
             botConfigCard.style.display = 'block';
             botConfigCard.scrollIntoView({ behavior: 'smooth' });
 
             alertBox.style.display = 'block';
-            alertBox.style.background = 'rgba(139, 92, 246, 0.15)';
-            alertBox.style.color = '#c084fc';
-            alertBox.style.border = '1px solid #8b5cf6';
+            alertBox.style.background = 'var(--badge-purple-bg)';
+            alertBox.style.color = 'var(--badge-purple-text)';
+            alertBox.style.border = '1px solid var(--badge-purple-border)';
             alertBox.innerText = res.message || '请填写下方机器人的目标服务器连接配置：';
             return;
           } else if (res.instance) {
-            // 已有机器人实例，直接展示
             renderBotResult(res.instance, res.bot_panel_url);
             alertBox.style.display = 'block';
-            alertBox.style.background = 'rgba(16, 185, 129, 0.15)';
-            alertBox.style.color = '#34d399';
-            alertBox.style.border = '1px solid #10b981';
+            alertBox.style.background = 'var(--badge-success-bg)';
+            alertBox.style.color = 'var(--badge-success-text)';
+            alertBox.style.border = '1px solid var(--badge-success-border)';
             alertBox.innerText = res.message || '已加载音乐机器人实例！';
             return;
           }
@@ -486,16 +633,16 @@
         renderResult(res.instance, res.message);
         
         alertBox.style.display = 'block';
-        alertBox.style.background = 'rgba(16, 185, 129, 0.15)';
-        alertBox.style.color = '#34d399';
-        alertBox.style.border = '1px solid #10b981';
+        alertBox.style.background = 'var(--badge-success-bg)';
+        alertBox.style.color = 'var(--badge-success-text)';
+        alertBox.style.border = '1px solid var(--badge-success-border)';
         alertBox.innerText = res.message || '服务器准备就绪！';
 
       } catch (err) {
         alertBox.style.display = 'block';
-        alertBox.style.background = 'rgba(239, 68, 68, 0.15)';
-        alertBox.style.color = '#f87171';
-        alertBox.style.border = '1px solid #ef4444';
+        alertBox.style.background = 'var(--badge-danger-bg)';
+        alertBox.style.color = 'var(--badge-danger-text)';
+        alertBox.style.border = '1px solid var(--badge-danger-border)';
         alertBox.innerText = err.message || '系统异常，请稍后重试';
       } finally {
         submitBtn.disabled = false;
@@ -546,9 +693,9 @@
         renderBotResult(res.instance, res.bot_panel_url);
 
         alertBox.style.display = 'block';
-        alertBox.style.background = 'rgba(16, 185, 129, 0.15)';
-        alertBox.style.color = '#34d399';
-        alertBox.style.border = '1px solid #10b981';
+        alertBox.style.background = 'var(--badge-success-bg)';
+        alertBox.style.color = 'var(--badge-success-text)';
+        alertBox.style.border = '1px solid var(--badge-success-border)';
         alertBox.innerText = res.message || '音乐机器人已就绪！';
         showToast(res.message || '音乐机器人已就绪！', 'success');
 
@@ -634,7 +781,6 @@
       const resultCard = document.getElementById('resultCard');
       resultCard.style.display = 'block';
 
-      // 提取客户端直连 host
       const host = inst.public_host || window.location.hostname;
       const voiceAddr = `${host}:${inst.voice_port}`;
 
@@ -667,11 +813,9 @@
         document.getElementById('apiKeyContainer').style.display = 'none';
       }
 
-      // 唤起客户端链接 ts3server://host?port=xxxx
       const clientUrl = `ts3server://${host}?port=${inst.voice_port}`;
       document.getElementById('tsClientLink').href = clientUrl;
 
-      // 平滑滚动
       resultCard.scrollIntoView({ behavior: 'smooth' });
     }
 
@@ -730,11 +874,9 @@
       }, 3000);
     }
 
-    // 通用兼容剪贴板复制（支持 HTTP / HTTPS / 手机端）
+    // 通用兼容剪贴板复制
     function copyToClipboard(text, successMsg = '已复制到剪贴板') {
       if (!text) return;
-
-      // 方式 1: 优先尝试 navigator.clipboard（仅安全上下文 HTTPS/localhost 可用）
       if (navigator.clipboard && window.isSecureContext) {
         navigator.clipboard.writeText(text).then(() => {
           showToast(successMsg, 'success');
@@ -743,8 +885,6 @@
         });
         return;
       }
-
-      // 方式 2: HTTP 与通用环境回退机制
       fallbackCopy(text, successMsg);
     }
 
@@ -1031,111 +1171,5 @@
       }
     }
   </script>
-
-  <!-- TS 客户端日志智能解析与端口提取模态框 -->
-  <div id="logParserModal" class="modal-overlay" onclick="handleLogModalBackdropClick(event)">
-    <div class="modal-content" style="max-width: 680px;" onclick="event.stopPropagation()">
-      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
-        <div style="display: flex; align-items: center; gap: 0.6rem;">
-          <div style="width: 36px; height: 36px; background: linear-gradient(135deg, #a855f7, #ec4899); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; color: #fff; box-shadow: 0 4px 12px rgba(168, 85, 247, 0.35);">
-            <i class="fa-solid fa-wand-magic-sparkles"></i>
-          </div>
-          <div>
-            <h3 style="font-size: 1.2rem; font-weight: 700; color: #fff;">TeamSpeak 客户端日志智能解析</h3>
-            <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">快速提取商家购买 TS 服务器的真实连接 IP 与语音端口</p>
-          </div>
-        </div>
-        <button class="btn-action btn-action-sm" onclick="closeLogParserModal()"><i class="fa-solid fa-xmark"></i></button>
-      </div>
-
-      <!-- 操作步骤提示栏 -->
-      <div style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
-        <div style="font-size: 0.84rem; color: #d8b4fe; font-weight: 600; margin-bottom: 0.4rem;">
-          <i class="fa-solid fa-circle-info"></i> 如何获取客户端日志（只需 30 秒）：
-        </div>
-        <div style="font-size: 0.8rem; color: #cbd5e1; line-height: 1.6;">
-          ① 打开电脑上的 TeamSpeak 客户端并<strong>连接进入您的服务器</strong>；<br>
-          ② 点击顶部菜单栏 <strong>「工具 (Tools)」 ➔ 「客户端日志 (Client Log)」</strong>（或按快捷键 <code>Ctrl + L</code>）；<br>
-          ③ 在弹出的日志窗口顶部，<strong>只勾选「信息 (Info)」</strong>；<br>
-          ④ 点击日志区域按 <strong>Ctrl + A 全选</strong>并复制，粘贴到下方输入框中点击解析。
-        </div>
-      </div>
-
-      <!-- 日志输入区 -->
-      <div style="margin-bottom: 1rem;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
-          <label class="info-label" style="font-weight: 600; margin-bottom: 0;">粘贴客户端日志或服务器地址：</label>
-          <div style="display: flex; gap: 0.4rem;">
-            <button type="button" class="btn-action btn-action-sm" onclick="loadSampleLog()" style="font-size: 0.75rem;">
-              <i class="fa-regular fa-lightbulb"></i> 载入测试示例
-            </button>
-            <button type="button" class="btn-action btn-action-sm" onclick="clearLogInput()" style="font-size: 0.75rem;">
-              <i class="fa-solid fa-eraser"></i> 清空
-            </button>
-          </div>
-        </div>
-        <textarea id="logParserInput" class="cdk-input" style="width: 100%; height: 140px; border: 1px solid var(--border-color); border-radius: 10px; background: rgba(0,0,0,0.4); padding: 0.75rem; font-family: monospace; font-size: 0.82rem; resize: vertical; line-height: 1.45; color: #e2e8f0;" placeholder="请在此处按 Ctrl+V 粘贴从 TeamSpeak 客户端日志中复制的文本内容，如：&#10;2026-08-25 10:00:00|INFO |ClientUI |1 |Connect to server: example.ts3.com&#10;2026-08-25 10:00:00|INFO |ClientUI |1 |Resolve successful: 123.45.67.89:20345"></textarea>
-      </div>
-
-      <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-bottom: 1rem;">
-        <button type="button" class="btn-action" onclick="closeLogParserModal()">关闭</button>
-        <button type="button" class="btn-primary" onclick="parseTsLogAction()" style="background: linear-gradient(135deg, #a855f7, #6366f1); cursor: pointer;">
-          <i class="fa-solid fa-bolt"></i> 立即解析提取
-        </button>
-      </div>
-
-      <!-- 错误警告提示 -->
-      <div id="logParserError" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; padding: 0.75rem 1rem; border-radius: 8px; font-size: 0.82rem; line-height: 1.5; margin-bottom: 1rem;">
-        <i class="fa-solid fa-triangle-exclamation"></i> 未能在粘贴的内容中检测到有效的 TS 连接记录。请确认已连入服务器并在客户端日志中勾选「信息」，全选复制后再粘贴尝试；或者直接输入形如 <code>123.45.67.89:10086</code> 的地址。
-      </div>
-
-      <!-- 解析结果展示卡片 -->
-      <div id="logParserResult" style="display: none; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 12px; padding: 1.25rem; animation: fadeIn 0.3s ease-out;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--border-color);">
-          <div style="display: flex; align-items: center; gap: 0.5rem; color: #34d399; font-weight: 700; font-size: 0.95rem;">
-            <i class="fa-solid fa-circle-check"></i> 成功提取到服务器连接信息！
-          </div>
-          <span id="parsedPortBadge" class="badge badge-success">已解析</span>
-        </div>
-
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem; margin-bottom: 1.25rem;">
-          <div class="info-item" style="padding: 0.75rem 0.85rem;">
-            <div class="info-label" style="font-size: 0.78rem;">目标域名 / 原始输入</div>
-            <div class="info-value" style="font-size: 0.95rem; color: #93c5fd;">
-              <span id="parsedTargetHost">-</span>
-              <button class="btn-copy" onclick="copyText('parsedTargetHost')"><i class="fa-regular fa-copy"></i></button>
-            </div>
-          </div>
-          <div class="info-item" style="padding: 0.75rem 0.85rem;">
-            <div class="info-label" style="font-size: 0.78rem;">服务器真实 IP (Address)</div>
-            <div class="info-value" style="font-size: 0.95rem; color: #38bdf8;">
-              <span id="parsedResolvedIp">-</span>
-              <button class="btn-copy" onclick="copyText('parsedResolvedIp')"><i class="fa-regular fa-copy"></i></button>
-            </div>
-          </div>
-          <div class="info-item" style="padding: 0.75rem 0.85rem; background: rgba(168, 85, 247, 0.12); border-color: rgba(168, 85, 247, 0.35);">
-            <div class="info-label" style="font-size: 0.78rem; color: #d8b4fe;">真实语音端口 (Real Port)</div>
-            <div class="info-value" style="font-size: 1.15rem; color: #facc15; font-weight: 800;">
-              <span id="parsedResolvedPort">9987</span>
-              <button class="btn-copy" onclick="copyText('parsedResolvedPort')"><i class="fa-regular fa-copy"></i></button>
-            </div>
-          </div>
-          <div class="info-item" style="padding: 0.75rem 0.85rem;">
-            <div class="info-label" style="font-size: 0.78rem;">完整连接串 (IP:端口)</div>
-            <div class="info-value" style="font-size: 0.95rem; color: #34d399;">
-              <span id="parsedFullAddr">-</span>
-              <button class="btn-copy" onclick="copyText('parsedFullAddr')"><i class="fa-regular fa-copy"></i></button>
-            </div>
-          </div>
-        </div>
-
-        <div style="display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end;">
-          <button type="button" class="btn-primary" onclick="applyParsedToBot()" style="background: linear-gradient(135deg, #10b981, #059669); font-size: 0.85rem; padding: 0.5rem 1rem; cursor: pointer;">
-            <i class="fa-solid fa-check"></i> 一键填入开通机器人表单
-          </button>
-        </div>
-      </div>
-    </div>
-  </div>
 </body>
 </html>
