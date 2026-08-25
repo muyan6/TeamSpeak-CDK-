@@ -198,13 +198,18 @@
             </div>
             <div>
               <label class="info-label">目标 TS 服务器地址 (IP或域名)</label>
-              <input type="text" id="botServerAddrInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="如 123.45.67.89 或 localhost" required>
+              <input type="text" id="botServerAddrInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" placeholder="如 123.45.67.89 或 example.ts3.com" required>
             </div>
             <div>
-              <label class="info-label">目标 TS 语音端口 (Port)</label>
+              <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                <label class="info-label" style="margin-bottom: 0;">目标 TS 语音端口 (Port)</label>
+                <button type="button" class="btn-action btn-action-sm" onclick="openLogParserModal()" style="font-size: 0.75rem; padding: 2px 8px; color: #c084fc; border-color: rgba(168, 85, 247, 0.4); background: rgba(168, 85, 247, 0.12); cursor: pointer;">
+                  <i class="fa-solid fa-wand-magic-sparkles"></i> 提取真实端口
+                </button>
+              </div>
               <input type="number" id="botServerPortInput" class="cdk-input" style="width: 100%; border: 1px solid var(--border-color); border-radius: 8px; background: rgba(0,0,0,0.3); padding: 0.6rem 0.8rem;" value="9987" placeholder="9987" required>
               <div style="font-size: 0.76rem; color: #94a3b8; margin-top: 0.35rem; line-height: 1.4;">
-                <i class="fa-solid fa-circle-info" style="color: #60a5fa;"></i> 推荐官方默认端口 <code>9987</code>；若对接本平台自建服务器请输入分配端口 (如 <code>60001</code>)
+                <i class="fa-solid fa-circle-info" style="color: #60a5fa;"></i> 官方默认端口 <code>9987</code>；若在商家购买请根据<a href="javascript:void(0)" onclick="openLogParserModal()" style="color: #c084fc; text-decoration: underline; margin-left: 2px;">教程查询端口</a>
               </div>
             </div>
             <div>
@@ -333,7 +338,7 @@
               <span>音乐机器人接入与网页点歌</span>
             </div>
             <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.7;">
-              使用 <code>BOT-</code> 开头的卡密开通。填入 TS 服务器 IP，语音端口推荐官方默认 <strong>9987</strong>（自建服务器填 <strong>60001</strong> 等），开通后点击控制台可在线点歌与播歌。
+              使用 <code>BOT-</code> 开头的卡密开通。填入 TS 服务器 IP 与语音端口（官方默认 <strong>9987</strong>；若为商家购买服务器请根据卡片 5 提取），开通后点击控制台可在线点歌与播歌。
             </p>
           </div>
 
@@ -346,6 +351,29 @@
             <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.7;">
               TS 服务器与音乐机器人到期后自动停机，<strong>绝不会删除您的任何配置与频道数据</strong>。随时输入新 CDK 即可秒级延期并重新上线。
             </p>
+          </div>
+
+          <!-- 教程卡片 5: 查询服务器真实端口 (商家购买必读) -->
+          <div style="background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(168, 85, 247, 0.4); border-radius: 12px; padding: 1.25rem; position: relative; overflow: hidden;">
+            <div style="position: absolute; top: 0; right: 0; background: linear-gradient(135deg, #a855f7, #ec4899); color: #fff; font-size: 0.7rem; font-weight: 700; padding: 2px 10px; border-bottom-left-radius: 8px;">
+              商家服务器必读
+            </div>
+            <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.6rem; color: #c084fc; font-weight: 700;">
+              <i class="fa-solid fa-5" style="background: rgba(168, 85, 247, 0.2); padding: 4px 8px; border-radius: 6px;"></i>
+              <span>查询服务器真实端口 (日志提取)</span>
+            </div>
+            <p style="font-size: 0.85rem; color: var(--text-muted); line-height: 1.6; margin-bottom: 0.6rem;">
+              如果在服务器商家购买 TS，商家通常采用端口转发或 SRV 域名解析，<strong>端口大概率不是官方默认 9987</strong>。
+            </p>
+            <div style="font-size: 0.82rem; color: #cbd5e1; line-height: 1.6; background: rgba(0,0,0,0.3); padding: 0.6rem 0.75rem; border-radius: 8px; margin-bottom: 0.75rem;">
+              <strong style="color: #60a5fa;"><i class="fa-solid fa-list-check"></i> 提取步骤：</strong><br>
+              1. 连入 TS 软件，点击右上角 <strong>「工具」 ➔ 「客户端日志」</strong> (Ctrl+L)；<br>
+              2. 顶部筛选 <strong>只勾选「信息」</strong>；<br>
+              3. 按 <strong>Ctrl+A</strong> 全选复制日志，粘贴至下方工具解析。
+            </div>
+            <button type="button" class="btn-primary" onclick="openLogParserModal()" style="width: 100%; justify-content: center; font-size: 0.85rem; padding: 0.6rem 0.85rem; background: linear-gradient(135deg, #a855f7, #6366f1); cursor: pointer;">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> 智能解析客户端日志提取端口
+            </button>
           </div>
         </div>
 
@@ -768,6 +796,346 @@
       const voiceAddr = `${host}:${currentInstance.voice_port}`;
       copyToClipboard(voiceAddr, `已复制连接串: ${voiceAddr}`);
     }
+
+    // === TeamSpeak 客户端日志智能解析与端口提取 ===
+    let lastParsedResult = null;
+
+    function openLogParserModal() {
+      const modal = document.getElementById('logParserModal');
+      if (modal) {
+        modal.style.display = 'flex';
+        const input = document.getElementById('logParserInput');
+        if (input) setTimeout(() => input.focus(), 100);
+      }
+    }
+
+    function closeLogParserModal() {
+      const modal = document.getElementById('logParserModal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function handleLogModalBackdropClick(e) {
+      if (e.target.id === 'logParserModal') {
+        closeLogParserModal();
+      }
+    }
+
+    function clearLogInput() {
+      document.getElementById('logParserInput').value = '';
+      document.getElementById('logParserResult').style.display = 'none';
+      document.getElementById('logParserError').style.display = 'none';
+      lastParsedResult = null;
+    }
+
+    function loadSampleLog() {
+      const sample = `2026-08-25 10:00:01.123456|INFO    |ClientUI      |1  |Connect to server: example.ts3.com
+2026-08-25 10:00:01.130000|INFO    |ClientUI      |1  |Trying to resolve example.ts3.com
+2026-08-25 10:00:01.140000|INFO    |TSDNS         |   |SRV DNS resolve successful, "_ts3._udp.example.ts3.com" => "node1.host.com:20345"
+2026-08-25 10:00:01.150000|INFO    |ClientUI      |1  |Lookup finished: ip:112.48.12.34 port:20345 query=example.ts3.com error=0
+2026-08-25 10:00:01.160000|INFO    |ClientUI      |1  |Resolve successful: 112.48.12.34:20345
+2026-08-25 10:00:01.170000|INFO    |ClientUI      |1  |Blacklist check ok
+2026-08-25 10:00:01.180000|INFO    |ClientUI      |1  |Initiating connection: 112.48.12.34:20345`;
+      document.getElementById('logParserInput').value = sample;
+      parseTsLogAction();
+    }
+
+    function parseTsLog(rawText) {
+      if (!rawText || !rawText.trim()) return null;
+      const text = rawText.trim();
+
+      let targetHost = null;
+      let resolvedIp = null;
+      let resolvedPort = null;
+
+      // 1. Connect to server: host[:port]
+      const connectMatches = [...text.matchAll(/Connect to server:\s*([^\s\r\n]+)/gi)];
+      if (connectMatches.length > 0) {
+        const last = connectMatches[connectMatches.length - 1][1].trim();
+        if (last.includes(':') && !last.startsWith('http://') && !last.startsWith('https://')) {
+          const parts = last.split(':');
+          targetHost = parts[0].trim();
+          resolvedPort = parseInt(parts[1].trim());
+        } else {
+          targetHost = last;
+        }
+      }
+
+      // 2. Trying to resolve host
+      const resolveDomainMatches = [...text.matchAll(/Trying to resolve\s*([^\s\r\n]+)/gi)];
+      if (resolveDomainMatches.length > 0 && !targetHost) {
+        targetHost = resolveDomainMatches[resolveDomainMatches.length - 1][1].trim();
+      }
+
+      // 3. Resolve successful / Initiating connection / Connecting to
+      const directConnectMatches = [...text.matchAll(/(?:Resolve successful|Initiating connection|Connecting to|Connected to)[:\s]+(?:\[([0-9a-fA-F:]+)\]|([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[a-zA-Z0-9.\-]+)):(\d+)/gi)];
+      if (directConnectMatches.length > 0) {
+        const last = directConnectMatches[directConnectMatches.length - 1];
+        resolvedIp = last[1] || last[2];
+        resolvedPort = parseInt(last[3]);
+      }
+
+      // 4. Lookup finished: ip:1.2.3.4 port:12345 or Lookup finished: 1.2.3.4 12345 host.com
+      if (!resolvedPort || !resolvedIp) {
+        const lookup1 = [...text.matchAll(/Lookup finished:.*?ip:([0-9a-zA-Z.:\-]+).*?port:(\d+)/gi)];
+        if (lookup1.length > 0) {
+          const last = lookup1[lookup1.length - 1];
+          resolvedIp = last[1];
+          resolvedPort = parseInt(last[2]);
+        }
+      }
+
+      if (!resolvedPort || !resolvedIp) {
+        const lookup2 = [...text.matchAll(/Lookup finished:\s+([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[a-zA-Z0-9.\-]+)\s+(\d+)\s+([^\s]+)?/gi)];
+        if (lookup2.length > 0) {
+          const last = lookup2[lookup2.length - 1];
+          resolvedIp = last[1];
+          resolvedPort = parseInt(last[2]);
+          if (!targetHost && last[3]) targetHost = last[3];
+        }
+      }
+
+      // 5. SRV DNS resolve successful
+      if (!resolvedPort || !resolvedIp) {
+        const srv = [...text.matchAll(/SRV DNS resolve successful[^\n\r]*?(?:=>|->)\s*"?([a-zA-Z0-9.\-]+):(\d+)/gi)];
+        if (srv.length > 0) {
+          const last = srv[srv.length - 1];
+          resolvedIp = last[1];
+          resolvedPort = parseInt(last[2]);
+        }
+      }
+
+      // 6. TSDNS result
+      if (!resolvedPort || !resolvedIp) {
+        const tsdns = [...text.matchAll(/TSDNS[^\n\r]*?result[:\s]+"?([a-zA-Z0-9.\-]+):(\d+)/gi)];
+        if (tsdns.length > 0) {
+          const last = tsdns[tsdns.length - 1];
+          resolvedIp = last[1];
+          resolvedPort = parseInt(last[2]);
+        }
+      }
+
+      // 7. Fallback: general IP:PORT / Domain:PORT in raw text
+      if (!resolvedPort || !resolvedIp) {
+        const generic = [...text.matchAll(/(?:(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.\-]+(?:\.[a-zA-Z]{2,}|(?:\d{1,3}\.){3}\d{1,3}))):(\d{2,5})/g)];
+        if (generic.length > 0) {
+          const last = generic[generic.length - 1];
+          resolvedIp = last[1];
+          resolvedPort = parseInt(last[2]);
+        }
+      }
+
+      // 8. Fallback: single IP or Domain with no port
+      if (!resolvedIp && targetHost) {
+        resolvedIp = targetHost;
+      }
+      if (!resolvedPort && resolvedIp) {
+        resolvedPort = 9987;
+      }
+
+      if (!resolvedIp && !targetHost) {
+        const ipOnly = text.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
+        if (ipOnly) {
+          resolvedIp = ipOnly[0];
+          resolvedPort = 9987;
+        } else {
+          const domainMatch = text.match(/\b([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}\b/);
+          if (domainMatch) {
+            targetHost = domainMatch[0];
+            resolvedIp = targetHost;
+            resolvedPort = 9987;
+          }
+        }
+      }
+
+      if (!resolvedIp && !targetHost) {
+        return null;
+      }
+
+      const finalIp = resolvedIp || targetHost;
+      const finalPort = resolvedPort || 9987;
+
+      return {
+        targetHost: targetHost || finalIp,
+        resolvedIp: finalIp,
+        resolvedPort: finalPort,
+        fullAddress: `${finalIp}:${finalPort}`,
+        isDefaultPort: finalPort === 9987
+      };
+    }
+
+    function parseTsLogAction() {
+      const input = document.getElementById('logParserInput');
+      const val = input.value.trim();
+      const errBox = document.getElementById('logParserError');
+      const resBox = document.getElementById('logParserResult');
+
+      errBox.style.display = 'none';
+      resBox.style.display = 'none';
+
+      if (!val) {
+        showToast('请先粘贴客户端日志或服务器地址', 'error');
+        errBox.innerText = '请先在上方输入框粘贴客户端日志或服务器地址后再点击解析。';
+        errBox.style.display = 'block';
+        return;
+      }
+
+      const result = parseTsLog(val);
+      if (!result) {
+        errBox.innerText = '未能在粘贴的内容中检测到有效的 TS 连接记录。请确认已连入服务器并在客户端日志中勾选「信息」，全选复制后再粘贴尝试；或者直接输入形如 123.45.67.89:10086 的地址。';
+        errBox.style.display = 'block';
+        showToast('解析失败，未检测到有效连接记录', 'error');
+        return;
+      }
+
+      lastParsedResult = result;
+      document.getElementById('parsedTargetHost').innerText = result.targetHost;
+      document.getElementById('parsedResolvedIp').innerText = result.resolvedIp;
+      document.getElementById('parsedResolvedPort').innerText = result.resolvedPort;
+      document.getElementById('parsedFullAddr').innerText = result.fullAddress;
+
+      const badge = document.getElementById('parsedPortBadge');
+      if (result.isDefaultPort) {
+        badge.className = 'badge badge-info';
+        badge.innerText = '官方默认端口 9987';
+      } else {
+        badge.className = 'badge badge-warning';
+        badge.innerText = `非默认端口 (${result.resolvedPort})`;
+      }
+
+      resBox.style.display = 'block';
+      showToast(`解析成功！端口为: ${result.resolvedPort}`, 'success');
+    }
+
+    function applyParsedToBot() {
+      if (!lastParsedResult) {
+        showToast('请先解析日志', 'error');
+        return;
+      }
+
+      const addrInput = document.getElementById('botServerAddrInput');
+      const portInput = document.getElementById('botServerPortInput');
+
+      if (addrInput) {
+        addrInput.value = lastParsedResult.resolvedIp || lastParsedResult.targetHost;
+      }
+      if (portInput) {
+        portInput.value = lastParsedResult.resolvedPort;
+      }
+
+      closeLogParserModal();
+      showToast(`已自动填入地址: ${addrInput.value} 端口: ${portInput.value}`, 'success');
+
+      const botConfigCard = document.getElementById('botConfigCard');
+      if (botConfigCard && botConfigCard.style.display !== 'none') {
+        botConfigCard.scrollIntoView({ behavior: 'smooth' });
+      }
+    }
   </script>
+
+  <!-- TS 客户端日志智能解析与端口提取模态框 -->
+  <div id="logParserModal" class="modal-overlay" onclick="handleLogModalBackdropClick(event)">
+    <div class="modal-content" style="max-width: 680px;" onclick="event.stopPropagation()">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem;">
+        <div style="display: flex; align-items: center; gap: 0.6rem;">
+          <div style="width: 36px; height: 36px; background: linear-gradient(135deg, #a855f7, #ec4899); border-radius: 8px; display: flex; align-items: center; justify-content: center; font-size: 1.1rem; color: #fff; box-shadow: 0 4px 12px rgba(168, 85, 247, 0.35);">
+            <i class="fa-solid fa-wand-magic-sparkles"></i>
+          </div>
+          <div>
+            <h3 style="font-size: 1.2rem; font-weight: 700; color: #fff;">TeamSpeak 客户端日志智能解析</h3>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin-top: 2px;">快速提取商家购买 TS 服务器的真实连接 IP 与语音端口</p>
+          </div>
+        </div>
+        <button class="btn-action btn-action-sm" onclick="closeLogParserModal()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+
+      <!-- 操作步骤提示栏 -->
+      <div style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.25); border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 1rem;">
+        <div style="font-size: 0.84rem; color: #d8b4fe; font-weight: 600; margin-bottom: 0.4rem;">
+          <i class="fa-solid fa-circle-info"></i> 如何获取客户端日志（只需 30 秒）：
+        </div>
+        <div style="font-size: 0.8rem; color: #cbd5e1; line-height: 1.6;">
+          ① 打开电脑上的 TeamSpeak 客户端并<strong>连接进入您的服务器</strong>；<br>
+          ② 点击顶部菜单栏 <strong>「工具 (Tools)」 ➔ 「客户端日志 (Client Log)」</strong>（或按快捷键 <code>Ctrl + L</code>）；<br>
+          ③ 在弹出的日志窗口顶部，<strong>只勾选「信息 (Info)」</strong>；<br>
+          ④ 点击日志区域按 <strong>Ctrl + A 全选</strong>并复制，粘贴到下方输入框中点击解析。
+        </div>
+      </div>
+
+      <!-- 日志输入区 -->
+      <div style="margin-bottom: 1rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem;">
+          <label class="info-label" style="font-weight: 600; margin-bottom: 0;">粘贴客户端日志或服务器地址：</label>
+          <div style="display: flex; gap: 0.4rem;">
+            <button type="button" class="btn-action btn-action-sm" onclick="loadSampleLog()" style="font-size: 0.75rem;">
+              <i class="fa-regular fa-lightbulb"></i> 载入测试示例
+            </button>
+            <button type="button" class="btn-action btn-action-sm" onclick="clearLogInput()" style="font-size: 0.75rem;">
+              <i class="fa-solid fa-eraser"></i> 清空
+            </button>
+          </div>
+        </div>
+        <textarea id="logParserInput" class="cdk-input" style="width: 100%; height: 140px; border: 1px solid var(--border-color); border-radius: 10px; background: rgba(0,0,0,0.4); padding: 0.75rem; font-family: monospace; font-size: 0.82rem; resize: vertical; line-height: 1.45; color: #e2e8f0;" placeholder="请在此处按 Ctrl+V 粘贴从 TeamSpeak 客户端日志中复制的文本内容，如：&#10;2026-08-25 10:00:00|INFO |ClientUI |1 |Connect to server: example.ts3.com&#10;2026-08-25 10:00:00|INFO |ClientUI |1 |Resolve successful: 123.45.67.89:20345"></textarea>
+      </div>
+
+      <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-bottom: 1rem;">
+        <button type="button" class="btn-action" onclick="closeLogParserModal()">关闭</button>
+        <button type="button" class="btn-primary" onclick="parseTsLogAction()" style="background: linear-gradient(135deg, #a855f7, #6366f1); cursor: pointer;">
+          <i class="fa-solid fa-bolt"></i> 立即解析提取
+        </button>
+      </div>
+
+      <!-- 错误警告提示 -->
+      <div id="logParserError" style="display: none; background: rgba(239, 68, 68, 0.15); border: 1px solid #ef4444; color: #f87171; padding: 0.75rem 1rem; border-radius: 8px; font-size: 0.82rem; line-height: 1.5; margin-bottom: 1rem;">
+        <i class="fa-solid fa-triangle-exclamation"></i> 未能在粘贴的内容中检测到有效的 TS 连接记录。请确认已连入服务器并在客户端日志中勾选「信息」，全选复制后再粘贴尝试；或者直接输入形如 <code>123.45.67.89:10086</code> 的地址。
+      </div>
+
+      <!-- 解析结果展示卡片 -->
+      <div id="logParserResult" style="display: none; background: rgba(15, 23, 42, 0.9); border: 1px solid rgba(16, 185, 129, 0.4); border-radius: 12px; padding: 1.25rem; animation: fadeIn 0.3s ease-out;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.6rem; border-bottom: 1px solid var(--border-color);">
+          <div style="display: flex; align-items: center; gap: 0.5rem; color: #34d399; font-weight: 700; font-size: 0.95rem;">
+            <i class="fa-solid fa-circle-check"></i> 成功提取到服务器连接信息！
+          </div>
+          <span id="parsedPortBadge" class="badge badge-success">已解析</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem; margin-bottom: 1.25rem;">
+          <div class="info-item" style="padding: 0.75rem 0.85rem;">
+            <div class="info-label" style="font-size: 0.78rem;">目标域名 / 原始输入</div>
+            <div class="info-value" style="font-size: 0.95rem; color: #93c5fd;">
+              <span id="parsedTargetHost">-</span>
+              <button class="btn-copy" onclick="copyText('parsedTargetHost')"><i class="fa-regular fa-copy"></i></button>
+            </div>
+          </div>
+          <div class="info-item" style="padding: 0.75rem 0.85rem;">
+            <div class="info-label" style="font-size: 0.78rem;">服务器真实 IP (Address)</div>
+            <div class="info-value" style="font-size: 0.95rem; color: #38bdf8;">
+              <span id="parsedResolvedIp">-</span>
+              <button class="btn-copy" onclick="copyText('parsedResolvedIp')"><i class="fa-regular fa-copy"></i></button>
+            </div>
+          </div>
+          <div class="info-item" style="padding: 0.75rem 0.85rem; background: rgba(168, 85, 247, 0.12); border-color: rgba(168, 85, 247, 0.35);">
+            <div class="info-label" style="font-size: 0.78rem; color: #d8b4fe;">真实语音端口 (Real Port)</div>
+            <div class="info-value" style="font-size: 1.15rem; color: #facc15; font-weight: 800;">
+              <span id="parsedResolvedPort">9987</span>
+              <button class="btn-copy" onclick="copyText('parsedResolvedPort')"><i class="fa-regular fa-copy"></i></button>
+            </div>
+          </div>
+          <div class="info-item" style="padding: 0.75rem 0.85rem;">
+            <div class="info-label" style="font-size: 0.78rem;">完整连接串 (IP:端口)</div>
+            <div class="info-value" style="font-size: 0.95rem; color: #34d399;">
+              <span id="parsedFullAddr">-</span>
+              <button class="btn-copy" onclick="copyText('parsedFullAddr')"><i class="fa-regular fa-copy"></i></button>
+            </div>
+          </div>
+        </div>
+
+        <div style="display: flex; gap: 0.6rem; flex-wrap: wrap; justify-content: flex-end;">
+          <button type="button" class="btn-primary" onclick="applyParsedToBot()" style="background: linear-gradient(135deg, #10b981, #059669); font-size: 0.85rem; padding: 0.5rem 1rem; cursor: pointer;">
+            <i class="fa-solid fa-check"></i> 一键填入开通机器人表单
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
