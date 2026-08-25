@@ -417,7 +417,7 @@
 
   <!-- TS 客户端日志智能解析与端口提取模态框 -->
   <div id="logParserModal" class="modal-overlay" onclick="handleLogModalBackdropClick(event)">
-    <div class="modal-content" onclick="event.stopPropagation()">
+    <div class="modal-content" onclick="event.stopPropagation()" style="max-width: 680px;">
       <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; padding-bottom: 0.85rem; border-bottom: 1px solid var(--border-color);">
         <div style="display: flex; align-items: center; gap: 0.75rem;">
           <div style="width: 38px; height: 38px; background: var(--accent-purple-gradient); border-radius: 10px; display: flex; align-items: center; justify-content: center; font-size: 1.15rem; color: #fff; box-shadow: 0 4px 12px rgba(168, 85, 247, 0.35);">
@@ -425,7 +425,7 @@
           </div>
           <div>
             <h3 style="font-size: 1.2rem; font-weight: 800; color: var(--text-main);">TeamSpeak 客户端日志智能解析</h3>
-            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">快速提取商家购买 TS 服务器的真实连接 IP 与语音端口</p>
+            <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 2px;">智能识别境外源站与国内中转线路，优先提取中转节点与真实端口</p>
           </div>
         </div>
         <button class="modal-close-btn" onclick="closeLogParserModal()" title="关闭"><i class="fa-solid fa-xmark"></i></button>
@@ -440,7 +440,8 @@
           ① 打开电脑上的 TeamSpeak 客户端并<strong>连接进入您的服务器</strong>；<br>
           ② 点击顶部菜单栏 <strong>「工具 (Tools)」 ➔ 「客户端日志 (Client Log)」</strong>（或快捷键 <code>Ctrl + L</code>）；<br>
           ③ 在弹出的日志窗口顶部，<strong>只勾选「信息 (Info)」</strong>；<br>
-          ④ 点击日志区域按 <strong>Ctrl + A 全选</strong>并复制，粘贴到下方输入框中点击解析。
+          ④ 点击日志区域按 <strong>Ctrl + A 全选</strong>并复制，粘贴到下方输入框中点击解析。<br>
+          <span style="color: #4ade80; font-weight: 600;"><i class="fa-solid fa-shield-halved"></i> 智能防护：系统会自动识别中转节点与境外源站，优先提取国内免翻墙中转地址。</span>
         </div>
       </div>
 
@@ -450,19 +451,19 @@
           <label class="info-label" style="font-weight: 700; margin-bottom: 0;">粘贴客户端日志或服务器地址：</label>
           <div style="display: flex; gap: 0.4rem;">
             <button type="button" class="btn-action btn-action-sm" onclick="loadSampleLog()" style="font-size: 0.76rem;">
-              <i class="fa-regular fa-lightbulb"></i> 载入测试示例
+              <i class="fa-regular fa-lightbulb"></i> 载入中转测试示例
             </button>
             <button type="button" class="btn-action btn-action-sm" onclick="clearLogInput()" style="font-size: 0.76rem;">
               <i class="fa-solid fa-eraser"></i> 清空
             </button>
           </div>
         </div>
-        <textarea id="logParserInput" class="form-control" style="width: 100%; height: 140px; font-family: 'Consolas', 'Courier New', monospace; font-size: 0.82rem; resize: vertical; line-height: 1.5;" placeholder="请在此处按 Ctrl+V 粘贴从 TeamSpeak 客户端日志中复制的文本内容，如：&#10;2026-08-25 10:00:00|INFO |ClientUI |1 |Connect to server: example.ts3.com&#10;2026-08-25 10:00:00|INFO |ClientUI |1 |Resolve successful: 123.45.67.89:20345"></textarea>
+        <textarea id="logParserInput" class="form-control" style="width: 100%; height: 130px; font-family: 'Consolas', 'Courier New', monospace; font-size: 0.82rem; resize: vertical; line-height: 1.5;" placeholder="请在此处按 Ctrl+V 粘贴从 TeamSpeak 客户端日志中复制的文本内容，如：&#10;2026-08-25 10:00:00|INFO |ClientUI |1 |Connect to server: ts.myserver.cn&#10;2026-08-25 10:00:00|INFO |TSDNS | |SRV DNS resolve successful, &quot;_ts3._udp.ts.myserver.cn&quot; => &quot;relay01.tsnode.cn:20345&quot;&#10;2026-08-25 10:00:00|INFO |ClientUI |1 |Resolve successful: 45.32.12.34:20345"></textarea>
       </div>
 
       <div style="display: flex; gap: 0.75rem; justify-content: flex-end; margin-bottom: 1.2rem;">
         <button type="button" class="btn-action" style="min-width: 90px; height: 38px;" onclick="closeLogParserModal()">取消关闭</button>
-        <button type="button" class="btn-primary" onclick="parseTsLogAction()" style="background: var(--accent-purple-gradient); min-width: 140px; height: 38px;">
+        <button type="button" class="btn-primary" id="btnRunLogParse" onclick="parseTsLogAction()" style="background: var(--accent-purple-gradient); min-width: 140px; height: 38px;">
           <i class="fa-solid fa-bolt"></i> 立即解析提取
         </button>
       </div>
@@ -474,41 +475,79 @@
 
       <!-- 解析结果展示卡片 -->
       <div id="logParserResult" style="display: none; background: var(--bg-card-inner); border: 1px solid var(--border-color); border-radius: 14px; padding: 1.25rem; animation: fadeIn 0.3s ease-out;">
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1rem; padding-bottom: 0.65rem; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; gap: 0.5rem;">
+        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.85rem; padding-bottom: 0.65rem; border-bottom: 1px solid var(--border-color); flex-wrap: wrap; gap: 0.5rem;">
           <div style="display: flex; align-items: center; gap: 0.5rem; color: var(--success); font-weight: 800; font-size: 0.95rem;">
-            <i class="fa-solid fa-circle-check"></i> 成功提取到目标服务器连接信息！
+            <i class="fa-solid fa-circle-check"></i> 成功提取到服务器连接信息！
           </div>
-          <span id="parsedPortBadge" class="badge badge-success">已解析</span>
+          <span id="parsedNodeBadge" class="badge badge-success">⚡ 已优选国内中转节点</span>
         </div>
 
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.85rem; margin-bottom: 1.25rem;">
-          <div class="info-item">
-            <div class="info-label">目标域名 / 原始输入</div>
-            <div class="info-value" style="font-size: 0.95rem; color: #60a5fa;">
-              <span id="parsedTargetHost">-</span>
-              <button class="btn-copy" onclick="copyText('parsedTargetHost')"><i class="fa-regular fa-copy"></i></button>
+        <!-- 线路提示信息 -->
+        <div id="parsedNodeNotice" style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.25); border-radius: 10px; padding: 0.65rem 0.85rem; margin-bottom: 1rem; font-size: 0.8rem; color: var(--text-secondary); line-height: 1.55;">
+          <i class="fa-solid fa-shield-halved" style="color: #38bdf8; margin-right: 4px;"></i>
+          <span id="parsedNodeNoticeText">已自动识别并提取国内中转节点，避免境外直连阻断。</span>
+        </div>
+
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.85rem; margin-bottom: 1.15rem;">
+          <!-- 推荐中转节点 -->
+          <div class="info-item" style="background: rgba(34, 197, 94, 0.08); border: 1.5px solid rgba(34, 197, 94, 0.35);">
+            <div class="info-label" style="color: var(--success); font-weight: 700;">
+              <i class="fa-solid fa-bolt"></i> 推荐连接地址（中转节点 / 域名）
+            </div>
+            <div class="info-value" style="font-size: 1rem; color: #4ade80; font-weight: 800;">
+              <span id="parsedTransitHost">-</span>
+              <button class="btn-copy" onclick="copyText('parsedTransitHost')"><i class="fa-regular fa-copy"></i></button>
             </div>
           </div>
-          <div class="info-item">
-            <div class="info-label">服务器真实 IP (Address)</div>
-            <div class="info-value" style="font-size: 0.95rem; color: #38bdf8;">
-              <span id="parsedResolvedIp">-</span>
-              <button class="btn-copy" onclick="copyText('parsedResolvedIp')"><i class="fa-regular fa-copy"></i></button>
-            </div>
-          </div>
+
+          <!-- 真实语音端口 -->
           <div class="info-item" style="background: rgba(168, 85, 247, 0.12); border-color: rgba(168, 85, 247, 0.35);">
-            <div class="info-label" style="color: #c084fc;">真实语音端口 (Real Port)</div>
+            <div class="info-label" style="color: #c084fc; font-weight: 700;">
+              <i class="fa-solid fa-headphones"></i> 真实语音端口 (Real Port)
+            </div>
             <div class="info-value" style="font-size: 1.2rem; color: #facc15; font-weight: 800;">
               <span id="parsedResolvedPort">9987</span>
               <button class="btn-copy" onclick="copyText('parsedResolvedPort')"><i class="fa-regular fa-copy"></i></button>
             </div>
           </div>
+
+          <!-- 境外源站 IP / 底层解析 IP -->
           <div class="info-item">
-            <div class="info-label">完整连接串 (IP:端口)</div>
-            <div class="info-value" style="font-size: 0.95rem; color: var(--success);">
+            <div class="info-label">
+              <i class="fa-solid fa-earth-asia"></i> 境外源服务器 IP (Origin Direct IP)
+            </div>
+            <div class="info-value" style="font-size: 0.92rem; color: #94a3b8;">
+              <span id="parsedOriginIp">-</span>
+              <button class="btn-copy" onclick="copyText('parsedOriginIp')"><i class="fa-regular fa-copy"></i></button>
+            </div>
+          </div>
+
+          <!-- 完整连接串 -->
+          <div class="info-item">
+            <div class="info-label">
+              <i class="fa-solid fa-link"></i> 推荐完整连接串 (地址:端口)
+            </div>
+            <div class="info-value" style="font-size: 0.92rem; color: #60a5fa;">
               <span id="parsedFullAddr">-</span>
               <button class="btn-copy" onclick="copyText('parsedFullAddr')"><i class="fa-regular fa-copy"></i></button>
             </div>
+          </div>
+        </div>
+
+        <!-- 填入选择模式 -->
+        <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; padding: 0.75rem 1rem; margin-bottom: 1.15rem;">
+          <div style="font-size: 0.78rem; color: var(--text-muted); font-weight: 700; margin-bottom: 0.45rem;">
+            选择开通机器人时填入的连接线路：
+          </div>
+          <div style="display: flex; gap: 1.2rem; flex-wrap: wrap; font-size: 0.84rem;">
+            <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
+              <input type="radio" name="applyTargetType" id="applyTypeTransit" value="transit" checked style="accent-color: #a855f7;">
+              <strong style="color: #4ade80;">优先使用中转节点地址</strong> <span style="font-size: 0.76rem; color: var(--text-muted);">（推荐，国内免翻墙、延迟低）</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
+              <input type="radio" name="applyTargetType" id="applyTypeOrigin" value="origin" style="accent-color: #a855f7;">
+              <span>使用境外源站直连 IP</span> <span style="font-size: 0.76rem; color: var(--text-muted);">（仅限海外或翻墙直连环境）</span>
+            </label>
           </div>
         </div>
 
@@ -968,13 +1007,13 @@
     }
 
     function loadSampleLog() {
-      const sample = `2026-08-25 10:00:01.123456|INFO    |ClientUI      |1  |Connect to server: example.ts3.com
-2026-08-25 10:00:01.130000|INFO    |ClientUI      |1  |Trying to resolve example.ts3.com
-2026-08-25 10:00:01.140000|INFO    |TSDNS         |   |SRV DNS resolve successful, "_ts3._udp.example.ts3.com" => "node1.host.com:20345"
-2026-08-25 10:00:01.150000|INFO    |ClientUI      |1  |Lookup finished: ip:112.48.12.34 port:20345 query=example.ts3.com error=0
-2026-08-25 10:00:01.160000|INFO    |ClientUI      |1  |Resolve successful: 112.48.12.34:20345
+      const sample = `2026-08-25 10:00:01.123456|INFO    |ClientUI      |1  |Connect to server: ts.myserver.cn
+2026-08-25 10:00:01.130000|INFO    |ClientUI      |1  |Trying to resolve ts.myserver.cn
+2026-08-25 10:00:01.140000|INFO    |TSDNS         |   |SRV DNS resolve successful, "_ts3._udp.ts.myserver.cn" => "relay01.tsnode.cn:20345"
+2026-08-25 10:00:01.150000|INFO    |ClientUI      |1  |Lookup finished: ip:114.114.114.114 port:20345 query=relay01.tsnode.cn error=0
+2026-08-25 10:00:01.160000|INFO    |ClientUI      |1  |Resolve successful: 45.32.12.34:20345
 2026-08-25 10:00:01.170000|INFO    |ClientUI      |1  |Blacklist check ok
-2026-08-25 10:00:01.180000|INFO    |ClientUI      |1  |Initiating connection: 112.48.12.34:20345`;
+2026-08-25 10:00:01.180000|INFO    |ClientUI      |1  |Initiating connection: 45.32.12.34:20345`;
       document.getElementById('logParserInput').value = sample;
       parseTsLogAction();
     }
@@ -983,9 +1022,16 @@
       if (!rawText || !rawText.trim()) return null;
       const text = rawText.trim();
 
-      let targetHost = null;
-      let resolvedIp = null;
-      let resolvedPort = null;
+      let connectHost = null;
+      let connectPort = null;
+      let srvTargetHost = null;
+      let srvTargetPort = null;
+      let directIp = null;
+      let directPort = null;
+      let lookupIp = null;
+      let lookupPort = null;
+      let tsdnsHost = null;
+      let tsdnsPort = null;
 
       // 1. Connect to server: host[:port]
       const connectMatches = [...text.matchAll(/Connect to server:\s*([^\s\r\n]+)/gi)];
@@ -993,121 +1039,172 @@
         const last = connectMatches[connectMatches.length - 1][1].trim();
         if (last.includes(':') && !last.startsWith('http://') && !last.startsWith('https://')) {
           const parts = last.split(':');
-          targetHost = parts[0].trim();
-          resolvedPort = parseInt(parts[1].trim());
+          connectHost = parts[0].trim();
+          connectPort = parseInt(parts[1].trim());
         } else {
-          targetHost = last;
+          connectHost = last;
         }
       }
 
       // 2. Trying to resolve host
       const resolveDomainMatches = [...text.matchAll(/Trying to resolve\s*([^\s\r\n]+)/gi)];
-      if (resolveDomainMatches.length > 0 && !targetHost) {
-        targetHost = resolveDomainMatches[resolveDomainMatches.length - 1][1].trim();
+      if (resolveDomainMatches.length > 0 && !connectHost) {
+        connectHost = resolveDomainMatches[resolveDomainMatches.length - 1][1].trim();
       }
 
-      // 3. Resolve successful / Initiating connection / Connecting to
+      // 3. SRV DNS resolve successful
+      const srvMatches = [...text.matchAll(/SRV DNS resolve successful[^\n\r]*?(?:=>|->)\s*"?([a-zA-Z0-9.\-]+):(\d+)/gi)];
+      if (srvMatches.length > 0) {
+        const last = srvMatches[srvMatches.length - 1];
+        srvTargetHost = last[1].trim();
+        srvTargetPort = parseInt(last[2]);
+      }
+
+      // 4. Lookup finished
+      const lookup1 = [...text.matchAll(/Lookup finished:.*?ip:([0-9a-zA-Z.:\-]+).*?port:(\d+)/gi)];
+      if (lookup1.length > 0) {
+        const last = lookup1[lookup1.length - 1];
+        lookupIp = last[1].trim();
+        lookupPort = parseInt(last[2]);
+      } else {
+        const lookup2 = [...text.matchAll(/Lookup finished:\s+([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[a-zA-Z0-9.\-]+)\s+(\d+)/gi)];
+        if (lookup2.length > 0) {
+          const last = lookup2[lookup2.length - 1];
+          lookupIp = last[1].trim();
+          lookupPort = parseInt(last[2]);
+        }
+      }
+
+      // 5. TSDNS result
+      const tsdnsMatches = [...text.matchAll(/TSDNS[^\n\r]*?result[:\s]+"?([a-zA-Z0-9.\-]+):(\d+)/gi)];
+      if (tsdnsMatches.length > 0) {
+        const last = tsdnsMatches[tsdnsMatches.length - 1];
+        tsdnsHost = last[1].trim();
+        tsdnsPort = parseInt(last[2]);
+      }
+
+      // 6. Direct connect / Resolve successful
       const directConnectMatches = [...text.matchAll(/(?:Resolve successful|Initiating connection|Connecting to|Connected to)[:\s]+(?:\[([0-9a-fA-F:]+)\]|([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[a-zA-Z0-9.\-]+)):(\d+)/gi)];
       if (directConnectMatches.length > 0) {
         const last = directConnectMatches[directConnectMatches.length - 1];
-        resolvedIp = last[1] || last[2];
-        resolvedPort = parseInt(last[3]);
+        directIp = last[1] || last[2];
+        directPort = parseInt(last[3]);
       }
 
-      // 4. Lookup finished: ip:1.2.3.4 port:12345 or Lookup finished: 1.2.3.4 12345 host.com
-      if (!resolvedPort || !resolvedIp) {
-        const lookup1 = [...text.matchAll(/Lookup finished:.*?ip:([0-9a-zA-Z.:\-]+).*?port:(\d+)/gi)];
-        if (lookup1.length > 0) {
-          const last = lookup1[lookup1.length - 1];
-          resolvedIp = last[1];
-          resolvedPort = parseInt(last[2]);
-        }
-      }
-
-      if (!resolvedPort || !resolvedIp) {
-        const lookup2 = [...text.matchAll(/Lookup finished:\s+([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[a-zA-Z0-9.\-]+)\s+(\d+)\s+([^\s]+)?/gi)];
-        if (lookup2.length > 0) {
-          const last = lookup2[lookup2.length - 1];
-          resolvedIp = last[1];
-          resolvedPort = parseInt(last[2]);
-          if (!targetHost && last[3]) targetHost = last[3];
-        }
-      }
-
-      // 5. SRV DNS resolve successful
-      if (!resolvedPort || !resolvedIp) {
-        const srv = [...text.matchAll(/SRV DNS resolve successful[^\n\r]*?(?:=>|->)\s*"?([a-zA-Z0-9.\-]+):(\d+)/gi)];
-        if (srv.length > 0) {
-          const last = srv[srv.length - 1];
-          resolvedIp = last[1];
-          resolvedPort = parseInt(last[2]);
-        }
-      }
-
-      // 6. TSDNS result
-      if (!resolvedPort || !resolvedIp) {
-        const tsdns = [...text.matchAll(/TSDNS[^\n\r]*?result[:\s]+"?([a-zA-Z0-9.\-]+):(\d+)/gi)];
-        if (tsdns.length > 0) {
-          const last = tsdns[tsdns.length - 1];
-          resolvedIp = last[1];
-          resolvedPort = parseInt(last[2]);
-        }
-      }
-
-      // 7. Fallback: general IP:PORT / Domain:PORT in raw text
-      if (!resolvedPort || !resolvedIp) {
+      // 7. 通用备选匹配 (IP:Port 或 Domain:Port)
+      if (!connectHost && !directIp) {
         const generic = [...text.matchAll(/(?:(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.\-]+(?:\.[a-zA-Z]{2,}|(?:\d{1,3}\.){3}\d{1,3}))):(\d{2,5})/g)];
         if (generic.length > 0) {
           const last = generic[generic.length - 1];
-          resolvedIp = last[1];
-          resolvedPort = parseInt(last[2]);
-        }
-      }
-
-      // 8. Fallback: single IP or Domain with no port
-      if (!resolvedIp && targetHost) {
-        resolvedIp = targetHost;
-      }
-      if (!resolvedPort && resolvedIp) {
-        resolvedPort = 9987;
-      }
-
-      if (!resolvedIp && !targetHost) {
-        const ipOnly = text.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
-        if (ipOnly) {
-          resolvedIp = ipOnly[0];
-          resolvedPort = 9987;
+          connectHost = last[1].trim();
+          connectPort = parseInt(last[2]);
         } else {
-          const domainMatch = text.match(/\b([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}\b/);
-          if (domainMatch) {
-            targetHost = domainMatch[0];
-            resolvedIp = targetHost;
-            resolvedPort = 9987;
+          const ipOnly = text.match(/\b(?:\d{1,3}\.){3}\d{1,3}\b/);
+          if (ipOnly) {
+            directIp = ipOnly[0];
+          } else {
+            const domainMatch = text.match(/\b([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}\b/);
+            if (domainMatch) {
+              connectHost = domainMatch[0];
+            }
           }
         }
       }
 
-      if (!resolvedIp && !targetHost) {
+      if (!connectHost && !directIp && !srvTargetHost && !lookupIp) {
         return null;
       }
 
-      const finalIp = resolvedIp || targetHost;
-      const finalPort = resolvedPort || 9987;
+      const finalPort = srvTargetPort || lookupPort || directPort || connectPort || 9987;
+      const isDomain = connectHost && !/^(\d{1,3}\.){3}\d{1,3}$/.test(connectHost);
+      const originIp = directIp || lookupIp || connectHost || '127.0.0.1';
+
+      // 优先提取国内中转节点
+      let transitHost = null;
+      let nodeType = 'direct';
+      let badgeText = '🟢 标准连接节点';
+      let badgeClass = 'badge badge-info';
+      let nodeNotice = '已成功提取目标服务器连接信息与语音端口。';
+
+      if (srvTargetHost) {
+        transitHost = srvTargetHost;
+        nodeType = 'srv_relay';
+        badgeText = '⚡ SRV 中转节点（已优选，免翻墙）';
+        badgeClass = 'badge badge-success';
+        nodeNotice = '检测到 SRV 国内中转节点，已自动优选作为连接地址，避免直连境外服务器。';
+      } else if (tsdnsHost) {
+        transitHost = tsdnsHost;
+        nodeType = 'tsdns_relay';
+        badgeText = '⚡ TSDNS 中转节点（已优选）';
+        badgeClass = 'badge badge-success';
+        nodeNotice = '检测到 TSDNS 中转解析节点，已为您优选该连接线路。';
+      } else if (isDomain && originIp && connectHost !== originIp) {
+        transitHost = connectHost;
+        nodeType = 'domain_relay';
+        badgeText = '⚡ 域名中转入口（已避开境外直连阻断）';
+        badgeClass = 'badge badge-success';
+        nodeNotice = `检测到底层为独立服务器 IP (${originIp})，已自动选用中转入口域名作为连接地址。`;
+      } else if (lookupIp && lookupIp !== originIp) {
+        transitHost = lookupIp;
+        nodeType = 'domestic_relay';
+        badgeText = '⚡ 国内中转节点（已优选）';
+        badgeClass = 'badge badge-success';
+        nodeNotice = '已成功识别国内中转节点 IP，免翻墙低延迟连接。';
+      } else {
+        transitHost = connectHost || originIp;
+      }
 
       return {
-        targetHost: targetHost || finalIp,
-        resolvedIp: finalIp,
+        targetHost: connectHost || transitHost,
+        transitHost: transitHost,
+        transitPort: finalPort,
+        originIp: originIp,
+        originPort: finalPort,
+        recommendedHost: transitHost,
+        recommendedPort: finalPort,
+        resolvedIp: originIp,
         resolvedPort: finalPort,
-        fullAddress: `${finalIp}:${finalPort}`,
-        isDefaultPort: finalPort === 9987
+        fullAddress: `${transitHost}:${finalPort}`,
+        isDefaultPort: finalPort === 9987,
+        nodeType: nodeType,
+        badgeText: badgeText,
+        badgeClass: badgeClass,
+        nodeNotice: nodeNotice
       };
     }
 
-    function parseTsLogAction() {
+    function renderParsedResult(result) {
+      if (!result) return;
+      document.getElementById('parsedTransitHost').innerText = result.transitHost || result.recommendedHost;
+      document.getElementById('parsedResolvedPort').innerText = result.transitPort || result.resolvedPort;
+      document.getElementById('parsedOriginIp').innerText = result.originIp || result.resolvedIp;
+      document.getElementById('parsedFullAddr').innerText = result.fullAddress;
+
+      const badge = document.getElementById('parsedNodeBadge');
+      if (badge) {
+        badge.className = result.badgeClass || 'badge badge-success';
+        badge.innerText = result.badgeText || '已解析';
+      }
+
+      const noticeBox = document.getElementById('parsedNodeNotice');
+      const noticeText = document.getElementById('parsedNodeNoticeText');
+      if (noticeText && result.nodeNotice) {
+        noticeText.innerText = result.nodeNotice;
+      }
+
+      // 默认选中优先中转节点
+      const applyTransitRadio = document.getElementById('applyTypeTransit');
+      if (applyTransitRadio) applyTransitRadio.checked = true;
+
+      document.getElementById('logParserResult').style.display = 'block';
+    }
+
+    async function parseTsLogAction() {
       const input = document.getElementById('logParserInput');
       const val = input.value.trim();
       const errBox = document.getElementById('logParserError');
       const resBox = document.getElementById('logParserResult');
+      const btnParse = document.getElementById('btnRunLogParse');
 
       errBox.style.display = 'none';
       resBox.style.display = 'none';
@@ -1119,31 +1216,56 @@
         return;
       }
 
-      const result = parseTsLog(val);
-      if (!result) {
-        errBox.innerText = '未能在粘贴的内容中检测到有效的 TS 连接记录。请确认已连入服务器并在客户端日志中勾选「信息」，全选复制后再粘贴尝试；或者直接输入形如 123.45.67.89:10086 的地址。';
+      // 1. 本地快速提取
+      const localResult = parseTsLog(val);
+      if (!localResult) {
+        errBox.innerText = '未能在粘贴的内容中检测到有效的 TS 连接记录。请确认已连入服务器并在客户端日志中勾选「信息」，全选复制后再粘贴尝试；或者直接输入形如 ts.myserver.com 或 123.45.67.89:10086 的地址。';
         errBox.style.display = 'block';
         showToast('解析失败，未检测到有效连接记录', 'error');
         return;
       }
 
-      lastParsedResult = result;
-      document.getElementById('parsedTargetHost').innerText = result.targetHost;
-      document.getElementById('parsedResolvedIp').innerText = result.resolvedIp;
-      document.getElementById('parsedResolvedPort').innerText = result.resolvedPort;
-      document.getElementById('parsedFullAddr').innerText = result.fullAddress;
+      lastParsedResult = localResult;
+      renderParsedResult(localResult);
+      showToast(`已提取连接信息！端口: ${localResult.transitPort || localResult.resolvedPort}`, 'success');
 
-      const badge = document.getElementById('parsedPortBadge');
-      if (result.isDefaultPort) {
-        badge.className = 'badge badge-info';
-        badge.innerText = '官方默认端口 9987';
-      } else {
-        badge.className = 'badge badge-warning';
-        badge.innerText = `非默认端口 (${result.resolvedPort})`;
+      // 2. 后端异步智能 SRV & GeoIP 双重验证与增强
+      try {
+        if (btnParse) btnParse.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在深度验证线路...';
+        const resp = await fetch('/api/parse-ts-target', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ input: val })
+        });
+        if (resp.ok) {
+          const remoteData = await resp.json();
+          if (remoteData.success) {
+            lastParsedResult = {
+              targetHost: remoteData.target_host || localResult.targetHost,
+              transitHost: remoteData.transit_host || localResult.transitHost,
+              transitPort: remoteData.transit_port || localResult.transitPort,
+              originIp: remoteData.origin_ip || localResult.originIp,
+              originPort: remoteData.origin_port || localResult.originPort,
+              recommendedHost: remoteData.transit_host || localResult.transitHost,
+              recommendedPort: remoteData.transit_port || localResult.transitPort,
+              resolvedIp: remoteData.origin_ip || localResult.originIp,
+              resolvedPort: remoteData.transit_port || localResult.transitPort,
+              fullAddress: remoteData.full_address || localResult.fullAddress,
+              isDefaultPort: remoteData.is_default_port,
+              nodeType: remoteData.node_type,
+              badgeText: remoteData.badge_text,
+              badgeClass: remoteData.badge_class,
+              nodeNotice: remoteData.message,
+              geoInfo: remoteData.geo_info
+            };
+            renderParsedResult(lastParsedResult);
+          }
+        }
+      } catch (e) {
+        console.warn('后端主动解析验证跳过:', e);
+      } finally {
+        if (btnParse) btnParse.innerHTML = '<i class="fa-solid fa-bolt"></i> 立即解析提取';
       }
-
-      resBox.style.display = 'block';
-      showToast(`解析成功！端口为: ${result.resolvedPort}`, 'success');
     }
 
     function applyParsedToBot() {
@@ -1154,16 +1276,27 @@
 
       const addrInput = document.getElementById('botServerAddrInput');
       const portInput = document.getElementById('botServerPortInput');
+      const applyTypeOrigin = document.getElementById('applyTypeOrigin');
+
+      let chosenHost = lastParsedResult.transitHost || lastParsedResult.targetHost || lastParsedResult.recommendedHost;
+      let chosenPort = lastParsedResult.transitPort || lastParsedResult.resolvedPort;
+      let modeText = '中转节点';
+
+      if (applyTypeOrigin && applyTypeOrigin.checked) {
+        chosenHost = lastParsedResult.originIp || lastParsedResult.resolvedIp || chosenHost;
+        chosenPort = lastParsedResult.originPort || lastParsedResult.resolvedPort;
+        modeText = '境外源站 IP';
+      }
 
       if (addrInput) {
-        addrInput.value = lastParsedResult.resolvedIp || lastParsedResult.targetHost;
+        addrInput.value = chosenHost;
       }
       if (portInput) {
-        portInput.value = lastParsedResult.resolvedPort;
+        portInput.value = chosenPort;
       }
 
       closeLogParserModal();
-      showToast(`已自动填入地址: ${addrInput.value} 端口: ${portInput.value}`, 'success');
+      showToast(`已填入${modeText}: ${chosenHost} 端口: ${chosenPort}`, 'success');
 
       const botConfigCard = document.getElementById('botConfigCard');
       if (botConfigCard && botConfigCard.style.display !== 'none') {

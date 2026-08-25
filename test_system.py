@@ -622,5 +622,45 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertIsNotNone(database.get_cdk(c_t[0]))
         self.assertIsNotNone(database.get_cdk(c_q[0]))
 
+    def test_parse_ts_target_srv_and_transit(self):
+        try:
+            from fastapi.testclient import TestClient
+            import app as ts_app
+            client = TestClient(ts_app.app)
+        except Exception:
+            self.skipTest("FastAPI TestClient 依赖不可用")
+
+        sample_log = """2026-08-25 10:00:01.123456|INFO |ClientUI |1 |Connect to server: ts.myserver.cn
+2026-08-25 10:00:01.130000|INFO |ClientUI |1 |Trying to resolve ts.myserver.cn
+2026-08-25 10:00:01.140000|INFO |TSDNS | |SRV DNS resolve successful, "_ts3._udp.ts.myserver.cn" => "relay01.tsnode.cn:20345"
+2026-08-25 10:00:01.150000|INFO |ClientUI |1 |Lookup finished: ip:114.114.114.114 port:20345 query=relay01.tsnode.cn error=0
+2026-08-25 10:00:01.160000|INFO |ClientUI |1 |Resolve successful: 45.32.12.34:20345"""
+
+        resp = client.post("/api/parse-ts-target", json={"input": sample_log})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        # 验证提取出的中转节点与真实端口
+        self.assertEqual(data["transit_host"], "relay01.tsnode.cn")
+        self.assertEqual(data["transit_port"], 20345)
+        self.assertEqual(data["origin_ip"], "45.32.12.34")
+        self.assertEqual(data["node_type"], "srv_relay")
+        self.assertIn("SRV", data["badge_text"])
+
+    def test_parse_ts_target_direct_ip(self):
+        try:
+            from fastapi.testclient import TestClient
+            import app as ts_app
+            client = TestClient(ts_app.app)
+        except Exception:
+            self.skipTest("FastAPI TestClient 依赖不可用")
+
+        resp = client.post("/api/parse-ts-target", json={"input": "114.114.114.114:20345"})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        self.assertEqual(data["transit_host"], "114.114.114.114")
+        self.assertEqual(data["transit_port"], 20345)
+
 if __name__ == "__main__":
     unittest.main()

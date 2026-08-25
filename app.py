@@ -1,6 +1,12 @@
 import os
+import re
+import socket
+import subprocess
+import ipaddress
+import urllib.request
+import json
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Optional, Literal, Dict, Any, Tuple, List
 from fastapi import FastAPI, Request, HTTPException, Depends, Header
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -9,7 +15,6 @@ from pydantic import BaseModel, Field
 
 import asyncio
 from datetime import datetime, timedelta
-from typing import Optional, List
 import config
 from database import (
     init_db,
@@ -207,6 +212,60 @@ class TestBotConfigRequest(BaseModel):
     user: Optional[str] = None
     password: Optional[str] = None
 
+class ParseTsTargetRequest(BaseModel):
+    input: str = Field(min_length=1, max_length=5000)
+
+# --- 辅助工具函数 ---
+
+def resolve_srv_record(domain: str) -> Tuple[Optional[str], Optional[int]]:
+    """
+    通过 nslookup 查询 TeamSpeak SRV 记录 (_ts3._udp.<domain>)
+    返回: (srv_host, srv_port)
+    """
+    try:
+        cmd = ["nslookup", "-type=SRV", f"_ts3._udp.{domain}"]
+        proc = subprocess.run(cmd, capture_output=True, text=True, timeout=3)
+        out = proc.stdout
+        port_m = re.search(r"port\s*=\s*(\d+)", out, re.I)
+        host_m = re.search(r"svr hostname\s*=\s*([^\s\r\n]+)", out, re.I)
+        if port_m and host_m:
+            srv_port = int(port_m.group(1))
+            srv_host = host_m.group(1).rstrip(".")
+            return srv_host, srv_port
+    except Exception:
+        pass
+    return None, None
+
+def get_ip_geo_info(ip_str: str) -> Dict[str, Any]:
+    """
+    查询 IP 的地理归属与是否为境外节点
+    """
+    try:
+        ip = ipaddress.ip_address(ip_str)
+        if ip.is_private or ip.is_loopback:
+            return {"is_overseas": False, "country": "内网/局域网", "location": "本地内网"}
+    except Exception:
+        return {"is_overseas": False, "country": "未知", "location": "未知"}
+
+    try:
+        req = urllib.request.Request(
+            f"http://ip-api.com/json/{ip_str}?lang=zh-CN",
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)"}
+        )
+        with urllib.request.urlopen(req, timeout=1.5) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+            if data.get("status") == "success":
+                code = data.get("countryCode", "")
+                country = data.get("country", "")
+                city = data.get("city", "")
+                is_overseas = (code != "CN")
+                loc = f"{country} {city}".strip() if country else "未知"
+                return {"is_overseas": is_overseas, "country": country or "未知", "location": loc}
+    except Exception:
+        pass
+
+    return {"is_overseas": False, "country": "国内/未知", "location": "默认线路"}
+
 # --- 权限校验依赖 ---
 
 def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
@@ -255,6 +314,162 @@ def admin_page(request: Request):
         return templates.TemplateResponse("admin.html", {"request": request})
 
 # --- 用户端 API ---
+
+@app.post("/api/parse-ts-target")
+def parse_ts_target_endpoint(req: ParseTsTargetRequest):
+    """
+    智能解析 TeamSpeak 日志/域名/IP，区分境外源站与国内中转节点，优先提取中转地址
+    """
+    raw_text = req.input.strip()
+    if not raw_text:
+        return JSONResponse(status_code=400, content={"success": False, "message": "输入内容不能为空"})
+
+    connect_host = None
+    connect_port = None
+    srv_target_host = None
+    srv_target_port = None
+    direct_ip = None
+    direct_port = None
+    lookup_ip = None
+    lookup_port = None
+
+    # 1. 匹配 Connect to server: host[:port]
+    m_conn = list(re.finditer(r"Connect to server:\s*([^\s\r\n]+)", raw_text, re.I))
+    if m_conn:
+        val = m_conn[-1].group(1).strip()
+        if ":" in val and not val.startswith("http"):
+            parts = val.split(":")
+            connect_host = parts[0].strip()
+            try:
+                connect_port = int(parts[1].strip())
+            except Exception:
+                pass
+        else:
+            connect_host = val
+
+    # 2. 匹配 Trying to resolve
+    if not connect_host:
+        m_try = list(re.finditer(r"Trying to resolve\s*([^\s\r\n]+)", raw_text, re.I))
+        if m_try:
+            connect_host = m_try[-1].group(1).strip()
+
+    # 3. 匹配 SRV DNS resolve successful
+    m_srv = list(re.finditer(r'SRV DNS resolve successful[^\n\r]*?(?:=>|->)\s*"?([a-zA-Z0-9.\-]+):(\d+)', raw_text, re.I))
+    if m_srv:
+        srv_target_host = m_srv[-1].group(1).strip()
+        srv_target_port = int(m_srv[-1].group(2).strip())
+
+    # 4. 匹配 Lookup finished
+    m_look = list(re.finditer(r'Lookup finished:.*?ip:([0-9a-zA-Z.:\-]+).*?port:(\d+)', raw_text, re.I))
+    if m_look:
+        lookup_ip = m_look[-1].group(1).strip()
+        lookup_port = int(m_look[-1].group(2).strip())
+
+    # 5. 匹配 Resolve successful / Initiating connection
+    m_direct = list(re.finditer(r'(?:Resolve successful|Initiating connection|Connected to)[:\s]+(?:\[([0-9a-fA-F:]+)\]|([0-9]{1,3}(?:\.[0-9]{1,3}){3}|[a-zA-Z0-9.\-]+)):(\d+)', raw_text, re.I))
+    if m_direct:
+        direct_ip = m_direct[-1].group(1) or m_direct[-1].group(2)
+        direct_port = int(m_direct[-1].group(3).strip())
+
+    # 6. 单行输入容错 (IP:PORT 或 DOMAIN:PORT)
+    if not connect_host and not direct_ip:
+        m_generic = list(re.finditer(r'(?:(?:https?:\/\/)?(?:www\.)?([a-zA-Z0-9.\-]+(?:\.[a-zA-Z]{2,}|(?:\d{1,3}\.){3}\d{1,3}))):(\d{2,5})', raw_text))
+        if m_generic:
+            connect_host = m_generic[-1].group(1).strip()
+            connect_port = int(m_generic[-1].group(2).strip())
+        else:
+            # 纯域名或纯 IP
+            m_ip = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', raw_text)
+            if m_ip:
+                direct_ip = m_ip.group(0)
+            else:
+                m_dom = re.search(r'\b([a-zA-Z0-9][-a-zA-Z0-9]*\.)+[a-zA-Z]{2,}\b', raw_text)
+                if m_dom:
+                    connect_host = m_dom.group(0)
+
+    # 语音端口判定优先级
+    final_port = srv_target_port or lookup_port or direct_port or connect_port or 9987
+
+    # 若输入了域名且尚未提取到 SRV，主动通过后端 DNS 查询 SRV
+    host_to_query = connect_host or direct_ip
+    is_domain = False
+    if host_to_query:
+        try:
+            ipaddress.ip_address(host_to_query)
+        except ValueError:
+            is_domain = True
+            if not srv_target_host:
+                s_host, s_port = resolve_srv_record(host_to_query)
+                if s_host:
+                    srv_target_host = s_host
+                    srv_target_port = s_port or final_port
+                    final_port = srv_target_port
+
+    # 解析底层真实 IP
+    resolved_underlying_ip = direct_ip or lookup_ip
+    if not resolved_underlying_ip and host_to_query:
+        try:
+            resolved_underlying_ip = socket.getaddrinfo(host_to_query, None, type=socket.SOCK_STREAM)[0][4][0]
+        except Exception:
+            pass
+
+    # 查询 IP 地理归属
+    geo_info = {"is_overseas": False, "country": "国内/未知", "location": "默认线路"}
+    if resolved_underlying_ip:
+        geo_info = get_ip_geo_info(resolved_underlying_ip)
+
+    # 确定中转节点 (transit_host) 与源站 (origin_ip)
+    transit_host = None
+    if srv_target_host:
+        transit_host = srv_target_host
+    elif is_domain and connect_host:
+        transit_host = connect_host
+    elif lookup_ip and lookup_ip != resolved_underlying_ip:
+        transit_host = lookup_ip
+    else:
+        transit_host = connect_host or resolved_underlying_ip or "127.0.0.1"
+
+    origin_ip = resolved_underlying_ip or direct_ip or connect_host or "127.0.0.1"
+
+    # 判断节点类型与提示
+    is_overseas = geo_info.get("is_overseas", False)
+    if srv_target_host:
+        node_type = "srv_relay"
+        badge_text = "⚡ SRV 中转节点（已优选，免翻墙）"
+        badge_class = "badge badge-success"
+        message = "已成功提取 SRV 国内中转节点与真实端口，优先推荐用于国内连接以避免境外直连阻断。"
+    elif is_domain and is_overseas:
+        node_type = "domain_relay"
+        badge_text = "⚡ 域名中转入口（已避开境外直连阻断）"
+        badge_class = "badge badge-success"
+        message = f"检测到目标底层为境外服务器 ({origin_ip} - {geo_info.get('location', '')})，已自动优选国内中转入口域名作为连接地址。"
+    elif is_overseas:
+        node_type = "overseas_origin"
+        badge_text = f"⚠️ 境外直连源站 ({geo_info.get('country', '境外')})"
+        badge_class = "badge badge-warning"
+        message = f"检测到该地址为境外服务器直连 IP ({origin_ip} - {geo_info.get('location', '')})，国内直连可能受阻或丢包，建议使用中转地址。"
+    else:
+        node_type = "direct"
+        badge_text = "🟢 标准连接节点"
+        badge_class = "badge badge-info"
+        message = "已成功提取目标服务器连接信息与语音端口。"
+
+    return JSONResponse(status_code=200, content={
+        "success": True,
+        "transit_host": transit_host,
+        "transit_port": final_port,
+        "origin_ip": origin_ip,
+        "origin_port": final_port,
+        "target_host": connect_host or transit_host,
+        "full_address": f"{transit_host}:{final_port}",
+        "is_default_port": final_port == 9987,
+        "node_type": node_type,
+        "is_overseas": is_overseas,
+        "geo_info": geo_info,
+        "badge_text": badge_text,
+        "badge_class": badge_class,
+        "message": message
+    })
 
 @app.post("/api/redeem")
 def redeem_cdk(req: RedeemRequest, request: Request):
