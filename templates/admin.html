@@ -451,7 +451,7 @@
         <!-- 生成 CDK 工具栏 -->
         <div style="background: var(--bg-card-inner); border: 1px solid var(--border-color); padding: 1.25rem 1.5rem; border-radius: 14px; margin-bottom: 1.5rem;">
           <h4 style="margin-bottom: 1rem; font-size: 1rem; color: #60a5fa;"><i class="fa-solid fa-wand-magic-sparkles"></i> 批量生成与发放 CDK</h4>
-          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; align-items: flex-end;">
+          <div class="admin-gen-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 1rem; align-items: flex-end;">
             <div>
               <label class="info-label" style="display: block; margin-bottom: 0.35rem;">CDK 类型</label>
               <select id="genType" class="form-control" onchange="onCdkTypeChange()" style="width: 100%;">
@@ -486,7 +486,7 @@
           </div>
         </div>
 
-        <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.85rem;">
+        <div class="cdk-filter-toolbar" style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; flex-wrap: wrap; gap: 0.85rem;">
           <!-- 分组切换与辅助筛选 -->
           <div style="display: flex; gap: 0.65rem; align-items: center; flex-wrap: wrap;">
             <!-- 状态分组 Tabs -->
