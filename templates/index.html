@@ -597,10 +597,10 @@
         </div>
 
         <div class="modal-result-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.85rem; margin-bottom: 1.15rem;">
-          <!-- 推荐中转节点 -->
+          <!-- 推荐连接地址 -->
           <div class="info-item" style="background: rgba(34, 197, 94, 0.08); border: 1.5px solid rgba(34, 197, 94, 0.35);">
-            <div class="info-label" style="color: var(--success); font-weight: 700;">
-              <i class="fa-solid fa-bolt"></i> 推荐连接地址（中转节点 / 域名）
+            <div class="info-label" id="parsedHostLabel" style="color: var(--success); font-weight: 700;">
+              <i class="fa-solid fa-bolt"></i> 推荐连接地址（国内直连 IP）
             </div>
             <div class="info-value" style="font-size: 1rem; color: #4ade80; font-weight: 800;">
               <span id="parsedTransitHost">-</span>
@@ -619,7 +619,7 @@
             </div>
           </div>
 
-          <!-- 境外源站 IP / 底层解析 IP -->
+          <!-- 境外源站 IP / 底层解析 IP / 原始域名 -->
           <div class="info-item">
             <div class="info-label" id="parsedOriginIpLabel">
               <i class="fa-solid fa-server"></i> 节点底层解析 IP
@@ -647,14 +647,10 @@
           <div style="font-size: 0.78rem; color: var(--text-muted); font-weight: 700; margin-bottom: 0.45rem;">
             选择开通机器人时填入的连接线路：
           </div>
-          <div class="modal-radio-group" style="display: flex; gap: 1.2rem; flex-wrap: wrap; font-size: 0.84rem;">
+          <div id="modalRadioGroup" class="modal-radio-group" style="display: flex; gap: 1.2rem; flex-wrap: wrap; font-size: 0.84rem;">
             <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
-              <input type="radio" name="applyTargetType" id="applyTypeTransit" value="transit" checked style="accent-color: #a855f7;">
-              <strong style="color: #4ade80;">优先使用中转节点地址</strong> <span style="font-size: 0.76rem; color: var(--text-muted);">（推荐，国内免翻墙、延迟低）</span>
-            </label>
-            <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
-              <input type="radio" name="applyTargetType" id="applyTypeOrigin" value="origin" style="accent-color: #a855f7;">
-              <span>使用境外源站直连 IP</span> <span style="font-size: 0.76rem; color: var(--text-muted);">（仅限海外或翻墙直连环境）</span>
+              <input type="radio" name="applyTargetType" value="ip" checked style="accent-color: #a855f7;">
+              <strong style="color: #4ade80;">优先使用国内直连 IP</strong> <span style="font-size: 0.76rem; color: var(--text-muted);">（推荐，最稳定）</span>
             </label>
           </div>
         </div>
@@ -1380,10 +1376,11 @@
 
       const finalPort = srvTargetPort || lookupPort || directPort || connectPort || 9987;
       const isDomain = connectHost && !/^(\d{1,3}\.){3}\d{1,3}$/.test(connectHost);
-      const originIp = directIp || lookupIp || connectHost || '127.0.0.1';
+      const originIp = directIp || lookupIp || (isDomain ? null : connectHost) || '127.0.0.1';
 
-      // 优先提取国内中转节点
+      let recommendedHost = null;
       let transitHost = null;
+      let domainHost = isDomain ? connectHost : null;
       let nodeType = 'direct';
       let badgeText = '🟢 标准连接节点';
       let badgeClass = 'badge badge-info';
@@ -1391,43 +1388,43 @@
 
       if (srvTargetHost) {
         transitHost = srvTargetHost;
+        recommendedHost = srvTargetHost;
         nodeType = 'srv_relay';
         badgeText = '⚡ SRV 中转节点（已优选，免翻墙）';
         badgeClass = 'badge badge-success';
         nodeNotice = '检测到 SRV 国内中转节点，已自动优选作为连接地址，避免直连境外服务器。';
       } else if (tsdnsHost) {
         transitHost = tsdnsHost;
+        recommendedHost = tsdnsHost;
         nodeType = 'tsdns_relay';
         badgeText = '⚡ TSDNS 中转节点（已优选）';
         badgeClass = 'badge badge-success';
         nodeNotice = '检测到 TSDNS 中转解析节点，已为您优选该连接线路。';
-      } else if (isDomain && originIp && connectHost !== originIp) {
+      } else if (isDomain && directIp) {
+        // 解析出了底层 IP，优先推荐直连 IP
+        recommendedHost = directIp;
         transitHost = connectHost;
-        nodeType = 'domain_relay';
-        badgeText = '⚡ 域名中转入口（已避开境外直连阻断）';
+        nodeType = 'domestic_direct';
+        badgeText = '🟢 国内直连服务器 (直连推荐)';
         badgeClass = 'badge badge-success';
-        nodeNotice = `检测到底层为独立服务器 IP (${originIp})，已自动选用中转入口域名作为连接地址。`;
-      } else if (lookupIp && lookupIp !== originIp) {
-        transitHost = lookupIp;
-        nodeType = 'domestic_relay';
-        badgeText = '⚡ 国内中转节点（已优选）';
-        badgeClass = 'badge badge-success';
-        nodeNotice = '已成功识别国内中转节点 IP，免翻墙低延迟连接。';
+        nodeNotice = `检测到底层机房 IP (${directIp})，优先推荐直接使用直连 IP 连接，免除 DNS 解析开销与失败风险。`;
       } else {
+        recommendedHost = connectHost || originIp;
         transitHost = connectHost || originIp;
       }
 
       return {
-        targetHost: connectHost || transitHost,
-        transitHost: transitHost,
+        targetHost: connectHost || transitHost || originIp,
+        domainHost: domainHost,
+        transitHost: transitHost || recommendedHost,
         transitPort: finalPort,
-        originIp: originIp,
+        originIp: originIp || directIp || connectHost,
         originPort: finalPort,
-        recommendedHost: transitHost,
+        recommendedHost: recommendedHost,
         recommendedPort: finalPort,
-        resolvedIp: originIp,
+        resolvedIp: directIp || originIp,
         resolvedPort: finalPort,
-        fullAddress: `${transitHost}:${finalPort}`,
+        fullAddress: `${recommendedHost}:${finalPort}`,
         isDefaultPort: finalPort === 9987,
         nodeType: nodeType,
         badgeText: badgeText,
@@ -1438,44 +1435,120 @@
 
     function renderParsedResult(result) {
       if (!result) return;
-      document.getElementById('parsedTransitHost').innerText = result.transitHost || result.recommendedHost;
-      document.getElementById('parsedResolvedPort').innerText = result.transitPort || result.resolvedPort;
-      
-      const ipLabel = document.getElementById('parsedOriginIpLabel');
-      const ipElem = document.getElementById('parsedOriginIp');
+      const recHost = result.recommendedHost || result.transitHost || result.originIp;
+      const recPort = result.recommendedPort || result.transitPort || result.resolvedPort || 9987;
       const isOverseas = result.is_overseas || result.isOverseas;
       const locText = result.geoInfo?.location || result.geoInfo?.country || '';
+      const domainHost = result.domainHost || (result.targetHost && result.targetHost !== result.originIp && !/^(\d{1,3}\.){3}\d{1,3}$/.test(result.targetHost) ? result.targetHost : null);
+      const isDomestic = !isOverseas;
+      const isSrv = result.nodeType === 'srv_relay';
+
+      document.getElementById('parsedTransitHost').innerText = recHost;
+      document.getElementById('parsedResolvedPort').innerText = recPort;
+      
+      const hostLabel = document.getElementById('parsedHostLabel');
+      if (hostLabel) {
+        if (isSrv) {
+          hostLabel.innerHTML = '<i class="fa-solid fa-bolt"></i> 推荐连接地址（国内中转节点）';
+        } else if (isDomestic) {
+          hostLabel.innerHTML = '<i class="fa-solid fa-bolt"></i> 推荐连接地址（国内直连 IP）';
+        } else {
+          hostLabel.innerHTML = '<i class="fa-solid fa-server"></i> 推荐连接地址（境外服务器）';
+        }
+      }
+
+      const ipLabel = document.getElementById('parsedOriginIpLabel');
+      const ipElem = document.getElementById('parsedOriginIp');
 
       if (ipLabel) {
-        if (isOverseas) {
+        if (domainHost && isDomestic) {
+          ipLabel.innerHTML = '<i class="fa-solid fa-globe"></i> 原始解析域名 / 别名';
+        } else if (isOverseas) {
           ipLabel.innerHTML = '<i class="fa-solid fa-earth-asia" style="color: #f87171;"></i> 境外源服务器 IP (海外直连)';
         } else {
-          ipLabel.innerHTML = '<i class="fa-solid fa-server" style="color: #38bdf8;"></i> 节点底层解析 IP (国内机房)';
+          ipLabel.innerHTML = '<i class="fa-solid fa-server" style="color: #38bdf8;"></i> 机房底层 IP (国内)';
         }
       }
 
       if (ipElem) {
-        const rawIp = result.originIp || result.resolvedIp || '-';
-        ipElem.innerText = locText ? `${rawIp} [${locText}]` : rawIp;
+        if (domainHost && isDomestic) {
+          ipElem.innerText = `${domainHost} ➔ ${result.originIp || recHost}`;
+        } else {
+          const rawIp = result.originIp || result.resolvedIp || recHost || '-';
+          ipElem.innerText = locText ? `${rawIp} [${locText}]` : rawIp;
+        }
       }
 
-      document.getElementById('parsedFullAddr').innerText = result.fullAddress;
+      document.getElementById('parsedFullAddr').innerText = result.fullAddress || `${recHost}:${recPort}`;
 
       const badge = document.getElementById('parsedNodeBadge');
       if (badge) {
-        badge.className = result.badgeClass || 'badge badge-success';
+        badge.className = result.badgeClass || (isDomestic ? 'badge badge-success' : 'badge badge-warning');
         badge.innerText = result.badgeText || '已解析';
       }
 
-      const noticeBox = document.getElementById('parsedNodeNotice');
       const noticeText = document.getElementById('parsedNodeNoticeText');
-      if (noticeText && result.nodeNotice) {
-        noticeText.innerText = result.nodeNotice;
+      if (noticeText && (result.nodeNotice || result.message)) {
+        noticeText.innerText = result.nodeNotice || result.message;
       }
 
-      // 默认选中优先中转节点
-      const applyTransitRadio = document.getElementById('applyTypeTransit');
-      if (applyTransitRadio) applyTransitRadio.checked = true;
+      // 动态生成单选选项
+      const radioContainer = document.getElementById('modalRadioGroup');
+      if (radioContainer) {
+        let radioHtml = '';
+        if (domainHost && isDomestic) {
+          // 国内域名解析出的国内机房 IP
+          const ipVal = result.originIp || recHost;
+          radioHtml = `
+            <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
+              <input type="radio" name="applyTargetType" value="ip" checked style="accent-color: #a855f7;">
+              <strong style="color: #4ade80;">优先使用国内直连 IP (${ipVal})</strong>
+              <span style="font-size: 0.76rem; color: var(--text-muted);">（推荐，直接连接国内机房，免 DNS 解析开销与失败风险）</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
+              <input type="radio" name="applyTargetType" value="domain" style="accent-color: #a855f7;">
+              <span>使用原始域名 (${domainHost})</span>
+              <span style="font-size: 0.76rem; color: var(--text-muted);">（备用域名连接）</span>
+            </label>
+          `;
+        } else if (isSrv) {
+          // 境外源站 + SRV 中转
+          const relayVal = result.transitHost || recHost;
+          const originVal = result.originIp || '-';
+          radioHtml = `
+            <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
+              <input type="radio" name="applyTargetType" value="transit" checked style="accent-color: #a855f7;">
+              <strong style="color: #4ade80;">优先使用国内中转地址 (${relayVal})</strong>
+              <span style="font-size: 0.76rem; color: var(--text-muted);">（推荐，国内免翻墙、低延迟）</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
+              <input type="radio" name="applyTargetType" value="origin" style="accent-color: #a855f7;">
+              <span>使用境外源站直连 IP (${originVal})</span>
+              <span style="font-size: 0.76rem; color: var(--text-muted);">（仅限海外或翻墙直连环境）</span>
+            </label>
+          `;
+        } else if (isOverseas) {
+          // 纯境外源站
+          radioHtml = `
+            <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
+              <input type="radio" name="applyTargetType" value="recommended" checked style="accent-color: #a855f7;">
+              <strong style="color: #facc15;">使用境外服务器地址 (${recHost})</strong>
+              <span style="font-size: 0.76rem; color: var(--text-muted);">（海外机房直连，延迟稍高）</span>
+            </label>
+          `;
+        } else {
+          // 国内直连 IP
+          const ipVal = result.originIp || recHost;
+          radioHtml = `
+            <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
+              <input type="radio" name="applyTargetType" value="ip" checked style="accent-color: #a855f7;">
+              <strong style="color: #4ade80;">使用国内直连 IP (${ipVal})</strong>
+              <span style="font-size: 0.76rem; color: var(--text-muted);">（推荐，直连国内机房）</span>
+            </label>
+          `;
+        }
+        radioContainer.innerHTML = radioHtml;
+      }
 
       document.getElementById('logParserResult').style.display = 'block';
     }
@@ -1508,7 +1581,7 @@
 
       lastParsedResult = localResult;
       renderParsedResult(localResult);
-      showToast(`已提取连接信息！端口: ${localResult.transitPort || localResult.resolvedPort}`, 'success');
+      showToast(`已提取连接信息！端口: ${localResult.recommendedPort || localResult.transitPort || localResult.resolvedPort}`, 'success');
 
       // 2. 后端异步智能 SRV & GeoIP 双重验证与增强
       try {
@@ -1523,17 +1596,19 @@
           if (remoteData.success) {
             lastParsedResult = {
               targetHost: remoteData.target_host || localResult.targetHost,
+              domainHost: remoteData.domain_host || localResult.domainHost,
               transitHost: remoteData.transit_host || localResult.transitHost,
               transitPort: remoteData.transit_port || localResult.transitPort,
               originIp: remoteData.origin_ip || localResult.originIp,
               originPort: remoteData.origin_port || localResult.originPort,
-              recommendedHost: remoteData.transit_host || localResult.transitHost,
-              recommendedPort: remoteData.transit_port || localResult.transitPort,
+              recommendedHost: remoteData.recommended_host || remoteData.transit_host || localResult.recommendedHost,
+              recommendedPort: remoteData.recommended_port || remoteData.transit_port || localResult.recommendedPort,
               resolvedIp: remoteData.origin_ip || localResult.originIp,
-              resolvedPort: remoteData.transit_port || localResult.transitPort,
+              resolvedPort: remoteData.recommended_port || remoteData.transit_port || localResult.transitPort,
               fullAddress: remoteData.full_address || localResult.fullAddress,
               isDefaultPort: remoteData.is_default_port,
               nodeType: remoteData.node_type,
+              is_overseas: remoteData.is_overseas,
               badgeText: remoteData.badge_text,
               badgeClass: remoteData.badge_class,
               nodeNotice: remoteData.message,
@@ -1557,16 +1632,29 @@
 
       const addrInput = document.getElementById('botServerAddrInput');
       const portInput = document.getElementById('botServerPortInput');
-      const applyTypeOrigin = document.getElementById('applyTypeOrigin');
+      const checkedRadio = document.querySelector('input[name="applyTargetType"]:checked');
+      const chosenType = checkedRadio ? checkedRadio.value : 'recommended';
 
-      let chosenHost = lastParsedResult.transitHost || lastParsedResult.targetHost || lastParsedResult.recommendedHost;
-      let chosenPort = lastParsedResult.transitPort || lastParsedResult.resolvedPort;
-      let modeText = '中转节点';
+      let chosenHost = lastParsedResult.recommendedHost || lastParsedResult.transitHost || lastParsedResult.originIp;
+      let chosenPort = lastParsedResult.recommendedPort || lastParsedResult.transitPort || lastParsedResult.resolvedPort || 9987;
+      let modeText = '直连 IP';
 
-      if (applyTypeOrigin && applyTypeOrigin.checked) {
+      if (chosenType === 'ip') {
+        chosenHost = lastParsedResult.originIp || lastParsedResult.recommendedHost;
+        chosenPort = lastParsedResult.originPort || lastParsedResult.recommendedPort || 9987;
+        modeText = '国内直连 IP';
+      } else if (chosenType === 'domain') {
+        chosenHost = lastParsedResult.domainHost || lastParsedResult.targetHost;
+        chosenPort = lastParsedResult.originPort || lastParsedResult.recommendedPort || 9987;
+        modeText = '原始域名';
+      } else if (chosenType === 'transit') {
+        chosenHost = lastParsedResult.transitHost || lastParsedResult.recommendedHost;
+        chosenPort = lastParsedResult.transitPort || lastParsedResult.recommendedPort || 9987;
+        modeText = '中转节点';
+      } else if (chosenType === 'origin') {
         chosenHost = lastParsedResult.originIp || lastParsedResult.resolvedIp || chosenHost;
-        chosenPort = lastParsedResult.originPort || lastParsedResult.resolvedPort;
-        modeText = '境外源站 IP';
+        chosenPort = lastParsedResult.originPort || lastParsedResult.resolvedPort || chosenPort;
+        modeText = '源站 IP';
       }
 
       if (addrInput) {

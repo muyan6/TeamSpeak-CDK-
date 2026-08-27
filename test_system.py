@@ -662,6 +662,31 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertEqual(data["transit_host"], "114.114.114.114")
         self.assertEqual(data["transit_port"], 20345)
 
+    def test_parse_ts_target_domestic_domain_resolution(self):
+        try:
+            from fastapi.testclient import TestClient
+            import app as ts_app
+            client = TestClient(ts_app.app)
+        except Exception:
+            self.skipTest("FastAPI TestClient 依赖不可用")
+
+        domestic_log = """2026-08-27 07:42:24|INFO |ClientUI |1 |Connect to server: xuzefeng12138.ts3.uno:3935
+2026-08-27 07:42:24|INFO |ClientUI |1 |Trying to resolve xuzefeng12138.ts3.uno
+2026-08-27 07:42:24|INFO |ClientUI |1 |Resolve successful: 101.42.25.147:3935
+2026-08-27 07:42:24|INFO |ClientUI |1 |Connect status: Connection established"""
+
+        resp = client.post("/api/parse-ts-target", json={"input": domestic_log})
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertTrue(data["success"])
+        # 国内机房服务器解析应优先推荐直连国内 IP
+        self.assertEqual(data["recommended_host"], "101.42.25.147")
+        self.assertEqual(data["recommended_port"], 3935)
+        self.assertEqual(data["origin_ip"], "101.42.25.147")
+        self.assertEqual(data["domain_host"], "xuzefeng12138.ts3.uno")
+        self.assertEqual(data["node_type"], "domestic_direct")
+        self.assertEqual(data["full_address"], "101.42.25.147:3935")
+
     def test_dns_service_validation_and_subdomain_uniqueness(self):
         from dns_service import dns_service
 

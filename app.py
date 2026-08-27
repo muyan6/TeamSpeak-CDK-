@@ -464,49 +464,56 @@ def parse_ts_target_endpoint(req: ParseTsTargetRequest):
     if resolved_underlying_ip:
         geo_info = get_ip_geo_info(resolved_underlying_ip)
 
-    # 确定中转节点 (transit_host) 与源站 (origin_ip)
-    transit_host = None
-    if srv_target_host:
-        transit_host = srv_target_host
-    elif is_domain and connect_host:
-        transit_host = connect_host
-    elif lookup_ip and lookup_ip != resolved_underlying_ip:
-        transit_host = lookup_ip
-    else:
-        transit_host = connect_host or resolved_underlying_ip or "127.0.0.1"
-
+    # 确定中转节点 (transit_host)、推荐连接主机 (recommended_host) 与源站 (origin_ip)
     origin_ip = resolved_underlying_ip or direct_ip or connect_host or "127.0.0.1"
 
     # 判断节点类型与提示
     is_overseas = geo_info.get("is_overseas", False)
     loc_str = geo_info.get("location", "") or geo_info.get("country", "")
-    
+
+    recommended_host = None
+    transit_host = None
+
     if srv_target_host:
+        transit_host = srv_target_host
+        recommended_host = srv_target_host
         node_type = "srv_relay"
         if is_overseas:
-            badge_text = "⚡ SRV 中转节点（已优选，免翻墙）"
+            badge_text = "⚡ SRV 国内中转节点（免翻墙）"
             badge_class = "badge badge-success"
-            message = f"检测到 SRV 中转节点 ({srv_target_host} ➔ {origin_ip} {loc_str})，已自动优选作为连接地址，避免境外直连阻断。"
+            message = f"检测到境外源站 ({origin_ip} - {loc_str}) 已配置 SRV 国内中转 ({srv_target_host})，已自动优选中转线路避免直连阻断。"
         else:
-            badge_text = "⚡ 国内中转节点（已优选，免翻墙）"
+            badge_text = "⚡ 国内高速线路（SRV 解析）"
             badge_class = "badge badge-success"
-            message = f"检测到目标已接入国内高速中转线路 ({srv_target_host} ➔ {origin_ip} {loc_str})，国内可直接免翻墙低延迟连接。"
-    elif is_domain and is_overseas:
-        node_type = "domain_relay"
-        badge_text = "⚡ 域名中转入口（已避开境外直连阻断）"
-        badge_class = "badge badge-success"
-        message = f"检测到目标底层为境外服务器 ({origin_ip} - {loc_str})，已自动优选国内中转入口域名作为连接地址。"
+            message = f"检测到目标服务器为国内线路 ({origin_ip} - {loc_str})，已通过 SRV 解析提取真实端口与连接节点 ({srv_target_host})。"
     elif is_domain and not is_overseas:
-        node_type = "domain_relay"
-        badge_text = "⚡ 国内中转入口（免翻墙直连）"
+        # 国内服务器 + 域名解析：底层已确认是国内机房 IP，优先推荐国内直连 IP（免 DNS 解析失败风险及额外解析开销）
+        recommended_host = origin_ip
+        transit_host = connect_host
+        node_type = "domestic_direct"
+        badge_text = "🟢 国内直连服务器 (直连推荐)"
         badge_class = "badge badge-success"
-        message = f"检测到目标为国内中转线路 ({origin_ip} - {loc_str})，已选用中转入口域名，国内可直接免翻墙低延迟连接。"
+        message = f"检测到目标为国内机房服务器 ({origin_ip} - {loc_str})，已成功解析底层直连 IP，推荐直接使用国内直连 IP 连接以获得最稳定连接。"
+    elif is_domain and is_overseas:
+        # 境外服务器 + 域名解析
+        recommended_host = connect_host or origin_ip
+        transit_host = connect_host
+        node_type = "domain_overseas"
+        badge_text = f"⚠️ 境外服务器域名 ({loc_str or '海外'})"
+        badge_class = "badge badge-warning"
+        message = f"检测到目标底层为境外服务器 ({origin_ip} - {loc_str})，国内直连可能受阻或有较高延迟。"
     elif is_overseas:
+        # 境外直连 IP
+        recommended_host = origin_ip
+        transit_host = origin_ip
         node_type = "overseas_origin"
         badge_text = f"⚠️ 境外直连源站 ({geo_info.get('country', '境外')})"
         badge_class = "badge badge-warning"
         message = f"检测到该地址为境外服务器直连 IP ({origin_ip} - {loc_str})，国内直连可能受阻或丢包，建议使用中转地址。"
     else:
+        # 国内直连 IP
+        recommended_host = origin_ip
+        transit_host = origin_ip
         node_type = "direct"
         badge_text = f"🟢 国内直连节点 ({loc_str or '国内'})"
         badge_class = "badge badge-info"
@@ -514,12 +521,15 @@ def parse_ts_target_endpoint(req: ParseTsTargetRequest):
 
     return JSONResponse(status_code=200, content={
         "success": True,
-        "transit_host": transit_host,
+        "recommended_host": recommended_host,
+        "recommended_port": final_port,
+        "transit_host": transit_host or recommended_host,
         "transit_port": final_port,
         "origin_ip": origin_ip,
         "origin_port": final_port,
-        "target_host": connect_host or transit_host,
-        "full_address": f"{transit_host}:{final_port}",
+        "domain_host": connect_host if is_domain else None,
+        "target_host": connect_host or origin_ip,
+        "full_address": f"{recommended_host}:{final_port}",
         "is_default_port": final_port == 9987,
         "node_type": node_type,
         "is_overseas": is_overseas,
