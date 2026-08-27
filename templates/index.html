@@ -232,6 +232,16 @@
           <span class="badge badge-info">CDK 验证成功</span>
         </div>
 
+        <!-- 权限等级与功能介绍横幅 -->
+        <div style="background: rgba(168, 85, 247, 0.08); border: 1px solid rgba(168, 85, 247, 0.3); border-radius: 12px; padding: 0.85rem 1.15rem; margin-bottom: 1.25rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; color: #c084fc; font-weight: 700; font-size: 0.92rem; margin-bottom: 0.35rem;">
+            <i class="fa-solid fa-crown"></i> 权限等级与音乐后台说明
+          </div>
+          <p style="font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6; margin-bottom: 0;">
+            <strong style="color: #a78bfa;">月卡用户仅有控制功能</strong>（仅开放网页播放控制、点歌切歌与队列管理，仅限控制当前创建的机器人）；<strong style="color: #facc15;">年卡用户独享音乐后台</strong>（独享独立音乐后台管理、高级音质调节与平台独立凭据）。
+          </p>
+        </div>
+
         <form id="botCreateForm" onsubmit="handleCreateBot(event)">
           <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; margin-bottom: 1.25rem;">
             <div>
@@ -265,6 +275,31 @@
             <div>
               <label class="info-label">TS 服务器连接密码 (可选)</label>
               <input type="password" id="botServerPassInput" class="form-control" style="width: 100%;" placeholder="无密码请留空">
+            </div>
+          </div>
+
+          <!-- Web 点歌后台账号密码设置 -->
+          <div style="background: var(--bg-card-inner); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.15rem; margin-bottom: 1.25rem;">
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; flex-wrap: wrap; gap: 0.5rem;">
+              <label class="info-label" style="margin-bottom: 0; color: #c084fc; font-weight: 700; font-size: 0.9rem;">
+                <i class="fa-solid fa-user-shield"></i> 网页点歌后台账号设置 (受限播放控制 & 队列管理)
+              </label>
+              <button type="button" class="btn-action btn-action-sm" onclick="generateRandomBotWebAccount()" style="font-size: 0.76rem; color: #38bdf8;">
+                <i class="fa-solid fa-dice"></i> 随机生成账号密码
+              </button>
+            </div>
+            <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.85rem; line-height: 1.5;">
+              系统将自动在音乐机器人后台为您开通独立成员账户并绑定该机器人。<strong>该账号仅具备【播放控制】与【队列管理】权限</strong>，保障平台安全独立。
+            </p>
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 1rem;">
+              <div>
+                <label class="info-label">后台登录用户名 (3-32位字符)</label>
+                <input type="text" id="botWebUserInput" class="form-control" style="width: 100%; font-family: 'Consolas', 'Courier New', monospace;" placeholder="如 user_ts666 (字母/数字/下划线)" maxlength="32">
+              </div>
+              <div>
+                <label class="info-label">后台登录密码 (≥8位)</label>
+                <input type="text" id="botWebPassInput" class="form-control" style="width: 100%; font-family: 'Consolas', 'Courier New', monospace;" placeholder="请输入至少 8 位密码" maxlength="64">
+              </div>
             </div>
           </div>
 
@@ -308,6 +343,44 @@
             <div class="info-label">默认频道</div>
             <div class="info-value">
               <span id="resBotChannel">根频道</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Web 点歌后台账号与权限卡片 -->
+        <div id="resBotWebAccountBox" class="token-box" style="background: rgba(168, 85, 247, 0.08); border-color: rgba(168, 85, 247, 0.3); margin-top: 1.25rem; display: none;">
+          <div class="token-box-header" style="color: #c084fc; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem;">
+            <div style="display: flex; align-items: center; gap: 0.5rem;">
+              <i class="fa-solid fa-user-lock"></i>
+              <span>网页点歌控制台登录凭据 (Web Control Panel Account)</span>
+            </div>
+            <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
+              <span class="badge badge-success" style="font-size: 0.74rem;"><i class="fa-solid fa-check"></i> 播放控制</span>
+              <span class="badge badge-success" style="font-size: 0.74rem;"><i class="fa-solid fa-check"></i> 队列管理</span>
+              <span class="badge badge-info" style="font-size: 0.74rem;"><i class="fa-solid fa-robot"></i> 专属机器人</span>
+            </div>
+          </div>
+          
+          <!-- 权限介绍与说明横幅 -->
+          <div style="background: rgba(168, 85, 247, 0.1); border-left: 3px solid #c084fc; border-radius: 6px; padding: 0.6rem 0.85rem; margin: 0.75rem 0; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.6;">
+            <i class="fa-solid fa-circle-info" style="color: #c084fc;"></i>
+            <strong>权限说明：</strong>月卡用户仅有控制功能（播放控制与队列管理），年卡用户独享音乐后台。
+          </div>
+
+          <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem; margin-top: 0.75rem;">
+            <div class="info-item">
+              <div class="info-label">Web 登录账号</div>
+              <div class="info-value" style="font-size: 1rem; color: #38bdf8;">
+                <span id="resBotWebUser">-</span>
+                <button class="btn-copy" onclick="copyText('resBotWebUser')" title="复制账号"><i class="fa-regular fa-copy"></i></button>
+              </div>
+            </div>
+            <div class="info-item">
+              <div class="info-label">Web 登录密码</div>
+              <div class="info-value" style="font-size: 1rem; color: #facc15;">
+                <span id="resBotWebPass">-</span>
+                <button class="btn-copy" onclick="copyText('resBotWebPass')" title="复制密码"><i class="fa-regular fa-copy"></i></button>
+              </div>
             </div>
           </div>
         </div>
@@ -370,7 +443,7 @@
           <!-- 教程卡片 2 -->
           <div class="tutorial-card">
             <div class="tutorial-card-header" style="color: #34d399;">
-              <div class="tutorial-icon-badge" style="background: rgba(16, 185, 129, 0.18); color: #34d399;">2</div>
+              <div class="tutorial-icon-badge" style="background: rgba(168, 85, 247, 0.18); color: #34d399;">2</div>
               <span>连接客户端与获取服主权限</span>
             </div>
             <p>
@@ -385,7 +458,7 @@
               <span>音乐机器人接入与网页点歌</span>
             </div>
             <p>
-              输入 <code>BOT-</code> 开头卡密开通，填入 TS 地址与端口（商家服请参考下方提取）。开通后点击控制台可在线点歌与播歌。
+              输入 <code>BOT-</code> 开头卡密开通，可设置专属 Web 控制账号（月卡用户仅有控制功能，年卡用户独享音乐后台）。开通后点击控制台可在线点歌与播歌。
             </p>
           </div>
 
@@ -780,6 +853,9 @@
           if (res.need_config) {
             currentPendingBotCdk = res.cdk;
             document.getElementById('botDurationTip').innerText = `卡密类型: 音乐机器人 | 有效时长: ${res.duration_desc || (res.duration_months + '个月')}`;
+            if (!document.getElementById('botWebUserInput')?.value) {
+              generateRandomBotWebAccount();
+            }
             botConfigCard.style.display = 'block';
             botConfigCard.scrollIntoView({ behavior: 'smooth' });
 
@@ -823,11 +899,36 @@
       }
     }
 
+    function generateRandomBotWebAccount() {
+      const randSuffix = Math.random().toString(36).substring(2, 7);
+      const user = 'user_' + randSuffix;
+      const pass = 'mb_' + Math.random().toString(36).substring(2, 8) + '!';
+      const uInput = document.getElementById('botWebUserInput');
+      const pInput = document.getElementById('botWebPassInput');
+      if (uInput) uInput.value = user;
+      if (pInput) pInput.value = pass;
+      showToast('已生成随机后台账号与密码', 'info');
+    }
+
     async function handleCreateBot(e) {
       e.preventDefault();
       if (!currentPendingBotCdk) {
         alert('缺少 CDK，请重新输入');
         return;
+      }
+
+      const webUser = document.getElementById('botWebUserInput')?.value.trim() || '';
+      const webPass = document.getElementById('botWebPassInput')?.value.trim() || '';
+
+      if (webUser || webPass) {
+        if (webUser.length < 3 || webUser.length > 32) {
+          alert('后台登录用户名长度必须为 3-32 个字符');
+          return;
+        }
+        if (webPass.length < 8) {
+          alert('后台登录密码长度不能少于 8 位');
+          return;
+        }
       }
 
       const botSubmitBtn = document.getElementById('botSubmitBtn');
@@ -842,7 +943,9 @@
         serverPort: parseInt(document.getElementById('botServerPortInput').value) || 9987,
         nickname: document.getElementById('botNickInput').value.trim(),
         defaultChannel: document.getElementById('botDefaultChannelInput').value.trim() || null,
-        serverPassword: document.getElementById('botServerPassInput').value.trim() || null
+        serverPassword: document.getElementById('botServerPassInput').value.trim() || null,
+        webUsername: webUser || null,
+        webPassword: webPass || null
       };
 
       botSubmitBtn.disabled = true;
@@ -893,6 +996,18 @@
       document.getElementById('resBotExpire').innerText = bot.expire_at || '永久有效';
       document.getElementById('resBotChannel').innerText = bot.default_channel || '默认大厅';
       document.getElementById('resBotStatusBadge').innerText = bot.status === 'active' ? '运行中 (Active)' : (bot.status === 'expired' ? '已到期 (Expired)' : '已停止 (Stopped)');
+
+      // 渲染 Web 点歌账号凭据
+      const webBox = document.getElementById('resBotWebAccountBox');
+      const webUserSpan = document.getElementById('resBotWebUser');
+      const webPassSpan = document.getElementById('resBotWebPass');
+      if (bot.web_username && bot.web_password) {
+        if (webBox) webBox.style.display = 'block';
+        if (webUserSpan) webUserSpan.innerText = bot.web_username;
+        if (webPassSpan) webPassSpan.innerText = bot.web_password;
+      } else {
+        if (webBox) webBox.style.display = 'none';
+      }
 
       if (panelUrl) {
         document.getElementById('botWebPanelLink').href = panelUrl;

@@ -74,6 +74,9 @@ def init_db():
                 duration_months INTEGER NOT NULL DEFAULT 1,
                 expire_at TEXT,                        -- 'YYYY-MM-DD HH:MM:SS' 或 'permanent'
                 status TEXT NOT NULL DEFAULT 'active', -- 'active', 'expired', 'stopped'
+                web_username TEXT,                     -- 绑定的 Web 网页点歌用户名
+                web_password TEXT,                     -- 绑定的 Web 网页点歌密码
+                web_user_id TEXT,                      -- 远程平台用户 ID
                 created_at TEXT NOT NULL
             )
         ''')
@@ -134,6 +137,15 @@ def init_db():
             cursor.execute("ALTER TABLE cdks ADD COLUMN is_trial INTEGER NOT NULL DEFAULT 0")
         if "bot_id" not in cdk_cols:
             cursor.execute("ALTER TABLE cdks ADD COLUMN bot_id TEXT")
+
+        cursor.execute("PRAGMA table_info(bot_instances)")
+        bot_cols = [col["name"] for col in cursor.fetchall()]
+        if "web_username" not in bot_cols:
+            cursor.execute("ALTER TABLE bot_instances ADD COLUMN web_username TEXT")
+        if "web_password" not in bot_cols:
+            cursor.execute("ALTER TABLE bot_instances ADD COLUMN web_password TEXT")
+        if "web_user_id" not in bot_cols:
+            cursor.execute("ALTER TABLE bot_instances ADD COLUMN web_user_id TEXT")
 
         # 进程在外部部署期间异常退出时，释放超过 10 分钟的临时占用。
         stale_claim_before = (datetime.now() - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
@@ -857,7 +869,10 @@ def create_bot_instance(
     duration_months: int = 1,
     expire_at: Optional[str] = None,
     default_channel: Optional[str] = None,
-    status: str = "active"
+    status: str = "active",
+    web_username: Optional[str] = None,
+    web_password: Optional[str] = None,
+    web_user_id: Optional[str] = None
 ) -> Dict[str, Any]:
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
@@ -865,11 +880,13 @@ def create_bot_instance(
         cursor.execute('''
             INSERT INTO bot_instances (
                 bot_id, name, server_address, server_port, nickname, 
-                default_channel, cdk_code, duration_months, expire_at, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                default_channel, cdk_code, duration_months, expire_at, status,
+                web_username, web_password, web_user_id, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
             bot_id, name, server_address, server_port, nickname,
-            default_channel, cdk_code, duration_months, expire_at or "permanent", status, now
+            default_channel, cdk_code, duration_months, expire_at or "permanent", status,
+            web_username, web_password, str(web_user_id) if web_user_id else None, now
         ))
         conn.commit()
     return get_bot_instance_by_id(bot_id)

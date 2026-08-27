@@ -774,5 +774,141 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertIsNotNone(created_inst)
         self.assertEqual(created_inst["domain_record_id"], "cf-rec-9999")
 
+    def test_bot_instance_web_account_storage(self):
+        """测试 bot_instances 表存储与查询 web 用户账号字段"""
+        bot_cdks = database.create_cdks(count=1, remark="月卡", cdk_type="music_bot", duration_months=1)
+        cdk = bot_cdks[0]
+
+        bot = database.create_bot_instance(
+            bot_id="uuid-bot-web-test",
+            name="我的点歌姬",
+            server_address="103.71.69.156",
+            server_port=9987,
+            nickname="MusicBot",
+            cdk_code=cdk,
+            duration_months=1,
+            expire_at="2026-09-27 12:00:00",
+            default_channel="音乐大厅",
+            web_username="test_user_888",
+            web_password="test_password_123",
+            web_user_id="user-uid-999"
+        )
+        self.assertIsNotNone(bot)
+        self.assertEqual(bot["web_username"], "test_user_888")
+        self.assertEqual(bot["web_password"], "test_password_123")
+        self.assertEqual(bot["web_user_id"], "user-uid-999")
+
+        found_by_id = database.get_bot_instance_by_id("uuid-bot-web-test")
+        self.assertEqual(found_by_id["web_username"], "test_user_888")
+
+        found_by_cdk = database.get_bot_instance_by_cdk(cdk)
+        self.assertEqual(found_by_cdk["web_username"], "test_user_888")
+
+        all_bots = database.get_all_bot_instances()
+        matched = next((b for b in all_bots if b["bot_id"] == "uuid-bot-web-test"), None)
+        self.assertIsNotNone(matched)
+        self.assertEqual(matched["web_username"], "test_user_888")
+
+    def test_music_bot_client_user_methods(self):
+        """测试 MusicBotClient 中用户创建、权限设定、重置密码等接口封装"""
+        from unittest.mock import patch
+
+        client = music_bot_client
+
+        # 1. 测试 create_user
+        with patch.object(client, "_request", return_value=(True, {"id": 101, "username": "user1", "role": "member"})) as mock_req:
+            ok, res = client.create_user("user1", "pass12345", role="member")
+            self.assertTrue(ok)
+            self.assertEqual(res["id"], 101)
+            mock_req.assert_called_once_with("POST", "/api/users", {
+                "username": "user1",
+                "password": "pass12345",
+                "role": "member"
+            })
+
+        # 2. 测试 set_user_permissions (仅播放控制与队列管理，仅限目标机器人)
+        with patch.object(client, "_request", return_value=(True, {"ok": True})) as mock_req:
+            ok, res = client.set_user_permissions(
+                user_id="101",
+                capabilities=["player.control", "player.queue"],
+                bots=["bot-uuid-abc"]
+            )
+            self.assertTrue(ok)
+            mock_req.assert_called_once_with("PUT", "/api/users/101/permissions", {
+                "capabilities": ["player.control", "player.queue"],
+                "bots": ["bot-uuid-abc"]
+            })
+
+        # 3. 测试 delete_user
+        with patch.object(client, "_request", return_value=(True, "")) as mock_req:
+            ok, _ = client.delete_user("101")
+            self.assertTrue(ok)
+            mock_req.assert_called_once_with("DELETE", "/api/users/101")
+
+        # 4. 测试 reset_user_password
+        with patch.object(client, "_request", return_value=(True, "")) as mock_req:
+            ok, _ = client.reset_user_password("101", "newpass123")
+            self.assertTrue(ok)
+            mock_req.assert_called_once_with("POST", "/api/users/101/reset-password", {
+                "newPassword": "newpass123"
+            })
+
+    def test_redeem_bot_with_web_account_full_workflow(self):
+        """测试完整端到端流程：兑换音乐机器人CDK并创建受限权限Web账号"""
+        from unittest.mock import patch, MagicMock
+        try:
+            import app as ts_app
+        except Exception:
+            self.skipTest("FastAPI 依赖环境在当前全局 Python 中未安装")
+
+        # 1. 生成音乐机器人 CDK
+        cdks = database.create_cdks(count=1, remark="月卡机器人", cdk_type="music_bot", duration_months=1)
+        cdk = cdks[0]
+
+        # 2. 模拟远程平台调用成功
+        with patch.object(ts_app.music_bot_client, "create_bot", return_value=(True, {"id": "remote-bot-888"})) as mock_create_bot, \
+             patch.object(ts_app.music_bot_client, "create_user", return_value=(True, {"id": "remote-user-666", "username": "vip_music_user"})) as mock_create_user, \
+             patch.object(ts_app.music_bot_client, "set_user_permissions", return_value=(True, {"ok": True})) as mock_set_perm:
+
+            req = ts_app.RedeemBotRequest(
+                cdk=cdk,
+                name="专属音乐机",
+                serverAddress="1.2.3.4",
+                serverPort=9987,
+                nickname="DJ_Master",
+                defaultChannel="点歌大厅",
+                webUsername="vip_music_user",
+                webPassword="password_888"
+            )
+            resp = ts_app.redeem_bot_instance(req)
+
+            self.assertIsInstance(resp, dict)
+            self.assertTrue(resp["success"])
+            self.assertEqual(resp["type"], "music_bot")
+            self.assertEqual(resp["permission_notice"], "月卡用户仅有控制功能，年卡用户独享音乐后台")
+            self.assertEqual(resp["instance"]["web_username"], "vip_music_user")
+            self.assertEqual(resp["instance"]["web_password"], "password_888")
+
+            # 验证权限调用是否准确：仅播放控制和队列管理，机器人仅包含创建的 remote-bot-888
+            mock_create_user.assert_called_once_with("vip_music_user", "password_888", role="member")
+            mock_set_perm.assert_called_once_with(
+                user_id="remote-user-666",
+                capabilities=["player.control", "player.queue"],
+                bots=["remote-bot-888"]
+            )
+
+        # 3. 验证再次通过 /api/redeem 查询已兑换机器人能够查出绑定的 Web 账号与权限提示
+        mock_request = MagicMock()
+        mock_request.client.host = "127.0.0.1"
+        mock_request.headers = {}
+        with patch.object(ts_app.music_bot_client, "get_bot", return_value=(True, {"status": "running"})):
+            query_req = ts_app.RedeemRequest(cdk=cdk)
+            q_data = ts_app.redeem_cdk(query_req, mock_request)
+            self.assertIsInstance(q_data, dict)
+            self.assertTrue(q_data["success"])
+            self.assertEqual(q_data["instance"]["web_username"], "vip_music_user")
+            self.assertEqual(q_data["permission_notice"], "月卡用户仅有控制功能，年卡用户独享音乐后台")
+
 if __name__ == "__main__":
     unittest.main()
+

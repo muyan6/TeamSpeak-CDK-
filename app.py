@@ -189,6 +189,8 @@ class RedeemBotRequest(BaseModel):
     nickname: str = Field(default="MusicBot", min_length=1, max_length=100)
     defaultChannel: Optional[str] = Field(default=None, max_length=200)
     serverPassword: Optional[str] = Field(default=None, max_length=255)
+    webUsername: Optional[str] = Field(default=None, max_length=64)
+    webPassword: Optional[str] = Field(default=None, max_length=128)
 
 class GenerateCdksRequest(BaseModel):
     count: int = Field(default=1, ge=1, le=200)
@@ -565,7 +567,8 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                     "type": "music_bot",
                     "message": f"该音乐机器人 CDK 已于 {cdk_info['used_at']} 激活",
                     "instance": bot,
-                    "bot_panel_url": get_bot_config()["bot_panel_url"]
+                    "bot_panel_url": get_bot_config()["bot_panel_url"],
+                    "permission_notice": "月卡用户仅有控制功能，年卡用户独享音乐后台"
                 }
             return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 已被激活使用，但绑定的音乐机器人实例已不存在"})
 
@@ -795,6 +798,20 @@ def redeem_bot_instance(req: RedeemBotRequest):
                 "message": "该服务器已使用过体验卡，每个服务器只能使用一次体验卡，请联系退款"
             })
 
+    # 校验用户输入的后台账号密码（若提供）
+    web_username = (req.webUsername or "").strip()
+    web_password = (req.webPassword or "").strip()
+    if web_username or web_password:
+        if not web_username or len(web_username) < 3 or len(web_username) > 32:
+            release_cdk_claim(code)
+            return JSONResponse(status_code=400, content={"success": False, "message": "后台账号用户名长度必须为 3 到 32 个字符"})
+        if not re.match(r"^[a-zA-Z0-9_\-\.@]+$", web_username):
+            release_cdk_claim(code)
+            return JSONResponse(status_code=400, content={"success": False, "message": "用户名包含非法字符，仅支持字母、数字、下划线、短横线与点"})
+        if not web_password or len(web_password) < 8:
+            release_cdk_claim(code)
+            return JSONResponse(status_code=400, content={"success": False, "message": "后台账号密码长度不能少于 8 位"})
+
     # 调用远程音乐机器人 API 创建实例
     try:
         ok, res = music_bot_client.create_bot(
@@ -824,6 +841,40 @@ def redeem_bot_instance(req: RedeemBotRequest):
     else:
         expire_at = "permanent"
 
+    # 如果填写了 Web 账号密码，在机器人后台创建该用户并配置仅限本机器人的受限权限 (播放控制+队列管理)
+    created_web_user_id = None
+    if web_username and web_password:
+        try:
+            ok_u, res_u = music_bot_client.create_user(web_username, web_password, role="member")
+            if not ok_u:
+                err_msg = str(res_u)
+                if "already" in err_msg.lower() or "409" in err_msg or "exists" in err_msg.lower() or "HTTP 400" in err_msg:
+                    friendly_err = f"Web 点歌用户名【{web_username}】可能已存在或不合规，请更换其他用户名重试"
+                else:
+                    friendly_err = f"Web 点歌账号创建失败: {res_u}"
+                # 回滚已创建的机器人
+                music_bot_client.delete_bot(str(bot_id))
+                if trial_reserved:
+                    release_trial_reservation(raw_addr, target_port, code)
+                release_cdk_claim(code)
+                return JSONResponse(status_code=400, content={"success": False, "message": friendly_err})
+            
+            created_web_user_id = res_u.get("id") if isinstance(res_u, dict) else None
+            
+            # 分配受限能力：仅播放控制 (player.control) 与队列管理 (player.queue)，机器人范围仅限刚刚创建的 bot_id
+            if created_web_user_id:
+                music_bot_client.set_user_permissions(
+                    user_id=str(created_web_user_id),
+                    capabilities=["player.control", "player.queue"],
+                    bots=[str(bot_id)]
+                )
+        except Exception as err_u:
+            music_bot_client.delete_bot(str(bot_id))
+            if trial_reserved:
+                release_trial_reservation(raw_addr, target_port, code)
+            release_cdk_claim(code)
+            return JSONResponse(status_code=500, content={"success": False, "message": f"创建 Web 用户及权限配置异常: {err_u}"})
+
     # 保存本地数据库；失败时回滚远程机器人和 CDK 占用。
     try:
         bot_inst = create_bot_instance(
@@ -836,11 +887,19 @@ def redeem_bot_instance(req: RedeemBotRequest):
             duration_months=duration_m,
             expire_at=expire_at,
             default_channel=req.defaultChannel.strip() if req.defaultChannel else None,
-            status="active"
+            status="active",
+            web_username=web_username or None,
+            web_password=web_password or None,
+            web_user_id=str(created_web_user_id) if created_web_user_id else None
         )
         if not bot_inst or not bind_cdk_bot(code, bot_id):
             raise RuntimeError("CDK 绑定失败")
     except Exception as e:
+        if created_web_user_id:
+            try:
+                music_bot_client.delete_user(str(created_web_user_id))
+            except Exception:
+                pass
         delete_bot_instance(bot_id)
         music_bot_client.delete_bot(bot_id)
         if trial_reserved:
@@ -860,6 +919,11 @@ def redeem_bot_instance(req: RedeemBotRequest):
                 raw_input=req.serverAddress
             )
         except Exception as e:
+            if created_web_user_id:
+                try:
+                    music_bot_client.delete_user(str(created_web_user_id))
+                except Exception:
+                    pass
             delete_bot_instance(bot_id)
             music_bot_client.delete_bot(bot_id)
             unbind_cdk_bot(code, bot_id)
@@ -872,7 +936,8 @@ def redeem_bot_instance(req: RedeemBotRequest):
         "type": "music_bot",
         "message": f"🎉 音乐机器人已成功创建并对接！到期时间: {expire_at}",
         "instance": bot_inst,
-        "bot_panel_url": get_bot_config()["bot_panel_url"]
+        "bot_panel_url": get_bot_config()["bot_panel_url"],
+        "permission_notice": "月卡用户仅有控制功能，年卡用户独享音乐后台"
     }
 
 @app.post("/api/bot-instances/{bot_id}/action")

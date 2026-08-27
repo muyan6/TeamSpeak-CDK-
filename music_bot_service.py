@@ -293,5 +293,81 @@ class MusicBotClient:
     def get_all_bots(self) -> Tuple[bool, Any]:
         return self._request("GET", "/api/bot")
 
+    # --- 用户与权限管理 ---
+
+    def get_users(self) -> Tuple[bool, Any]:
+        """
+        获取音乐机器人后台的所有用户列表
+        """
+        return self._request("GET", "/api/users")
+
+    def create_user(self, username: str, password: str, role: str = "member") -> Tuple[bool, Any]:
+        """
+        在音乐机器人后台创建新用户
+        """
+        payload = {
+            "username": username.strip(),
+            "password": password.strip(),
+            "role": role
+        }
+        ok, res = self._request("POST", "/api/users", payload)
+        if not ok:
+            return False, res
+
+        # 尝试从返回结果中提取用户 ID
+        user_id = None
+        if isinstance(res, dict):
+            user_id = res.get("id") or (res.get("user", {}).get("id") if isinstance(res.get("user"), dict) else None)
+        
+        # 若创建接口未直接返回 ID，调用列表接口查询对应用户的 ID
+        if not user_id:
+            ok_list, list_res = self.get_users()
+            if ok_list and isinstance(list_res, dict) and "users" in list_res:
+                for u in list_res["users"]:
+                    if isinstance(u, dict) and u.get("username") == username.strip():
+                        user_id = u.get("id")
+                        res = u
+                        break
+
+        if user_id:
+            if isinstance(res, dict):
+                res["id"] = user_id
+            else:
+                res = {"id": user_id, "username": username.strip(), "role": role}
+            return True, res
+        return ok, res
+
+    def set_user_permissions(self, user_id: str, capabilities: Optional[List[str]] = None, bots: Any = None) -> Tuple[bool, Any]:
+        """
+        设置用户的能力权限与机器人访问范围
+        capabilities: 例如 ["player.control", "player.queue"]
+        bots: "all" 或 指定的机器人 ID 列表，例如 ["bot_id_123"]
+        """
+        if capabilities is None:
+            capabilities = ["player.control", "player.queue"]
+        if bots is None:
+            bots = []
+
+        payload = {
+            "capabilities": capabilities,
+            "bots": bots
+        }
+        return self._request("PUT", f"/api/users/{user_id}/permissions", payload)
+
+    def delete_user(self, user_id: str) -> Tuple[bool, Any]:
+        """
+        删除音乐机器人后台的指定用户
+        """
+        return self._request("DELETE", f"/api/users/{user_id}")
+
+    def reset_user_password(self, user_id: str, new_password: str) -> Tuple[bool, Any]:
+        """
+        重置指定用户的登录密码
+        """
+        payload = {
+            "newPassword": new_password.strip()
+        }
+        return self._request("POST", f"/api/users/{user_id}/reset-password", payload)
+
 # 单例实例
 music_bot_client = MusicBotClient()

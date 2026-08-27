@@ -1326,7 +1326,10 @@
             </td>
             <td>
               <strong style="color: #c084fc; font-size: 0.95rem;">${escapeHtml(b.name)}</strong>
-              <div style="font-size: 0.75rem; color: var(--text-muted);">${escapeHtml(b.default_channel || '默认大厅')}</div>
+              <div style="font-size: 0.75rem; color: var(--text-muted);">
+                ${escapeHtml(b.default_channel || '默认大厅')}
+                ${b.web_username ? ` · <span style="color:#38bdf8;" title="绑定的Web点歌账号"><i class="fa-solid fa-user"></i> ${escapeHtml(b.web_username)}</span>` : ''}
+              </div>
             </td>
             <td><code style="color: #60a5fa; font-size: 0.85rem;">${escapeHtml(b.server_address)}:${escapeHtml(b.server_port)}</code></td>
             <td><span style="color: #e2e8f0; font-weight: 500;">${escapeHtml(b.nickname)}</span></td>
