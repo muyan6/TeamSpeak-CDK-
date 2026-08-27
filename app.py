@@ -93,16 +93,28 @@ async def system_expiry_checker():
             # 1. 扫描已到期的音乐机器人
             expired_bots = get_expired_active_bots()
             for b in expired_bots:
-                print(f"[*] ⏰ 监测到机器人 [{b['name']}] (ID: {b['bot_id']}) 已到达有效期限 ({b['expire_at']})，正在执行自动停机下线...")
-                await asyncio.to_thread(music_bot_client.stop_bot, b["bot_id"])
-                update_bot_instance_status(b["bot_id"], "expired")
+                try:
+                    print(f"[*] ⏰ 监测到机器人 [{b['name']}] (ID: {b['bot_id']}) 已到达有效期限 ({b['expire_at']})，正在执行自动停机下线...")
+                    stop_ok, stop_res = await asyncio.to_thread(music_bot_client.stop_bot, b["bot_id"])
+                    if not stop_ok:
+                        print(f"[Warning] 机器人 [{b['bot_id']}] 停机响应: {stop_res}，依然标记状态为 expired")
+                except Exception as b_err:
+                    print(f"[Warning] 停止机器人 [{b['bot_id']}] 发生异常: {b_err}")
+                finally:
+                    update_bot_instance_status(b["bot_id"], "expired")
 
             # 2. 扫描已到期的 TeamSpeak 语音服务器
             expired_instances = get_expired_active_instances()
             for inst in expired_instances:
-                print(f"[*] ⏰ 监测到 TeamSpeak 服务器 [{inst['name']}] (ID: {inst['id']}) 已到达有效期限 ({inst['expire_at']})，正在执行自动停机下线...")
-                await asyncio.to_thread(stop_instance_container, inst["id"])
-                update_instance_status(inst["id"], "expired")
+                try:
+                    print(f"[*] ⏰ 监测到 TeamSpeak 服务器 [{inst['name']}] (ID: {inst['id']}) 已到达有效期限 ({inst['expire_at']})，正在执行自动停机下线...")
+                    stop_ok = await asyncio.to_thread(stop_instance_container, inst["id"])
+                    if not stop_ok:
+                        print(f"[Warning] TeamSpeak 容器 [{inst['id']}] 停止未成功，依然标记状态为 expired")
+                except Exception as inst_err:
+                    print(f"[Warning] 停止 TeamSpeak 容器 [{inst['id']}] 发生异常: {inst_err}")
+                finally:
+                    update_instance_status(inst["id"], "expired")
         except Exception as err:
             print(f"[Error in system_expiry_checker]: {err}")
         await asyncio.sleep(30)
@@ -712,9 +724,11 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     except Exception as e:
         if domain_record_id:
             try:
-                dns_service.delete_ts_srv_record(domain_record_id, dns_cfg=dns_cfg)
-            except Exception:
-                pass
+                ok_del, err_del = dns_service.delete_ts_srv_record(domain_record_id, dns_cfg=dns_cfg)
+                if not ok_del:
+                    print(f"[Warning] 回滚时删除 DNS 记录失败: {err_del}")
+            except Exception as d_err:
+                print(f"[Warning] 回滚时删除 DNS 记录异常: {d_err}")
         delete_instance(instance_id)
         destroy_instance_container(instance_id, delete_files=True)
         release_cdk_claim(code)
@@ -737,9 +751,11 @@ def redeem_cdk(req: RedeemRequest, request: Request):
         except Exception as e:
             if domain_record_id:
                 try:
-                    dns_service.delete_ts_srv_record(domain_record_id, dns_cfg=dns_cfg)
-                except Exception:
-                    pass
+                    ok_del, err_del = dns_service.delete_ts_srv_record(domain_record_id, dns_cfg=dns_cfg)
+                    if not ok_del:
+                        print(f"[Warning] 体验卡回滚时删除 DNS 记录失败: {err_del}")
+                except Exception as d_err:
+                    print(f"[Warning] 体验卡回滚时删除 DNS 记录异常: {d_err}")
             delete_instance(instance_id)
             destroy_instance_container(instance_id, delete_files=True)
             unbind_cdk_instance(code, instance_id)
@@ -863,12 +879,24 @@ def redeem_bot_instance(req: RedeemBotRequest):
             
             # 分配受限能力：仅播放控制 (player.control) 与队列管理 (player.queue)，机器人范围仅限刚刚创建的 bot_id
             if created_web_user_id:
-                music_bot_client.set_user_permissions(
+                ok_p, res_p = music_bot_client.set_user_permissions(
                     user_id=str(created_web_user_id),
                     capabilities=["player.control", "player.queue"],
                     bots=[str(bot_id)]
                 )
+                if not ok_p:
+                    music_bot_client.delete_user(str(created_web_user_id))
+                    music_bot_client.delete_bot(str(bot_id))
+                    if trial_reserved:
+                        release_trial_reservation(raw_addr, target_port, code)
+                    release_cdk_claim(code)
+                    return JSONResponse(status_code=500, content={"success": False, "message": f"Web 用户权限配置失败: {res_p}"})
         except Exception as err_u:
+            if created_web_user_id:
+                try:
+                    music_bot_client.delete_user(str(created_web_user_id))
+                except Exception:
+                    pass
             music_bot_client.delete_bot(str(bot_id))
             if trial_reserved:
                 release_trial_reservation(raw_addr, target_port, code)
@@ -1319,9 +1347,11 @@ def manage_instance(instance_id: int, req: InstanceActionRequest, _: bool = Depe
     elif action == "destroy":
         if instance.get("domain_record_id"):
             try:
-                dns_service.delete_ts_srv_record(instance["domain_record_id"])
+                ok_del, err_del = dns_service.delete_ts_srv_record(instance["domain_record_id"])
+                if not ok_del:
+                    print(f"[Warning] 销毁实例 ts{instance_id} 时删除 DNS 记录失败: {err_del}")
             except Exception as e:
-                print(f"[Warning] 删除 DNS 记录异常: {e}")
+                print(f"[Warning] 销毁实例 ts{instance_id} 时删除 DNS 记录异常: {e}")
         ok = destroy_instance_container(instance_id, delete_files=True)
         if not ok:
             return JSONResponse(status_code=500, content={
@@ -1355,9 +1385,11 @@ def batch_manage_instances_api(req: BatchActionInstancesRequest, _: bool = Depen
             inst = get_instance_by_id(instance_id)
             if inst and inst.get("domain_record_id"):
                 try:
-                    dns_service.delete_ts_srv_record(inst["domain_record_id"])
-                except Exception:
-                    pass
+                    ok_del, err_del = dns_service.delete_ts_srv_record(inst["domain_record_id"])
+                    if not ok_del:
+                        print(f"[Warning] 批量销毁实例 ts{instance_id} 时删除 DNS 记录失败: {err_del}")
+                except Exception as d_err:
+                    print(f"[Warning] 批量销毁实例 ts{instance_id} 时删除 DNS 记录异常: {d_err}")
             if destroy_instance_container(instance_id, delete_files=True) and delete_instance(instance_id):
                 success_count += 1
     return {"success": True, "count": success_count, "message": f"已成功对 {success_count} 个 TS 实例执行【{action}】操作"}

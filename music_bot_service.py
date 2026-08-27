@@ -280,7 +280,9 @@ class MusicBotClient:
         return self._request("POST", f"/api/bot/{bot_id}/stop")
 
     def restart_bot(self, bot_id: str) -> Tuple[bool, Any]:
-        self.stop_bot(bot_id)
+        stop_ok, stop_res = self.stop_bot(bot_id)
+        if not stop_ok:
+            print(f"[Info] restart_bot: 停止机器人 [{bot_id}] 响应: {stop_res} (可能处于非运行状态，继续尝试启动)")
         time.sleep(1)
         return self.start_bot(bot_id)
 

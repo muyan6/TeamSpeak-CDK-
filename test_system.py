@@ -755,7 +755,7 @@ class TestTeamSpeakManager(unittest.TestCase):
         cdk = cdks[0]
 
         # 5. 用户兑换 CDK 并指定自定义二级域名
-        with patch.object(ts_app.docker_service, "create_and_start_instance_container", return_value=(True, {"admin_token": "tok-dns", "query_password": "p", "query_apikey": "k"})), \
+        with patch.object(ts_app.docker_service, "deploy_teamspeak_instance", return_value=(True, {"admin_token": "tok-dns", "query_password": "p", "query_apikey": "k"}, "")), \
              patch.object(ts_app.dns_service, "create_ts_srv_record", return_value=(True, "playgame.voice.example.com", "cf-rec-9999")):
 
             redeem_resp = client.post("/api/redeem", json={"cdk": cdk, "subdomain": "playgame"})
