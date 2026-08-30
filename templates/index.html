@@ -61,33 +61,55 @@
             </button>
           </div>
 
-          <!-- 自定义二级域名输入选区 (若管理员开启了 DNS 自动化绑定) -->
-          <div id="subdomainConfigBox" style="display: none; margin-top: 1.25rem; padding: 1.1rem 1.25rem; background: var(--bg-card-inner); border: 1px solid var(--border-color); border-radius: 14px; text-align: left;">
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.4rem; flex-wrap: wrap; gap: 0.5rem;">
-              <label class="info-label" style="font-weight: 700; margin-bottom: 0; color: #60a5fa; font-size: 0.9rem;">
-                <i class="fa-solid fa-globe"></i> 自定义专属二级域名 (选填 / 推荐)
-              </label>
-              <span id="subdomainCheckBadge" class="badge badge-info" style="display: none; font-size: 0.76rem;">检查中...</span>
+          <!-- 自定义二级域名展开选区 (仅在 DNS 开启时展示，且若输入 BOT- 卡密则自动隐藏) -->
+          <div id="subdomainWrapper" style="display: none; margin-top: 1.15rem; text-align: left;">
+            <!-- 识别到音乐机器人卡密时的轻量友好提示 -->
+            <div id="botDetectedNotice" style="display: none; background: rgba(168, 85, 247, 0.08); border: 1px dashed rgba(168, 85, 247, 0.35); border-radius: 10px; padding: 0.65rem 0.95rem; font-size: 0.82rem; color: #c084fc; align-items: center; gap: 0.5rem;">
+              <i class="fa-solid fa-robot"></i>
+              <span>已识别为<strong>音乐机器人卡密 (BOT-)</strong>，直接点击下方按钮开通即可（无需配置二级域名）。</span>
             </div>
-            <p style="font-size: 0.78rem; color: var(--text-muted); margin-bottom: 0.75rem; line-height: 1.5;">
-              系统将自动向 DNS 绑定专属 SRV 记录。开通后<strong>在 TeamSpeak 客户端直接输入该域名即可秒连，无需输端口与 IP</strong>！
-            </p>
-            <div class="subdomain-row" style="display: flex; align-items: center; gap: 0.45rem;">
-              <input 
-                type="text" 
-                id="subdomainInput" 
-                class="form-control" 
-                placeholder="输入前缀（如 play / room / myts）" 
-                style="flex: 1; font-family: 'Consolas', 'Courier New', monospace; font-size: 0.95rem; text-transform: lowercase;"
-                autocomplete="off"
-                maxlength="32"
-                oninput="handleSubdomainInputDebounce()"
-              />
-              <span id="subdomainRootDomainSuffix" style="font-size: 0.92rem; font-weight: 700; color: #38bdf8; background: var(--bg-card); padding: 0.48rem 0.85rem; border-radius: 8px; border: 1px solid var(--border-color); white-space: nowrap;">
-                .yourdomain.com
-              </span>
+
+            <!-- TS 专属二级域名折叠面板 -->
+            <div id="subdomainAccordion" style="border: 1px solid var(--border-color); border-radius: 12px; background: var(--bg-card-inner); overflow: hidden; transition: all 0.25s ease;">
+              <div 
+                id="subdomainToggleHeader" 
+                onclick="toggleSubdomainAccordion()" 
+                style="display: flex; justify-content: space-between; align-items: center; padding: 0.75rem 1rem; cursor: pointer; user-select: none; transition: background 0.2s ease;"
+              >
+                <div style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.86rem; color: var(--text-secondary); font-weight: 600; flex-wrap: wrap;">
+                  <i class="fa-solid fa-globe" style="color: #60a5fa;"></i>
+                  <span>自定义专属二级域名</span>
+                  <span style="font-size: 0.72rem; color: #60a5fa; background: rgba(59, 130, 246, 0.15); padding: 0.15rem 0.45rem; border-radius: 4px; font-weight: normal;">选填 · 仅限 TS 语音服务器</span>
+                </div>
+                <div style="display: flex; align-items: center; gap: 0.4rem; font-size: 0.8rem; color: var(--text-muted);">
+                  <span id="subdomainCheckBadge" class="badge badge-info" style="display: none; font-size: 0.74rem; margin-right: 0.25rem;">检查中...</span>
+                  <span id="subdomainToggleStatusText">点击展开</span>
+                  <i id="subdomainToggleIcon" class="fa-solid fa-chevron-down" style="font-size: 0.75rem; transition: transform 0.25s ease;"></i>
+                </div>
+              </div>
+
+              <div id="subdomainConfigBody" style="display: none; padding: 0.25rem 1rem 1rem 1rem; border-top: 1px solid var(--border-subtle);">
+                <p style="font-size: 0.78rem; color: var(--text-muted); margin: 0.65rem 0; line-height: 1.5;">
+                  系统将自动向 DNS 绑定专属 SRV 记录。开通后<strong>在 TeamSpeak 客户端直接输入该域名即可秒连，无需输端口与 IP</strong>（音乐机器人无需填写）。
+                </p>
+                <div class="subdomain-row" style="display: flex; align-items: center; gap: 0.45rem;">
+                  <input 
+                    type="text" 
+                    id="subdomainInput" 
+                    class="form-control" 
+                    placeholder="输入前缀（如 play / room / myts）" 
+                    style="flex: 1; font-family: 'Consolas', 'Courier New', monospace; font-size: 0.92rem; text-transform: lowercase;"
+                    autocomplete="off"
+                    maxlength="32"
+                    oninput="handleSubdomainInputDebounce()"
+                  />
+                  <span id="subdomainRootDomainSuffix" style="font-size: 0.88rem; font-weight: 700; color: #38bdf8; background: var(--bg-card); padding: 0.45rem 0.8rem; border-radius: 8px; border: 1px solid var(--border-color); white-space: nowrap;">
+                    .yourdomain.com
+                  </span>
+                </div>
+                <div id="subdomainFeedback" style="font-size: 0.78rem; margin-top: 0.45rem; display: none; line-height: 1.4;"></div>
+              </div>
             </div>
-            <div id="subdomainFeedback" style="font-size: 0.78rem; margin-top: 0.45rem; display: none; line-height: 1.4;"></div>
           </div>
         </form>
         <div id="statusAlert" style="margin-top: 1.25rem; display: none; padding: 0.85rem; border-radius: 10px; font-size: 0.9rem;"></div>
@@ -253,8 +275,8 @@
               <input type="text" id="botNickInput" class="form-control" style="width: 100%;" value="MusicBot" required>
             </div>
             <div>
-              <label class="info-label">目标 TS 服务器地址 (IP或域名)</label>
-              <input type="text" id="botServerAddrInput" class="form-control" style="width: 100%;" placeholder="如 123.45.67.89 或 example.ts3.com" required>
+              <label class="info-label">目标 TS 服务器地址 (IP或二级域名)</label>
+              <input type="text" id="botServerAddrInput" class="form-control" style="width: 100%;" placeholder="如 123.45.67.89 或 play.yourdomain.com" required>
             </div>
             <div>
               <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
@@ -710,19 +732,70 @@
       showToast(`已切换至${target === 'dark' ? '黑夜模式' : '白天模式'}`);
     }
 
+    let isSubdomainExpanded = false;
+    function toggleSubdomainAccordion(forceState) {
+      const body = document.getElementById('subdomainConfigBody');
+      const icon = document.getElementById('subdomainToggleIcon');
+      const text = document.getElementById('subdomainToggleStatusText');
+      const input = document.getElementById('subdomainInput');
+
+      if (typeof forceState === 'boolean') {
+        isSubdomainExpanded = forceState;
+      } else {
+        isSubdomainExpanded = !isSubdomainExpanded;
+      }
+
+      if (isSubdomainExpanded) {
+        if (body) body.style.display = 'block';
+        if (icon) icon.style.transform = 'rotate(180deg)';
+        if (text) text.innerText = '点击收起';
+        if (input) input.focus();
+      } else {
+        if (body) body.style.display = 'none';
+        if (icon) icon.style.transform = 'rotate(0deg)';
+        if (text) text.innerText = '点击展开';
+      }
+    }
+
+    function handleCdkInputChange() {
+      const cdkInput = document.getElementById('cdkInput');
+      const val = (cdkInput ? cdkInput.value : '').trim().toUpperCase();
+      const wrapper = document.getElementById('subdomainWrapper');
+      const botNotice = document.getElementById('botDetectedNotice');
+      const accordion = document.getElementById('subdomainAccordion');
+
+      if (!systemDnsConfig || !systemDnsConfig.dns_enabled) {
+        if (wrapper) wrapper.style.display = 'none';
+        return;
+      }
+
+      if (val.startsWith('BOT-') || val.startsWith('BOT')) {
+        // 识别到音乐机器人卡密：隐藏二级域名折叠面板，展示轻量提示
+        if (wrapper) wrapper.style.display = 'block';
+        if (accordion) accordion.style.display = 'none';
+        if (botNotice) botNotice.style.display = 'flex';
+      } else {
+        // 默认或 TS 服务器卡密：展示二级域名折叠面板，隐藏机器人提示
+        if (wrapper) wrapper.style.display = 'block';
+        if (accordion) accordion.style.display = 'block';
+        if (botNotice) botNotice.style.display = 'none';
+      }
+    }
+
     async function fetchDnsInfo() {
       try {
         const resp = await fetch('/api/dns-info');
         if (resp.ok) {
           const data = await resp.json();
           systemDnsConfig = data;
-          const box = document.getElementById('subdomainConfigBox');
+          const wrapper = document.getElementById('subdomainWrapper');
           const suffix = document.getElementById('subdomainRootDomainSuffix');
           if (data.dns_enabled && data.root_domain) {
-            if (box) box.style.display = 'block';
+            if (wrapper) wrapper.style.display = 'block';
             if (suffix) suffix.innerText = '.' + data.root_domain;
+            handleCdkInputChange();
           } else {
-            if (box) box.style.display = 'none';
+            if (wrapper) wrapper.style.display = 'none';
           }
         }
       } catch (e) {
@@ -777,12 +850,12 @@
           if (data.available) {
             if (badge) {
               badge.className = 'badge badge-success';
-              badge.innerText = '✓ 该域名可用';
+              badge.innerText = '✓ 可用';
             }
             if (feedback) {
               feedback.style.display = 'block';
               feedback.style.color = '#34d399';
-              feedback.innerHTML = `<i class="fa-solid fa-circle-check"></i> 专属域名：<strong style="color:#38bdf8;">${data.full_domain}</strong>（可直接用于免端口连接）`;
+              feedback.innerHTML = `<i class="fa-solid fa-circle-check"></i> 专属域名：<strong style="color:#38bdf8;">${data.full_domain}</strong>（免输端口直连）`;
             }
           } else {
             if (badge) {
@@ -806,6 +879,12 @@
       updateThemeUI(currentTheme);
 
       fetchDnsInfo();
+
+      const cdkInput = document.getElementById('cdkInput');
+      if (cdkInput) {
+        cdkInput.addEventListener('input', handleCdkInputChange);
+        cdkInput.addEventListener('paste', () => setTimeout(handleCdkInputChange, 50));
+      }
 
       const addrInput = document.getElementById('botServerAddrInput');
       const portInput = document.getElementById('botServerPortInput');
