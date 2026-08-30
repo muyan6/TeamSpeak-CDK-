@@ -972,7 +972,7 @@ def redeem_bot_instance(req: RedeemBotRequest):
     return {
         "success": True,
         "type": "music_bot",
-        "message": f"🎉 音乐机器人已成功创建并对接！到期时间: {expire_at}",
+        "message": f"🎉 音乐机器人已成功创建并对接！请在 TS 客户端右键机器人赋予【服务器管理员】权限。到期时间: {expire_at}",
         "instance": bot_inst,
         "bot_panel_url": get_bot_config()["bot_panel_url"],
         "permission_notice": "月卡用户仅有控制功能，年卡用户独享音乐后台"

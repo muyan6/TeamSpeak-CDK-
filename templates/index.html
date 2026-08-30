@@ -303,6 +303,11 @@
             </div>
           </div>
 
+          <div style="background: rgba(245, 158, 11, 0.06); border: 1px dashed rgba(245, 158, 11, 0.35); border-radius: 10px; padding: 0.65rem 0.95rem; margin-bottom: 1rem; font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5;">
+            <i class="fa-solid fa-circle-info" style="color: #fbbf24; margin-right: 4px;"></i>
+            <strong>温馨提示：</strong>机器人创建并连入 TS 语音后，请在客户端右键机器人赋予【<strong>服务器管理员 (Server Admin)</strong>】权限以保证正常播放与切歌。
+          </div>
+
           <button type="submit" id="botSubmitBtn" class="btn-primary" style="background: var(--accent-purple-gradient); width: 100%; padding: 0.85rem;">
             <span class="spinner" id="botLoadingSpinner"></span>
             <span id="botBtnText"><i class="fa-solid fa-play"></i> 立即创建并连接音乐机器人</span>
@@ -345,6 +350,19 @@
               <span id="resBotChannel">根频道</span>
             </div>
           </div>
+        </div>
+
+        <!-- 机器人服务器管理员权限提示横幅 -->
+        <div class="token-box" style="background: rgba(245, 158, 11, 0.08); border-color: rgba(245, 158, 11, 0.35); margin-top: 1.25rem;">
+          <div class="token-box-header" style="color: #fbbf24; display: flex; align-items: center; gap: 0.5rem;">
+            <i class="fa-solid fa-shield-halved"></i>
+            <span>重要操作提示：请给机器人【服务器管理员】权限 (Server Admin)</span>
+          </div>
+          <p style="font-size: 0.85rem; color: var(--text-secondary); line-height: 1.65; margin: 0.5rem 0 0 0;">
+            机器人已成功连入您的 TeamSpeak 服务器。请服主/管理员在 TeamSpeak 客户端中：<br>
+            <strong>👉 右键机器人昵称 ➔ 选择【设置服务器组 (Set Server Group)】➔ 勾选【Server Admin (服务器管理员)】</strong><br>
+            <span style="color: var(--text-muted); font-size: 0.8rem;">（赋予管理员权限后，机器人方可拥有自由切换频道、播放无损高音质音频及响应切歌指令的完整权限）</span>
+          </p>
         </div>
 
         <!-- Web 点歌后台账号与权限卡片 -->
@@ -458,7 +476,7 @@
               <span>音乐机器人接入与网页点歌</span>
             </div>
             <p>
-              输入 <code>BOT-</code> 开头卡密开通，可设置专属 Web 控制账号（月卡用户仅有控制功能，年卡用户独享音乐后台）。开通后点击控制台可在线点歌与播歌。
+              输入 <code>BOT-</code> 开头卡密开通，可设置专属 Web 控制账号（月卡用户仅有控制功能，年卡用户独享音乐后台）。<strong>开通后请在 TS 客户端右键机器人赋予【服务器管理员】权限</strong>，点击控制台即可在线点歌与播歌。
             </p>
           </div>
 
