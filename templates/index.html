@@ -246,12 +246,30 @@
 
       <!-- 音乐机器人配置表单卡片 (当输入未使用音乐机器人CDK时展示) -->
       <div id="botConfigCard" class="card result-card">
-        <div class="result-header">
+        <div class="result-header" style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.75rem;">
           <div>
             <h2 style="font-size: 1.35rem; font-weight: 800; color: #a78bfa;"><i class="fa-solid fa-music"></i> 开通 TeamSpeak 音乐机器人</h2>
             <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;" id="botDurationTip">卡密有效时长: 1 个月</p>
           </div>
-          <span class="badge badge-info">CDK 验证成功</span>
+          <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
+            <a id="botConfigTutorialBtn" href="http://103.71.69.156:23452/" target="_blank" rel="noopener noreferrer" class="btn-action" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); text-decoration: none; font-size: 0.82rem; padding: 0.4rem 0.8rem; background: rgba(56, 189, 248, 0.08);">
+              <i class="fa-solid fa-book-open"></i> 机器人使用教程 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.72rem; margin-left: 2px;"></i>
+            </a>
+            <span class="badge badge-info">CDK 验证成功</span>
+          </div>
+        </div>
+
+        <!-- 机器人使用教程跳转与提示横幅 -->
+        <div style="background: rgba(56, 189, 248, 0.08); border: 1px solid rgba(56, 189, 248, 0.3); border-radius: 12px; padding: 0.85rem 1.15rem; margin-bottom: 1.25rem; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.75rem;">
+          <div style="font-size: 0.84rem; color: var(--text-secondary); line-height: 1.55;">
+            <div style="font-weight: 700; color: #38bdf8; margin-bottom: 0.25rem;">
+              <i class="fa-solid fa-circle-question"></i> 新手使用指引与详细教程
+            </div>
+            首次使用不知道如何配置？详细的机器人开通接入、TS 客户端权限与网页点歌说明<strong>请在该网址的使用教程里查看</strong>。
+          </div>
+          <a id="botConfigTutorialBannerLink" href="http://103.71.69.156:23452/" target="_blank" rel="noopener noreferrer" class="btn-primary" style="background: linear-gradient(135deg, #0284c7, #38bdf8); text-decoration: none; font-size: 0.82rem; padding: 0.45rem 0.95rem; border-radius: 8px; white-space: nowrap;">
+            <i class="fa-solid fa-arrow-up-right-from-square"></i> 打开使用教程
+          </a>
         </div>
 
         <!-- 权限等级与功能介绍横幅 -->
@@ -429,6 +447,9 @@
         <div class="action-btn-group" style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem;">
           <a id="botWebPanelLink" href="http://103.71.69.156:23467/" target="_blank" class="btn-primary" style="background: var(--accent-pink-gradient); text-decoration: none;">
             <i class="fa-solid fa-music"></i> 进入网页点歌 / 播放控制台
+          </a>
+          <a id="botResultTutorialLink" href="http://103.71.69.156:23452/" target="_blank" rel="noopener noreferrer" class="btn-action" style="text-decoration: none; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">
+            <i class="fa-solid fa-book-open"></i> 机器人使用教程 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.72rem; margin-left: 2px;"></i>
           </a>
           <button class="btn-action" onclick="botAction('restart')">
             <i class="fa-solid fa-rotate"></i> 重启
@@ -782,12 +803,27 @@
       }
     }
 
+    let botTutorialUrl = 'http://103.71.69.156:23452/';
+    function updateBotTutorialLinks(url) {
+      if (!url) return;
+      botTutorialUrl = url;
+      const btn1 = document.getElementById('botConfigTutorialBtn');
+      const btn2 = document.getElementById('botConfigTutorialBannerLink');
+      const btn3 = document.getElementById('botResultTutorialLink');
+      if (btn1) btn1.href = url;
+      if (btn2) btn2.href = url;
+      if (btn3) btn3.href = url;
+    }
+
     async function fetchDnsInfo() {
       try {
         const resp = await fetch('/api/dns-info');
         if (resp.ok) {
           const data = await resp.json();
           systemDnsConfig = data;
+          if (data.bot_tutorial_url) {
+            updateBotTutorialLinks(data.bot_tutorial_url);
+          }
           const wrapper = document.getElementById('subdomainWrapper');
           const suffix = document.getElementById('subdomainRootDomainSuffix');
           if (data.dns_enabled && data.root_domain) {
@@ -943,6 +979,9 @@
 
         // === 分支 1: 音乐机器人 ===
         if (res.type === 'music_bot') {
+          if (res.bot_tutorial_url) {
+            updateBotTutorialLinks(res.bot_tutorial_url);
+          }
           if (res.need_config) {
             currentPendingBotCdk = res.cdk;
             document.getElementById('botDurationTip').innerText = `卡密类型: 音乐机器人 | 有效时长: ${res.duration_desc || (res.duration_months + '个月')}`;
@@ -959,7 +998,7 @@
             alertBox.innerText = res.message || '请填写下方机器人的目标服务器连接配置：';
             return;
           } else if (res.instance) {
-            renderBotResult(res.instance, res.bot_panel_url);
+            renderBotResult(res.instance, res.bot_panel_url, res.bot_tutorial_url);
             alertBox.style.display = 'block';
             alertBox.style.background = 'var(--badge-success-bg)';
             alertBox.style.color = 'var(--badge-success-text)';
@@ -1058,7 +1097,7 @@
         }
 
         document.getElementById('botConfigCard').style.display = 'none';
-        renderBotResult(res.instance, res.bot_panel_url);
+        renderBotResult(res.instance, res.bot_panel_url, res.bot_tutorial_url);
 
         alertBox.style.display = 'block';
         alertBox.style.background = 'var(--badge-success-bg)';
@@ -1077,10 +1116,14 @@
       }
     }
 
-    function renderBotResult(bot, panelUrl) {
+    function renderBotResult(bot, panelUrl, tutorialUrl) {
       currentBotInstance = bot;
       const botResultCard = document.getElementById('botResultCard');
       botResultCard.style.display = 'block';
+
+      if (tutorialUrl || bot.bot_tutorial_url) {
+        updateBotTutorialLinks(tutorialUrl || bot.bot_tutorial_url);
+      }
 
       document.getElementById('resBotName').innerText = `音乐机器人 (${bot.name})`;
       document.getElementById('resBotCreatedAt').innerText = `开通时间: ${bot.created_at || '刚刚'}`;

@@ -187,27 +187,36 @@ def set_admin_password(new_password: str):
     set_setting("admin_password", new_password.strip())
 
 def get_bot_config() -> Dict[str, str]:
-    from config import BOT_PANEL_URL, BOT_PANEL_USER, BOT_PANEL_PASS
+    from config import BOT_PANEL_URL, BOT_PANEL_USER, BOT_PANEL_PASS, BOT_TUTORIAL_URL
     url = get_setting("bot_panel_url", BOT_PANEL_URL) or BOT_PANEL_URL
     user = get_setting("bot_panel_user", BOT_PANEL_USER) or BOT_PANEL_USER
     pwd = get_setting("bot_panel_pass", BOT_PANEL_PASS) or BOT_PANEL_PASS
+    tutorial_url = get_setting("bot_tutorial_url", BOT_TUTORIAL_URL) or BOT_TUTORIAL_URL
     return {
         "bot_panel_url": url.rstrip("/"),
         "bot_panel_user": user,
-        "bot_panel_pass": pwd
+        "bot_panel_pass": pwd,
+        "bot_tutorial_url": tutorial_url.strip()
     }
 
-def set_bot_config(url: str, user: str, password: str) -> Dict[str, str]:
+def set_bot_config(url: str, user: str, password: str, tutorial_url: Optional[str] = None) -> Dict[str, str]:
+    from config import BOT_TUTORIAL_URL
     cleaned_url = url.strip().rstrip("/")
     cleaned_user = user.strip()
     cleaned_pass = password.strip()
     set_setting("bot_panel_url", cleaned_url)
     set_setting("bot_panel_user", cleaned_user)
     set_setting("bot_panel_pass", cleaned_pass)
+    if tutorial_url is not None:
+        cleaned_tut = tutorial_url.strip() or BOT_TUTORIAL_URL
+        set_setting("bot_tutorial_url", cleaned_tut)
+    else:
+        cleaned_tut = get_setting("bot_tutorial_url", BOT_TUTORIAL_URL) or BOT_TUTORIAL_URL
     return {
         "bot_panel_url": cleaned_url,
         "bot_panel_user": cleaned_user,
-        "bot_panel_pass": cleaned_pass
+        "bot_panel_pass": cleaned_pass,
+        "bot_tutorial_url": cleaned_tut
     }
 
 # --- DNS 自动化绑定配置 ---

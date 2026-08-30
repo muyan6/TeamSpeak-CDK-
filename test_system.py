@@ -214,20 +214,23 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertIn("bot_panel_url", cfg)
         self.assertIn("bot_panel_user", cfg)
         self.assertIn("bot_panel_pass", cfg)
+        self.assertIn("bot_tutorial_url", cfg)
 
-        # 2. 修改配置
+        # 2. 修改配置包含 tutorial_url
         new_url = "http://127.0.0.1:23467"
         new_user = "test_admin"
         new_pass = "TestPass123"
-        database.set_bot_config(new_url, new_user, new_pass)
+        new_tutorial = "http://103.71.69.156:23452/"
+        database.set_bot_config(new_url, new_user, new_pass, tutorial_url=new_tutorial)
 
         updated_cfg = database.get_bot_config()
         self.assertEqual(updated_cfg["bot_panel_url"], new_url)
         self.assertEqual(updated_cfg["bot_panel_user"], new_user)
         self.assertEqual(updated_cfg["bot_panel_pass"], new_pass)
+        self.assertEqual(updated_cfg["bot_tutorial_url"], new_tutorial)
 
         # 3. 恢复配置
-        database.set_bot_config(cfg["bot_panel_url"], cfg["bot_panel_user"], cfg["bot_panel_pass"])
+        database.set_bot_config(cfg["bot_panel_url"], cfg["bot_panel_user"], cfg["bot_panel_pass"], tutorial_url=cfg["bot_tutorial_url"])
 
     def test_music_bot_test_connection(self):
         # 1. 正常连接测试

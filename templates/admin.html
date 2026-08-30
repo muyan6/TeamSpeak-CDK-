@@ -621,6 +621,16 @@
               </div>
             </div>
 
+            <div style="margin-bottom: 1.25rem;">
+              <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
+                <i class="fa-solid fa-book-bookmark" style="color: #38bdf8;"></i> 机器人使用教程跳转网址 (Tutorial URL)
+              </label>
+              <input type="text" id="cfgBotTutorialUrl" class="form-control" style="width: 100%; padding: 0.65rem 0.9rem;" placeholder="如 http://103.71.69.156:23452/">
+              <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.35rem;">
+                前台用户在开通机器人界面与控制卡片点击“使用教程”时跳转的网址（默认：<code>http://103.71.69.156:23452/</code>）
+              </div>
+            </div>
+
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem;">
               <div>
                 <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
@@ -2183,6 +2193,7 @@
         const data = await res.json();
         if (data.success && data.config) {
           document.getElementById('cfgBotUrl').value = data.config.url || '';
+          document.getElementById('cfgBotTutorialUrl').value = data.config.tutorial_url || 'http://103.71.69.156:23452/';
           document.getElementById('cfgBotUser').value = data.config.user || '';
           document.getElementById('cfgBotPass').value = data.config.password || '';
         }
@@ -2194,6 +2205,7 @@
     async function handleSaveBotConfig(e) {
       e.preventDefault();
       const url = document.getElementById('cfgBotUrl').value.trim();
+      const tutorial_url = document.getElementById('cfgBotTutorialUrl').value.trim();
       const user = document.getElementById('cfgBotUser').value.trim();
       const password = document.getElementById('cfgBotPass').value.trim();
 
@@ -2213,7 +2225,7 @@
             'Content-Type': 'application/json',
             'X-Admin-Password': adminToken
           },
-          body: JSON.stringify({ url, user, password })
+          body: JSON.stringify({ url, user, password, tutorial_url })
         });
         const data = await res.json();
         if (data.success) {

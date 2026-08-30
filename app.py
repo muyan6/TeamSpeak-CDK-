@@ -252,6 +252,7 @@ class BotConfigRequest(BaseModel):
     url: str = Field(min_length=1, max_length=500)
     user: str = Field(min_length=1, max_length=255)
     password: str = Field(min_length=1, max_length=255)
+    tutorial_url: Optional[str] = Field(default=None, max_length=500)
 
 class TestBotConfigRequest(BaseModel):
     url: Optional[str] = None
@@ -542,11 +543,13 @@ def parse_ts_target_endpoint(req: ParseTsTargetRequest):
 @app.get("/api/dns-info")
 def get_dns_info_endpoint():
     cfg = get_dns_config()
+    bot_cfg = get_bot_config()
     return {
         "success": True,
         "dns_enabled": cfg.get("dns_enabled", False),
         "dns_provider": cfg.get("dns_provider", "disabled"),
-        "root_domain": cfg.get("dns_root_domain", "")
+        "root_domain": cfg.get("dns_root_domain", ""),
+        "bot_tutorial_url": bot_cfg.get("bot_tutorial_url", "http://103.71.69.156:23452/")
     }
 
 @app.post("/api/check-subdomain")
@@ -590,6 +593,7 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                     "message": f"该音乐机器人 CDK 已于 {cdk_info['used_at']} 激活",
                     "instance": bot,
                     "bot_panel_url": get_bot_config()["bot_panel_url"],
+                    "bot_tutorial_url": get_bot_config().get("bot_tutorial_url", "http://103.71.69.156:23452/"),
                     "permission_notice": "月卡用户仅有控制功能，年卡用户独享音乐后台"
                 }
             return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 已被激活使用，但绑定的音乐机器人实例已不存在"})
@@ -610,6 +614,7 @@ def redeem_cdk(req: RedeemRequest, request: Request):
             "is_trial": bool(is_trial),
             "duration_months": duration_m,
             "duration_desc": duration_desc,
+            "bot_tutorial_url": get_bot_config().get("bot_tutorial_url", "http://103.71.69.156:23452/"),
             "message": f"CDK 验证成功！当前为【音乐机器人 - {duration_desc}】，请填写目标服务器连接配置以启动机器人"
         }
 
@@ -975,6 +980,7 @@ def redeem_bot_instance(req: RedeemBotRequest):
         "message": f"🎉 音乐机器人已成功创建并对接！请在 TS 客户端右键机器人赋予【服务器管理员】权限。到期时间: {expire_at}",
         "instance": bot_inst,
         "bot_panel_url": get_bot_config()["bot_panel_url"],
+        "bot_tutorial_url": get_bot_config().get("bot_tutorial_url", "http://103.71.69.156:23452/"),
         "permission_notice": "月卡用户仅有控制功能，年卡用户独享音乐后台"
     }
 
@@ -1538,7 +1544,8 @@ def get_bot_config_api(_: bool = Depends(verify_admin)):
         "config": {
             "url": cfg["bot_panel_url"],
             "user": cfg["bot_panel_user"],
-            "password": cfg["bot_panel_pass"]
+            "password": cfg["bot_panel_pass"],
+            "tutorial_url": cfg.get("bot_tutorial_url", "http://103.71.69.156:23452/")
         }
     }
 
@@ -1547,17 +1554,20 @@ def update_bot_config_api(req: BotConfigRequest, _: bool = Depends(verify_admin)
     url = req.url.strip()
     user = req.user.strip()
     password = req.password.strip()
+    tutorial_url = req.tutorial_url.strip() if req.tutorial_url else None
 
     if not url:
         raise HTTPException(status_code=400, detail="机器人网站地址 (URL) 不能为空")
     if not url.startswith("http://") and not url.startswith("https://"):
         raise HTTPException(status_code=400, detail="网站地址格式不正确，必须以 http:// 或 https:// 开头")
+    if tutorial_url and not (tutorial_url.startswith("http://") or tutorial_url.startswith("https://")):
+        raise HTTPException(status_code=400, detail="使用教程跳转网址格式不正确，必须以 http:// 或 https:// 开头")
     if not user:
         raise HTTPException(status_code=400, detail="管理员登录账号不能为空")
     if not password:
         raise HTTPException(status_code=400, detail="管理员登录密码不能为空")
 
-    saved_cfg = set_bot_config(url, user, password)
+    saved_cfg = set_bot_config(url, user, password, tutorial_url=tutorial_url)
     music_bot_client.update_config(saved_cfg["bot_panel_url"], saved_cfg["bot_panel_user"], saved_cfg["bot_panel_pass"])
 
     return {
@@ -1566,7 +1576,8 @@ def update_bot_config_api(req: BotConfigRequest, _: bool = Depends(verify_admin)
         "config": {
             "url": saved_cfg["bot_panel_url"],
             "user": saved_cfg["bot_panel_user"],
-            "password": saved_cfg["bot_panel_pass"]
+            "password": saved_cfg["bot_panel_pass"],
+            "tutorial_url": saved_cfg.get("bot_tutorial_url", "http://103.71.69.156:23452/")
         }
     }
 
