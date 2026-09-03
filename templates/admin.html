@@ -668,20 +668,20 @@
           <div id="testResultBox" style="display: none; padding: 1rem 1.25rem; border-radius: 10px; font-size: 0.88rem; margin-top: 1rem;"></div>
 
           <!-- 分割线 -->
-          <div style="border-top: 1px dashed rgba(255, 255, 255, 0.12); margin: 2.2rem 0 1.5rem 0;"></div>
+          <div style="border-top: 1px dashed var(--border-color); margin: 2.2rem 0 1.5rem 0;"></div>
 
           <!-- 机器人新建用户权限配置（与音乐后台完全一致） -->
-          <div style="background: rgba(30, 41, 59, 0.45); border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px; padding: 1.25rem 1.5rem; margin-top: 1rem;">
+          <div style="background: var(--bg-card-inner); border: 1px solid var(--border-color); border-radius: 12px; padding: 1.25rem 1.5rem; margin-top: 1rem;">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.25rem;">
               <div>
-                <h4 style="font-size: 1.15rem; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 0.5rem; margin: 0;">
+                <h4 style="font-size: 1.15rem; font-weight: 700; color: var(--accent-primary); display: flex; align-items: center; gap: 0.5rem; margin: 0;">
                   <i class="fa-solid fa-user-shield"></i> 机器人新建用户权限配置（与音乐机器人后台完全一致）
                 </h4>
                 <p style="font-size: 0.82rem; color: var(--text-muted); margin-top: 0.35rem; line-height: 1.5;">
                   配置用户通过 CDK 兑换创建机器人并开通 Web 点歌账号时的权限。勾选【机器人管理】即赋予管理权限，无需改动任何代码！
                 </p>
               </div>
-              <button type="button" id="syncBotPermBtn" class="btn-action" style="background: rgba(56, 189, 248, 0.15); border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;" onclick="handleSyncBotPermissions()">
+              <button type="button" id="syncBotPermBtn" class="btn-action" style="background: var(--badge-info-bg); border-color: var(--badge-info-border); color: var(--badge-info-text);" onclick="handleSyncBotPermissions()">
                 <span class="spinner" id="syncBotPermSpinner" style="display: none; width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;"></span>
                 <i class="fa-solid fa-arrows-rotate" id="syncBotPermIcon"></i> 从机器人后台同步用户权限
               </button>
@@ -691,63 +691,63 @@
             <div id="syncPermStatusBox" style="display: none; padding: 0.85rem 1rem; border-radius: 8px; font-size: 0.84rem; margin-bottom: 1.25rem;"></div>
 
             <!-- 机器人后台现有用户模板选择 (同步后出现) -->
-            <div id="remoteUserTemplateBox" style="display: none; background: rgba(15, 23, 42, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 1.25rem;">
-              <div style="font-size: 0.84rem; font-weight: 600; color: #cbd5e1; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
-                <i class="fa-solid fa-users" style="color: #60a5fa;"></i> 机器人后台现有用户权限（点击可一键套用）:
+            <div id="remoteUserTemplateBox" style="display: none; background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; padding: 0.85rem 1rem; margin-bottom: 1.25rem;">
+              <div style="font-size: 0.84rem; font-weight: 600; color: var(--text-main); margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                <i class="fa-solid fa-users" style="color: var(--accent-primary);"></i> 机器人后台现有用户权限（点击可一键套用）:
               </div>
               <div id="remoteUsersList" style="display: flex; flex-wrap: wrap; gap: 0.5rem;"></div>
             </div>
 
             <form id="botPermissionForm" onsubmit="handleSaveBotPermissions(event)">
               <!-- 1. 能力 (与音乐机器人后台完全一致) -->
-              <div style="background: rgba(15, 23, 42, 0.55); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1.25rem;">
-                <div style="font-size: 0.95rem; font-weight: 700; color: #f1f5f9; margin-bottom: 0.85rem; display: flex; align-items: center; justify-content: space-between;">
+              <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.85rem; display: flex; align-items: center; justify-content: space-between;">
                   <span style="display: flex; align-items: center; gap: 0.45rem;">
-                    <i class="fa-solid fa-bolt" style="color: #facc15;"></i> 能力 (与音乐机器人后台一致)
+                    <i class="fa-solid fa-bolt" style="color: var(--badge-warning-text);"></i> 能力 (与音乐机器人后台一致)
                   </span>
                   <span style="font-size: 0.78rem; font-weight: normal; color: var(--text-muted);">
                     （勾选后新建机器人自动赋予对应能力）
                   </span>
                 </div>
                 <div style="display: flex; flex-wrap: wrap; gap: 1.25rem 1.75rem; align-items: center;">
-                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: #f1f5f9; user-select: none;">
-                    <input type="checkbox" name="botCaps" value="player.control" style="width: 16px; height: 16px; accent-color: #0284c7; cursor: pointer;">
+                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: var(--text-main); user-select: none;">
+                    <input type="checkbox" name="botCaps" value="player.control" style="width: 16px; height: 16px; accent-color: var(--accent-primary); cursor: pointer;">
                     <span><strong>播放控制</strong></span>
                   </label>
-                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: #f1f5f9; user-select: none;">
-                    <input type="checkbox" name="botCaps" value="player.queue" style="width: 16px; height: 16px; accent-color: #0284c7; cursor: pointer;">
+                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: var(--text-main); user-select: none;">
+                    <input type="checkbox" name="botCaps" value="player.queue" style="width: 16px; height: 16px; accent-color: var(--accent-primary); cursor: pointer;">
                     <span><strong>队列管理</strong></span>
                   </label>
-                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: #38bdf8; user-select: none; background: rgba(56, 189, 248, 0.1); padding: 0.25rem 0.65rem; border-radius: 6px; border: 1px solid rgba(56, 189, 248, 0.3);">
-                    <input type="checkbox" name="botCaps" value="bot.manage" style="width: 16px; height: 16px; accent-color: #0284c7; cursor: pointer;">
-                    <span><strong>机器人管理</strong> <span style="font-size: 0.75rem; color: #7dd3fc;">(启停/配置/频道)</span></span>
+                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: var(--badge-info-text); user-select: none; background: var(--badge-info-bg); padding: 0.25rem 0.65rem; border-radius: 6px; border: 1px solid var(--badge-info-border);">
+                    <input type="checkbox" name="botCaps" value="bot.manage" style="width: 16px; height: 16px; accent-color: var(--accent-primary); cursor: pointer;">
+                    <span><strong>机器人管理</strong> <span style="font-size: 0.75rem; opacity: 0.85;">(启停/配置/频道)</span></span>
                   </label>
-                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: #f1f5f9; user-select: none;">
-                    <input type="checkbox" name="botCaps" value="bot.create" style="width: 16px; height: 16px; accent-color: #0284c7; cursor: pointer;">
+                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: var(--text-main); user-select: none;">
+                    <input type="checkbox" name="botCaps" value="bot.create" style="width: 16px; height: 16px; accent-color: var(--accent-primary); cursor: pointer;">
                     <span><strong>创建新实例</strong></span>
                   </label>
-                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: #f1f5f9; user-select: none;">
-                    <input type="checkbox" name="botCaps" value="platform.auth" style="width: 16px; height: 16px; accent-color: #0284c7; cursor: pointer;">
+                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: var(--text-main); user-select: none;">
+                    <input type="checkbox" name="botCaps" value="platform.auth" style="width: 16px; height: 16px; accent-color: var(--accent-primary); cursor: pointer;">
                     <span><strong>平台登录凭据</strong></span>
                   </label>
-                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: #f1f5f9; user-select: none;">
-                    <input type="checkbox" name="botCaps" value="quality" style="width: 16px; height: 16px; accent-color: #0284c7; cursor: pointer;">
+                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: var(--text-main); user-select: none;">
+                    <input type="checkbox" name="botCaps" value="quality" style="width: 16px; height: 16px; accent-color: var(--accent-primary); cursor: pointer;">
                     <span><strong>音质设置</strong></span>
                   </label>
                 </div>
               </div>
 
               <!-- 2. 机器人授权范围 (与音乐机器人后台一致) -->
-              <div style="background: rgba(15, 23, 42, 0.55); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1.25rem;">
-                <div style="font-size: 0.95rem; font-weight: 700; color: #f1f5f9; margin-bottom: 0.85rem; display: flex; align-items: center; gap: 0.45rem;">
-                  <i class="fa-solid fa-robot" style="color: #60a5fa;"></i> 机器人 (Bots Scope)
+              <div style="background: var(--bg-card); border: 1px solid var(--border-color); border-radius: 10px; padding: 1rem 1.25rem; margin-bottom: 1.25rem; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+                <div style="font-size: 0.95rem; font-weight: 700; color: var(--text-main); margin-bottom: 0.85rem; display: flex; align-items: center; gap: 0.45rem;">
+                  <i class="fa-solid fa-robot" style="color: var(--accent-primary);"></i> 机器人 (Bots Scope)
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 0.6rem;">
-                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: #f1f5f9; user-select: none;">
-                    <input type="checkbox" id="cfgPermBotsAllCheckbox" onchange="onBotsAllCheckboxChange(this)" style="width: 16px; height: 16px; accent-color: #0284c7; cursor: pointer;">
+                  <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; cursor: pointer; color: var(--text-main); user-select: none;">
+                    <input type="checkbox" id="cfgPermBotsAllCheckbox" onchange="onBotsAllCheckboxChange(this)" style="width: 16px; height: 16px; accent-color: var(--accent-primary); cursor: pointer;">
                     <span><strong>全部机器人</strong></span>
                   </label>
-                  <div id="cfgPermBotsScopeHint" style="font-size: 0.8rem; color: #94a3b8; line-height: 1.5; margin-left: 1.5rem;">
+                  <div id="cfgPermBotsScopeHint" style="font-size: 0.8rem; color: var(--text-muted); line-height: 1.5; margin-left: 1.5rem;">
                     💡 默认<strong>未勾选</strong>：新建用户<strong>仅限访问控制自己兑换开通的机器人实例</strong>（推荐/多用户安全隔离）。<br>
                     若勾选【全部机器人】，则新建用户可在点歌后台查看并控制平台上的所有机器人。
                   </div>
@@ -758,8 +758,8 @@
               <!-- 3. 用户角色与提示文案 -->
               <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; margin-bottom: 1.5rem;">
                 <div>
-                  <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
-                    <i class="fa-solid fa-id-badge" style="color: #a78bfa;"></i> 平台身份角色 (Role)
+                  <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600; color: var(--text-main);">
+                    <i class="fa-solid fa-id-badge" style="color: var(--badge-purple-text);"></i> 平台身份角色 (Role)
                   </label>
                   <select id="cfgPermRole" class="form-control" style="width: 100%; padding: 0.65rem 0.9rem;">
                     <option value="member">普通成员 (member - 默认/受上述“能力”限制)</option>
@@ -771,8 +771,8 @@
                 </div>
 
                 <div>
-                  <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
-                    <i class="fa-solid fa-comment-dots" style="color: #c084fc;"></i> 前台权限提示文案 (Permission Notice)
+                  <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600; color: var(--text-main);">
+                    <i class="fa-solid fa-comment-dots" style="color: var(--badge-purple-text);"></i> 前台权限提示文案 (Permission Notice)
                   </label>
                   <input type="text" id="cfgPermNotice" class="form-control" style="width: 100%; padding: 0.65rem 0.9rem;" placeholder="如：月卡用户仅有控制功能，年卡用户独享音乐后台">
                   <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.35rem;">
@@ -783,13 +783,13 @@
 
               <!-- 保存与快捷按钮 -->
               <div style="display: flex; gap: 0.75rem; align-items: center; flex-wrap: wrap;">
-                <button type="submit" id="saveBotPermBtn" class="btn-primary" style="background: linear-gradient(135deg, #0284c7, #38bdf8); padding: 0.65rem 1.5rem;">
+                <button type="submit" id="saveBotPermBtn" class="btn-primary" style="background: var(--accent-gradient); padding: 0.65rem 1.5rem;">
                   <i class="fa-solid fa-floppy-disk"></i> 保存权限配置
                 </button>
                 <button type="button" class="btn-action" onclick="resetBotPermFormDefault()">
                   <i class="fa-solid fa-rotate-left"></i> 恢复默认 (仅播放+队列)
                 </button>
-                <button type="button" class="btn-action" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4); background: rgba(56, 189, 248, 0.1);" onclick="quickGrantBotManage()">
+                <button type="button" class="btn-action" style="color: var(--badge-info-text); border-color: var(--badge-info-border); background: var(--badge-info-bg);" onclick="quickGrantBotManage()">
                   <i class="fa-solid fa-check-double"></i> 一键开启【机器人管理】
                 </button>
               </div>
@@ -1563,7 +1563,7 @@
             <td style="text-align: right;">
               <div style="display: inline-flex; gap: 0.35rem;">
                 <a href="${escapeHtml(data.bot_panel_url || 'http://103.71.69.156:23467/')}" target="_blank" rel="noopener noreferrer" class="btn-action btn-action-sm btn-purple" title="进入点歌后台"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
-                ${b.web_username ? `<button class="btn-action btn-action-sm" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" title="按后台最新配置同步下发用户管理权限" onclick="syncSingleBotUserPerm(${jsString(b.bot_id)}, ${jsString(b.web_username)})"><i class="fa-solid fa-user-gear"></i></button>` : ''}
+                ${b.web_username ? `<button class="btn-action btn-action-sm" style="color: var(--badge-info-text); border-color: var(--badge-info-border); background: var(--badge-info-bg);" title="按后台最新配置同步下发用户管理权限" onclick="syncSingleBotUserPerm(${jsString(b.bot_id)}, ${jsString(b.web_username)})"><i class="fa-solid fa-user-gear"></i></button>` : ''}
                 <button class="btn-action btn-action-sm btn-purple" title="续费 / 延期" onclick="openRenewBotModal(${jsString(b.bot_id)}, ${jsString(b.name)}, ${jsString(b.expire_at || '永久有效')})"><i class="fa-solid fa-clock-rotate-left"></i></button>
                 <button class="btn-action btn-action-sm" title="重启机器人" onclick="botAdminAction(${jsString(b.bot_id)}, 'restart')"><i class="fa-solid fa-rotate-right"></i></button>
                 <button class="btn-action btn-action-sm" title="停止机器人" onclick="botAdminAction(${jsString(b.bot_id)}, 'stop')"><i class="fa-solid fa-stop"></i></button>
@@ -2587,18 +2587,18 @@
 
         resultBox.style.display = 'block';
         if (data.success) {
-          resultBox.style.background = 'rgba(16, 185, 129, 0.15)';
-          resultBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
-          resultBox.style.color = '#34d399';
+          resultBox.style.background = 'var(--badge-success-bg)';
+          resultBox.style.border = '1px solid var(--badge-success-border)';
+          resultBox.style.color = 'var(--badge-success-text)';
           resultBox.replaceChildren(
             Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-check' }),
             document.createTextNode(' 测试成功：' + String(data.message || ''))
           );
           showToast('对接平台连接与鉴权测试通过！', 'success');
         } else {
-          resultBox.style.background = 'rgba(239, 68, 68, 0.15)';
-          resultBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
-          resultBox.style.color = '#f87171';
+          resultBox.style.background = 'var(--badge-danger-bg)';
+          resultBox.style.border = '1px solid var(--badge-danger-border)';
+          resultBox.style.color = 'var(--badge-danger-text)';
           resultBox.replaceChildren(
             Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark' }),
             document.createTextNode(' 测试失败：' + String(data.message || data.detail || '无法连接到该机器人平台'))
@@ -2607,9 +2607,9 @@
         }
       } catch (err) {
         resultBox.style.display = 'block';
-        resultBox.style.background = 'rgba(239, 68, 68, 0.15)';
-        resultBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
-        resultBox.style.color = '#f87171';
+        resultBox.style.background = 'var(--badge-danger-bg)';
+        resultBox.style.border = '1px solid var(--badge-danger-border)';
+        resultBox.style.color = 'var(--badge-danger-text)';
         resultBox.innerHTML = `<i class="fa-solid fa-circle-xmark" style="font-size: 1.1rem; margin-right: 6px;"></i> <strong>请求异常：</strong>网络请求失败，请检查服务器网络与后台日志`;
         showToast('测试请求异常', 'error');
       } finally {
@@ -2737,20 +2737,20 @@
 
         statusBox.style.display = 'block';
         if (data.connected) {
-          statusBox.style.background = 'rgba(16, 185, 129, 0.15)';
-          statusBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
-          statusBox.style.color = '#34d399';
+          statusBox.style.background = 'var(--badge-success-bg)';
+          statusBox.style.border = '1px solid var(--badge-success-border)';
+          statusBox.style.color = 'var(--badge-success-text)';
           statusBox.replaceChildren(
-            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-check' }),
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-check', style: 'margin-right: 6px;' }),
             document.createTextNode(' 同步成功：' + String(data.message || '已成功与外部机器人程序同步用户管理与权限'))
           );
           showToast('已从机器人后台成功同步权限！', 'success');
         } else {
-          statusBox.style.background = 'rgba(234, 179, 8, 0.15)';
-          statusBox.style.border = '1px solid rgba(234, 179, 8, 0.4)';
-          statusBox.style.color = '#facc15';
+          statusBox.style.background = 'var(--badge-warning-bg)';
+          statusBox.style.border = '1px solid var(--badge-warning-border)';
+          statusBox.style.color = 'var(--badge-warning-text)';
           statusBox.replaceChildren(
-            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-exclamation' }),
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-exclamation', style: 'margin-right: 6px;' }),
             document.createTextNode(' 提示：' + String(data.message || '未能连接到远程机器人平台，已启用预置标准权限库'))
           );
         }
@@ -2764,15 +2764,16 @@
               const btnEl = document.createElement('button');
               btnEl.type = 'button';
               btnEl.className = 'btn-action btn-action-sm';
-              btnEl.style.background = 'rgba(56, 189, 248, 0.12)';
-              btnEl.style.borderColor = 'rgba(56, 189, 248, 0.35)';
-              btnEl.style.color = '#e2e8f0';
+              btnEl.style.background = 'var(--badge-info-bg)';
+              btnEl.style.borderColor = 'var(--badge-info-border)';
+              btnEl.style.color = 'var(--text-main)';
               btnEl.style.fontSize = '0.8rem';
-              btnEl.style.padding = '0.3rem 0.65rem';
+              btnEl.style.padding = '0.35rem 0.7rem';
+              btnEl.style.borderRadius = '8px';
               btnEl.replaceChildren(
-                Object.assign(document.createElement('i'), { className: 'fa-solid fa-user-tag', style: 'color: #38bdf8; margin-right: 4px;' }),
+                Object.assign(document.createElement('i'), { className: 'fa-solid fa-user-tag', style: 'color: var(--accent-primary); margin-right: 5px;' }),
                 Object.assign(document.createElement('strong'), { textContent: String(u.username || '') }),
-                Object.assign(document.createElement('span'), { style: 'color: #facc15; font-size: 0.72rem; margin: 0 4px;', textContent: `[${String(u.role === 'admin' ? '管理员' : '成员')}]` }),
+                Object.assign(document.createElement('span'), { style: 'color: var(--badge-warning-text); font-size: 0.72rem; margin: 0 4px;', textContent: `[${String(u.role === 'admin' ? '管理员' : '成员')}]` }),
                 Object.assign(document.createElement('span'), { style: 'color: var(--text-muted); font-size: 0.72rem;', textContent: `(${capsCount}项能力)` })
               );
               btnEl.onclick = () => applyTemplateUser(u.role || 'member', u.capabilities || []);
@@ -2784,11 +2785,11 @@
         }
       } catch (err) {
         statusBox.style.display = 'block';
-        statusBox.style.background = 'rgba(239, 68, 68, 0.15)';
-        statusBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
-        statusBox.style.color = '#f87171';
+        statusBox.style.background = 'var(--badge-danger-bg)';
+        statusBox.style.border = '1px solid var(--badge-danger-border)';
+        statusBox.style.color = 'var(--badge-danger-text)';
         statusBox.replaceChildren(
-          Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark' }),
+          Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark', style: 'margin-right: 6px;' }),
           document.createTextNode(' 同步异常：' + String(err.message || ''))
         );
         showToast('同步权限失败: ' + err.message, 'error');
