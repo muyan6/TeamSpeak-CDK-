@@ -681,6 +681,38 @@ def unbind_cdk_bot(code: str, bot_id: str) -> bool:
         conn.commit()
         return cursor.rowcount == 1
 
+def restore_bot_cdk(cdk_code: str, bot_id: str, duration_months: int = 1, remark: str = "自愈/手动恢复已绑定CDK") -> Optional[Dict[str, Any]]:
+    """
+    当机器人实例存在但 cdks 表中记录被意外删除时，重新向 cdks 表补全记录
+    """
+    clean_code = cdk_code.strip().upper()
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO cdks 
+            (code, status, cdk_type, duration_months, is_trial, bot_id, remark, created_at, used_at)
+            VALUES (?, 'used', 'music_bot', ?, 0, ?, ?, ?, ?)
+        """, (clean_code, duration_months, bot_id, remark, now_str, now_str))
+        conn.commit()
+    return get_cdk(clean_code)
+
+def restore_instance_cdk(cdk_code: str, instance_id: int, duration_months: int = 0, remark: str = "自愈/手动恢复已绑定CDK") -> Optional[Dict[str, Any]]:
+    """
+    当 TeamSpeak 实例存在但 cdks 表中记录被意外删除时，重新向 cdks 表补全记录
+    """
+    clean_code = cdk_code.strip().upper()
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT OR REPLACE INTO cdks 
+            (code, status, cdk_type, duration_months, is_trial, instance_id, remark, created_at, used_at)
+            VALUES (?, 'used', 'teamspeak', ?, 0, ?, ?, ?, ?)
+        """, (clean_code, duration_months, instance_id, remark, now_str, now_str))
+        conn.commit()
+    return get_cdk(clean_code)
+
 # --- 实例管理 ---
 
 def get_next_instance_id() -> int:
@@ -761,6 +793,13 @@ def get_instance_by_id(instance_id: int) -> Optional[Dict[str, Any]]:
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("SELECT * FROM instances WHERE id = ?", (instance_id,))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+def get_instance_by_cdk(cdk_code: str) -> Optional[Dict[str, Any]]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM instances WHERE cdk_code = ?", (cdk_code.strip(),))
         row = cursor.fetchone()
         return dict(row) if row else None
 

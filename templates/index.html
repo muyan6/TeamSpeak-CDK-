@@ -252,7 +252,7 @@
             <p style="color: var(--text-muted); font-size: 0.85rem; margin-top: 0.25rem;" id="botDurationTip">卡密有效时长: 1 个月</p>
           </div>
           <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-            <a id="botConfigTutorialBtn" href="http://103.71.69.156:23452/" target="_blank" rel="noopener noreferrer" class="btn-action" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); text-decoration: none; font-size: 0.82rem; padding: 0.4rem 0.8rem; background: rgba(56, 189, 248, 0.08);">
+            <a id="botConfigTutorialBtn" href="{{ bot_tutorial_url or 'http://103.71.69.156:23452/' }}" target="_blank" rel="noopener noreferrer" class="btn-action" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.35); text-decoration: none; font-size: 0.82rem; padding: 0.4rem 0.8rem; background: rgba(56, 189, 248, 0.08);">
               <i class="fa-solid fa-book-open"></i> 机器人使用教程 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.72rem; margin-left: 2px;"></i>
             </a>
             <span class="badge badge-info">CDK 验证成功</span>
@@ -267,7 +267,7 @@
             </div>
             首次使用不知道如何配置？详细的机器人开通接入、TS 客户端权限与网页点歌说明<strong>请在该网址的使用教程里查看</strong>。
           </div>
-          <a id="botConfigTutorialBannerLink" href="http://103.71.69.156:23452/" target="_blank" rel="noopener noreferrer" class="btn-primary" style="background: linear-gradient(135deg, #0284c7, #38bdf8); text-decoration: none; font-size: 0.82rem; padding: 0.45rem 0.95rem; border-radius: 8px; white-space: nowrap;">
+          <a id="botConfigTutorialBannerLink" href="{{ bot_tutorial_url or 'http://103.71.69.156:23452/' }}" target="_blank" rel="noopener noreferrer" class="btn-primary" style="background: linear-gradient(135deg, #0284c7, #38bdf8); text-decoration: none; font-size: 0.82rem; padding: 0.45rem 0.95rem; border-radius: 8px; white-space: nowrap;">
             <i class="fa-solid fa-arrow-up-right-from-square"></i> 打开使用教程
           </a>
         </div>
@@ -445,10 +445,10 @@
 
         <!-- 机器人操作控制栏 -->
         <div class="action-btn-group" style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem;">
-          <a id="botWebPanelLink" href="http://103.71.69.156:23467/" target="_blank" class="btn-primary" style="background: var(--accent-pink-gradient); text-decoration: none;">
+          <a id="botWebPanelLink" href="{{ bot_panel_url or 'http://103.71.69.156:23467/' }}" target="_blank" class="btn-primary" style="background: var(--accent-pink-gradient); text-decoration: none;">
             <i class="fa-solid fa-music"></i> 进入网页点歌 / 播放控制台
           </a>
-          <a id="botResultTutorialLink" href="http://103.71.69.156:23452/" target="_blank" rel="noopener noreferrer" class="btn-action" style="text-decoration: none; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">
+          <a id="botResultTutorialLink" href="{{ bot_tutorial_url or 'http://103.71.69.156:23452/' }}" target="_blank" rel="noopener noreferrer" class="btn-action" style="text-decoration: none; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">
             <i class="fa-solid fa-book-open"></i> 机器人使用教程 <i class="fa-solid fa-arrow-up-right-from-square" style="font-size: 0.72rem; margin-left: 2px;"></i>
           </a>
           <button class="btn-action" onclick="botAction('restart')">
@@ -803,7 +803,7 @@
       }
     }
 
-    let botTutorialUrl = 'http://103.71.69.156:23452/';
+    let botTutorialUrl = "{{ bot_tutorial_url or 'http://103.71.69.156:23452/' }}";
     function updateBotTutorialLinks(url) {
       if (!url) return;
       botTutorialUrl = url;

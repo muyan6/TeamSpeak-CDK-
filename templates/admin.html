@@ -395,11 +395,11 @@
           <div>
             <h3 style="font-size: 1.15rem; font-weight: 700; color: #c084fc;"><i class="fa-solid fa-robot"></i> 音乐机器人实例列表</h3>
             <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem;">
-              控制中心: <a id="botPanelTopLink" href="http://103.71.69.156:23467/" target="_blank" style="color: #c084fc; text-decoration: none;">http://103.71.69.156:23467/</a>
+              控制中心: <a id="botPanelTopLink" href="{{ bot_panel_url or 'http://103.71.69.156:23467/' }}" target="_blank" style="color: #c084fc; text-decoration: none;">{{ bot_panel_url or 'http://103.71.69.156:23467/' }}</a>
             </p>
           </div>
           <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-            <a href="http://103.71.69.156:23467/" target="_blank" class="btn-action btn-purple">
+            <a id="botPanelTopBtn" href="{{ bot_panel_url or 'http://103.71.69.156:23467/' }}" target="_blank" class="btn-action btn-purple">
               <i class="fa-solid fa-arrow-up-right-from-square"></i> 打开点歌网页后台
             </a>
             <button class="btn-action" onclick="switchTab('bot_config')">
@@ -853,6 +853,57 @@
     </div>
   </div>
 
+  <!-- 音乐机器人续费 / 延期模态框 -->
+  <div id="renewBotModal" class="modal-overlay">
+    <div class="modal-content" style="max-width: 480px;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem;">
+        <h3 style="font-size: 1.15rem; color: #c084fc;"><i class="fa-solid fa-clock-rotate-left"></i> 音乐机器人延期续费</h3>
+        <button class="btn-action" onclick="closeRenewBotModal()"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div style="background: rgba(192, 132, 252, 0.08); padding: 0.85rem; border-radius: 8px; margin-bottom: 1.2rem; font-size: 0.85rem; color: #e2e8f0; border: 1px solid rgba(192, 132, 252, 0.2);">
+        <div>机器人名称: <strong id="renewBotModalName" style="color: #c084fc;">-</strong></div>
+        <div style="margin-top: 0.25rem;">当前到期时间: <span id="renewBotModalExpire" style="color: #facc15;">-</span></div>
+      </div>
+      <form onsubmit="submitRenewBot(event)">
+        <input type="hidden" id="renewBotModalBotId">
+        <div style="margin-bottom: 1.25rem;">
+          <label class="info-label" style="display: block; margin-bottom: 0.4rem;">续费方式</label>
+          <div style="display: flex; gap: 1.25rem; margin-bottom: 0.75rem;">
+            <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; color: #e2e8f0; font-size: 0.9rem;">
+              <input type="radio" name="renewMode" value="direct" checked onchange="toggleRenewMode(this.value)">
+              <span>直接指定时长延期</span>
+            </label>
+            <label style="display: flex; align-items: center; gap: 0.4rem; cursor: pointer; color: #e2e8f0; font-size: 0.9rem;">
+              <input type="radio" name="renewMode" value="cdk" onchange="toggleRenewMode(this.value)">
+              <span>输入新 CDK 续费</span>
+            </label>
+          </div>
+        </div>
+
+        <div id="renewDirectBox" style="margin-bottom: 1.25rem;">
+          <label class="info-label" style="display: block; margin-bottom: 0.35rem;">选择增加时长</label>
+          <select id="renewDirectMonths" class="form-control" style="width: 100%;">
+            <option value="1">增加 1 个月 (30天)</option>
+            <option value="3">增加 3 个月 (90天)</option>
+            <option value="6">增加 6 个月 (180天)</option>
+            <option value="12">增加 1 年 (360天)</option>
+            <option value="0">设为 永久有效 (Permanent)</option>
+          </select>
+        </div>
+
+        <div id="renewCdkBox" style="display: none; margin-bottom: 1.25rem;">
+          <label class="info-label" style="display: block; margin-bottom: 0.35rem;">输入新音乐机器人 CDK</label>
+          <input type="text" id="renewModalCdkInput" class="form-control" style="width: 100%; text-transform: uppercase;" placeholder="如 BOT-xxxx-xxxx-xxxx">
+        </div>
+
+        <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+          <button type="button" class="btn-action" onclick="closeRenewBotModal()">取消</button>
+          <button type="submit" id="renewBotSubmitBtn" class="btn-primary" style="background: var(--accent-purple-gradient);"><i class="fa-solid fa-check"></i> 确认续费</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
   <!-- 按条件批量清理 / 删除 CDK 模态框 -->
   <div id="batchDeleteCdkModal" class="modal-overlay">
     <div class="modal-content" style="max-width: 520px;">
@@ -1216,6 +1267,20 @@
       }
     }
 
+    function updateBotPanelUrls(url) {
+      if (!url) return;
+      const cleanUrl = url.trim().replace(/\/+$/, '') + '/';
+      const topLink = document.getElementById('botPanelTopLink');
+      const topBtn = document.getElementById('botPanelTopBtn');
+      if (topLink) {
+        topLink.href = cleanUrl;
+        topLink.innerText = cleanUrl;
+      }
+      if (topBtn) {
+        topBtn.href = cleanUrl;
+      }
+    }
+
     async function loadDashboard() {
       loadStats();
       loadInstances();
@@ -1234,8 +1299,7 @@
           document.getElementById('statCdkCounts').innerText = `${data.total_cdks} / ${data.unused_cdks}`;
           document.getElementById('statPortRange').innerText = data.voice_ports_summary || '暂无分配';
           if (data.bot_panel_url) {
-            document.getElementById('botPanelTopLink').href = data.bot_panel_url;
-            document.getElementById('botPanelTopLink').innerText = data.bot_panel_url;
+            updateBotPanelUrls(data.bot_panel_url);
           }
         }
       } catch (e) {}
@@ -1324,6 +1388,9 @@
           headers: { 'X-Admin-Password': adminToken }
         });
         const data = await res.json();
+        if (data.bot_panel_url) {
+          updateBotPanelUrls(data.bot_panel_url);
+        }
         if (!data.success || data.bots.length === 0) {
           tbody.innerHTML = '<tr><td colspan="9" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无音乐机器人实例</td></tr>';
           return;
@@ -1343,7 +1410,16 @@
             </td>
             <td><code style="color: #60a5fa; font-size: 0.85rem;">${escapeHtml(b.server_address)}:${escapeHtml(b.server_port)}</code></td>
             <td><span style="color: #e2e8f0; font-weight: 500;">${escapeHtml(b.nickname)}</span></td>
-            <td><code style="color: #38bdf8; font-size: 0.85rem;">${escapeHtml(b.cdk_code)}</code></td>
+            <td>
+              <code style="color: #38bdf8; font-size: 0.85rem;">${escapeHtml(b.cdk_code)}</code>
+              ${b.cdk_exists === false ? `
+                <div style="margin-top: 0.25rem;">
+                  <button class="btn-action btn-action-sm btn-danger" style="font-size: 0.68rem; padding: 0.15rem 0.45rem; background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5;" onclick="restoreBotCdk(${jsString(b.bot_id)}, ${jsString(b.cdk_code)})" title="该CDK在卡密库中已丢失，点击一键重新写入库">
+                    <i class="fa-solid fa-rotate-left"></i> 库中已删·一键恢复
+                  </button>
+                </div>
+              ` : ''}
+            </td>
             <td style="font-size: 0.85rem; color: #facc15;">${escapeHtml(b.expire_at || '永久有效')}</td>
             <td>
               <span class="badge ${b.is_expired ? 'badge-danger' : 'badge-success'}">
@@ -1358,6 +1434,7 @@
             <td style="text-align: right;">
               <div style="display: inline-flex; gap: 0.35rem;">
                 <a href="${escapeHtml(data.bot_panel_url || 'http://103.71.69.156:23467/')}" target="_blank" rel="noopener noreferrer" class="btn-action btn-action-sm btn-purple" title="进入点歌后台"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                <button class="btn-action btn-action-sm btn-purple" title="续费 / 延期" onclick="openRenewBotModal(${jsString(b.bot_id)}, ${jsString(b.name)}, ${jsString(b.expire_at || '永久有效')})"><i class="fa-solid fa-clock-rotate-left"></i></button>
                 <button class="btn-action btn-action-sm" title="重启机器人" onclick="botAdminAction(${jsString(b.bot_id)}, 'restart')"><i class="fa-solid fa-rotate-right"></i></button>
                 <button class="btn-action btn-action-sm" title="停止机器人" onclick="botAdminAction(${jsString(b.bot_id)}, 'stop')"><i class="fa-solid fa-stop"></i></button>
                 <button class="btn-action btn-action-sm" title="启动机器人" onclick="botAdminAction(${jsString(b.bot_id)}, 'start')"><i class="fa-solid fa-play"></i></button>
@@ -1388,6 +1465,98 @@
         loadStats();
       } catch (e) {
         showToast('操作失败', 'error');
+      }
+    }
+
+    function openRenewBotModal(botId, botName, expireAt) {
+      document.getElementById('renewBotModalBotId').value = botId;
+      document.getElementById('renewBotModalName').innerText = botName;
+      document.getElementById('renewBotModalExpire').innerText = expireAt;
+      document.querySelector('input[name="renewMode"][value="direct"]').checked = true;
+      toggleRenewMode('direct');
+      document.getElementById('renewDirectMonths').value = '1';
+      document.getElementById('renewModalCdkInput').value = '';
+      document.getElementById('renewBotModal').style.display = 'flex';
+    }
+
+    function closeRenewBotModal() {
+      document.getElementById('renewBotModal').style.display = 'none';
+    }
+
+    function toggleRenewMode(mode) {
+      document.getElementById('renewDirectBox').style.display = mode === 'direct' ? 'block' : 'none';
+      document.getElementById('renewCdkBox').style.display = mode === 'cdk' ? 'block' : 'none';
+    }
+
+    async function submitRenewBot(e) {
+      e.preventDefault();
+      const botId = document.getElementById('renewBotModalBotId').value;
+      const mode = document.querySelector('input[name="renewMode"]:checked')?.value || 'direct';
+      let payload = {};
+
+      if (mode === 'direct') {
+        payload.duration_months = parseInt(document.getElementById('renewDirectMonths').value, 10);
+      } else {
+        const cdk = document.getElementById('renewModalCdkInput').value.trim().toUpperCase();
+        if (!cdk) {
+          showToast('请输入要使用的续费 CDK', 'error');
+          return;
+        }
+        payload.cdk = cdk;
+      }
+
+      const submitBtn = document.getElementById('renewBotSubmitBtn');
+      submitBtn.disabled = true;
+      submitBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在续费...';
+
+      try {
+        const res = await fetch(`/api/admin/bots/${botId}/renew`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify(payload)
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || '🎉 续费成功！', 'success');
+          closeRenewBotModal();
+          loadBots();
+          loadStats();
+        } else {
+          showToast(data.message || data.detail || '续费失败', 'error');
+        }
+      } catch (err) {
+        showToast('请求异常，续费失败', 'error');
+      } finally {
+        submitBtn.disabled = false;
+        submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> 确认续费';
+      }
+    }
+
+    async function restoreBotCdk(botId, cdkCode) {
+      if (!confirm(`确认要将卡密【${cdkCode}】重新恢复补全至卡密数据库吗？\n\n恢复后前台用户即可重新使用此卡密查询与管理该机器人。`)) {
+        return;
+      }
+      try {
+        const res = await fetch(`/api/admin/bots/${botId}/restore-cdk`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          }
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || '🎉 卡密已成功恢复！', 'success');
+          loadBots();
+          loadStats();
+        } else {
+          showToast(data.message || data.detail || '恢复失败', 'error');
+        }
+      } catch (e) {
+        showToast('请求异常，恢复失败', 'error');
       }
     }
 
@@ -2099,7 +2268,15 @@
     }
 
     async function deleteCdk(code) {
-      if (!confirm(`确定要删除 CDK: ${code} 吗？`)) return;
+      const c = (window._allCdks || []).find(item => item.code === code);
+      if (c && c.status === 'used') {
+        const boundTarget = c.bot_id ? `音乐机器人 (${c.bot_id})` : (c.instance_id ? `TS实例 ts${c.instance_id}` : '运行中的实例');
+        if (!confirm(`⚠️ 风险提示：\n\nCDK: ${code} 当前已绑定在【${boundTarget}】！\n删除后前台普通用户将无法通过该卡密查询或延期此实例。\n\n确定仍要删除该 CDK 吗？`)) {
+          return;
+        }
+      } else {
+        if (!confirm(`确定要删除 CDK: ${code} 吗？`)) return;
+      }
       try {
         const res = await fetch(`/api/admin/cdks/${code}`, {
           method: 'DELETE',
@@ -2196,6 +2373,9 @@
           document.getElementById('cfgBotTutorialUrl').value = data.config.tutorial_url || 'http://103.71.69.156:23452/';
           document.getElementById('cfgBotUser').value = data.config.user || '';
           document.getElementById('cfgBotPass').value = data.config.password || '';
+          if (data.config.url) {
+            updateBotPanelUrls(data.config.url);
+          }
         }
       } catch (e) {
         showToast('读取机器人平台配置失败', 'error');
@@ -2230,6 +2410,7 @@
         const data = await res.json();
         if (data.success) {
           showToast('🎉 对接配置保存成功并已即时生效！', 'success');
+          updateBotPanelUrls(url);
           loadStats();
         } else {
           showToast(data.message || data.detail || '保存失败', 'error');

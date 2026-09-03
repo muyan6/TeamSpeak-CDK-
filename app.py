@@ -27,6 +27,7 @@ from database import (
     bind_cdk_instance,
     bind_cdk_bot,
     get_instance_by_id,
+    get_instance_by_cdk,
     get_all_instances,
     create_instance,
     update_instance_token,
@@ -41,6 +42,8 @@ from database import (
     get_bot_instance_by_id,
     get_bot_instance_by_cdk,
     get_all_bot_instances,
+    restore_bot_cdk,
+    restore_instance_cdk,
     update_bot_instance_status,
     delete_bot_instance,
     delete_bot_instances,
@@ -244,6 +247,10 @@ class BatchActionBotsRequest(BaseModel):
     bot_ids: List[str] = Field(min_length=1, max_length=200)
     action: Literal["start", "stop", "restart", "delete"]
 
+class AdminRenewBotRequest(BaseModel):
+    duration_months: Optional[int] = 1
+    cdk: Optional[str] = None
+
 class ChangePasswordRequest(BaseModel):
     old_password: str = Field(min_length=1, max_length=255)
     new_password: str = Field(min_length=6, max_length=255)
@@ -348,17 +355,28 @@ def claim_error_response(code: str, expected_type: str) -> JSONResponse:
 
 @app.get("/", response_class=HTMLResponse)
 def index_page(request: Request):
+    bot_cfg = get_bot_config()
+    ctx = {
+        "request": request,
+        "bot_panel_url": bot_cfg.get("bot_panel_url", ""),
+        "bot_tutorial_url": bot_cfg.get("bot_tutorial_url", "")
+    }
     try:
-        return templates.TemplateResponse(request=request, name="index.html")
+        return templates.TemplateResponse(request=request, name="index.html", context=ctx)
     except TypeError:
-        return templates.TemplateResponse("index.html", {"request": request})
+        return templates.TemplateResponse("index.html", ctx)
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_page(request: Request):
+    bot_cfg = get_bot_config()
+    ctx = {
+        "request": request,
+        "bot_panel_url": bot_cfg.get("bot_panel_url", "")
+    }
     try:
-        return templates.TemplateResponse(request=request, name="admin.html")
+        return templates.TemplateResponse(request=request, name="admin.html", context=ctx)
     except TypeError:
-        return templates.TemplateResponse("admin.html", {"request": request})
+        return templates.TemplateResponse("admin.html", ctx)
 
 # --- 用户端 API ---
 
@@ -568,6 +586,16 @@ def check_subdomain_endpoint(req: CheckSubdomainRequest):
 def redeem_cdk(req: RedeemRequest, request: Request):
     code = req.cdk.strip().upper()
     cdk_info = get_cdk(code)
+    if not cdk_info:
+        # 自愈与容错机制：检测是否为已激活实例但绑定的 CDK 记录在 cdks 表中被误删
+        existing_bot = get_bot_instance_by_cdk(code)
+        if existing_bot:
+            cdk_info = restore_bot_cdk(code, existing_bot["bot_id"], existing_bot.get("duration_months", 1))
+        else:
+            existing_inst = get_instance_by_cdk(code)
+            if existing_inst:
+                cdk_info = restore_instance_cdk(code, existing_inst["id"], existing_inst.get("duration_months", 0))
+
     if not cdk_info:
         return JSONResponse(status_code=400, content={"success": False, "message": "CDK 无效或不存在，请检查后重试"})
 
@@ -1271,12 +1299,14 @@ def list_admin_bots(_: bool = Depends(verify_admin)):
         for b in remote_bots["bots"]:
             remote_map[b["id"]] = b
 
+    all_cdk_codes = {c["code"] for c in get_all_cdks()}
     now_dt = datetime.now()
     for bot in bots:
         r_info = remote_map.get(bot["bot_id"])
         bot["remote_info"] = r_info
         bot["connected"] = r_info.get("connected", False) if r_info else False
         bot["playing"] = r_info.get("playing", False) if r_info else False
+        bot["cdk_exists"] = (bot.get("cdk_code") in all_cdk_codes) if bot.get("cdk_code") else False
         
         # 计算剩余有效天数
         if bot["expire_at"] and bot["expire_at"] != "permanent":
@@ -1331,6 +1361,64 @@ def manage_admin_bot(bot_id: str, req: BotActionRequest, _: bool = Depends(verif
 
     else:
         raise HTTPException(status_code=400, detail="不支持的操作指令")
+
+@app.post("/api/admin/bots/{bot_id}/renew")
+def admin_renew_bot_api(bot_id: str, req: AdminRenewBotRequest, _: bool = Depends(verify_admin)):
+    bot = get_bot_instance_by_id(bot_id)
+    if not bot:
+        return JSONResponse(status_code=404, content={"success": False, "message": "未找到要续费的机器人实例"})
+
+    if req.cdk and req.cdk.strip():
+        code = req.cdk.strip().upper()
+        cdk_info = get_cdk(code)
+        if not cdk_info:
+            return JSONResponse(status_code=400, content={"success": False, "message": "CDK 无效或不存在"})
+        if cdk_info["status"] != "unused":
+            return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 已经使用或不可用"})
+        if cdk_info.get("cdk_type") != "music_bot":
+            return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 不是音乐机器人兑换码"})
+        claimed = claim_cdk(code, "music_bot")
+        if not claimed:
+            return claim_error_response(code, "music_bot")
+        add_m = 1 if claimed.get("is_trial", 0) else claimed.get("duration_months", 1)
+        renewed_bot = renew_bot_instance(bot_id, add_m)
+        if not renewed_bot:
+            release_cdk_claim(code)
+            return JSONResponse(status_code=500, content={"success": False, "message": "续费失败"})
+        bind_cdk_bot(code, bot_id)
+    else:
+        add_m = req.duration_months if req.duration_months is not None else 1
+        renewed_bot = renew_bot_instance(bot_id, add_m)
+        if not renewed_bot:
+            return JSONResponse(status_code=500, content={"success": False, "message": "续费失败"})
+
+    start_ok, _ = music_bot_client.start_bot(bot_id)
+    if start_ok:
+        update_bot_instance_status(bot_id, "active")
+        renewed_bot["status"] = "active"
+
+    duration_desc = "永久" if renewed_bot["expire_at"] == "permanent" else f"顺延至: {renewed_bot['expire_at']}"
+    return {
+        "success": True,
+        "message": f"🎉 机器人续费成功！有效期已{duration_desc}",
+        "bot": renewed_bot
+    }
+
+@app.post("/api/admin/bots/{bot_id}/restore-cdk")
+def admin_restore_bot_cdk_api(bot_id: str, _: bool = Depends(verify_admin)):
+    bot = get_bot_instance_by_id(bot_id)
+    if not bot:
+        return JSONResponse(status_code=404, content={"success": False, "message": "机器人实例不存在"})
+    cdk_code = (bot.get("cdk_code") or "").strip()
+    if not cdk_code:
+        return JSONResponse(status_code=400, content={"success": False, "message": "该机器人无绑定的 CDK 编码"})
+    
+    cdk_info = restore_bot_cdk(cdk_code, bot_id, bot.get("duration_months", 1), remark="管理员后台一键补全恢复")
+    return {
+        "success": True,
+        "message": f"🎉 CDK【{cdk_code}】记录已成功恢复至卡密数据库！",
+        "cdk": cdk_info
+    }
 
 @app.post("/api/admin/instances/{instance_id}/action")
 def manage_instance(instance_id: int, req: InstanceActionRequest, _: bool = Depends(verify_admin)):

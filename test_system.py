@@ -1,6 +1,7 @@
 import os
 import shutil
 import unittest
+from unittest.mock import MagicMock, patch
 from pathlib import Path
 
 # 设置测试环境变量
@@ -936,6 +937,89 @@ class TestTeamSpeakManager(unittest.TestCase):
             self.assertTrue(q_data["success"])
             self.assertEqual(q_data["instance"]["web_username"], "vip_music_user")
             self.assertEqual(q_data["permission_notice"], "月卡用户仅有控制功能，年卡用户独享音乐后台")
+
+    def test_bot_cdk_self_healing_and_admin_management(self):
+        # 1. 基础数据库级自愈与延期测试
+        bot_cdks = database.create_cdks(count=1, remark="自愈测试卡", cdk_type="music_bot", duration_months=1)
+        cdk = bot_cdks[0]
+        bot_id = "uuid-healing-test-999"
+
+        bot = database.create_bot_instance(
+            bot_id=bot_id,
+            name="自愈测试机器人",
+            server_address="stormclub.ts3.uno",
+            server_port=60001,
+            nickname="HealingBot",
+            cdk_code=cdk,
+            duration_months=1,
+            expire_at="2026-09-21 19:10:20",
+            default_channel="默认大厅"
+        )
+        self.assertIsNotNone(bot)
+        database.bind_cdk_bot(cdk, bot_id)
+
+        # 模拟误删
+        del_ok = database.delete_cdk(cdk)
+        self.assertTrue(del_ok)
+        self.assertIsNone(database.get_cdk(cdk))
+
+        # 验证能通过 bot_instances 查找到绑定的机器人
+        found_bot = database.get_bot_instance_by_cdk(cdk)
+        self.assertIsNotNone(found_bot)
+        self.assertEqual(found_bot["bot_id"], bot_id)
+
+        # 验证手动/自愈补全函数 restore_bot_cdk
+        restored = database.restore_bot_cdk(cdk, bot_id, 1)
+        self.assertIsNotNone(restored)
+        self.assertEqual(restored["status"], "used")
+        self.assertEqual(restored["bot_id"], bot_id)
+
+        # 验证机器人延期函数 renew_bot_instance
+        renewed = database.renew_bot_instance(bot_id, 2)
+        self.assertIsNotNone(renewed)
+        self.assertGreater(renewed["expire_at"], "2026-09-21 19:10:20")
+
+        # 2. 如果存在 FastAPI 环境，进一步测试 HTTP API 层的自愈和管理员接口
+        try:
+            import app as ts_app
+        except Exception:
+            database.delete_bot_instance(bot_id)
+            database.delete_cdk(cdk)
+            return
+
+        # 模拟再次删除 CDK 并调用 /api/redeem 触发自动自愈
+        database.delete_cdk(cdk)
+        self.assertIsNone(database.get_cdk(cdk))
+
+        mock_request = MagicMock()
+        mock_request.client.host = "127.0.0.1"
+        mock_request.headers = {}
+
+        with patch.object(ts_app.music_bot_client, "get_bot", return_value=(True, {"status": "running"})):
+            query_req = ts_app.RedeemRequest(cdk=cdk)
+            res = ts_app.redeem_cdk(query_req, mock_request)
+            self.assertIsInstance(res, dict)
+            self.assertTrue(res["success"])
+            self.assertEqual(res["instance"]["bot_id"], bot_id)
+
+        self.assertIsNotNone(database.get_cdk(cdk))
+
+        # 测试管理员续费接口
+        with patch.object(ts_app.music_bot_client, "start_bot", return_value=(True, "ok")):
+            renew_req = ts_app.AdminRenewBotRequest(duration_months=2)
+            renew_res = ts_app.admin_renew_bot_api(bot_id, renew_req, _=True)
+            self.assertTrue(renew_res["success"])
+
+        # 测试管理员一键恢复 CDK 接口
+        database.delete_cdk(cdk)
+        self.assertIsNone(database.get_cdk(cdk))
+        restore_res = ts_app.admin_restore_bot_cdk_api(bot_id, _=True)
+        self.assertTrue(restore_res["success"])
+        self.assertIsNotNone(database.get_cdk(cdk))
+
+        # 清理
+        database.delete_bot_instance(bot_id)
+        database.delete_cdk(cdk)
 
 if __name__ == "__main__":
     unittest.main()
