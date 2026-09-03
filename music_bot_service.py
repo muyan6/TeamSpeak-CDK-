@@ -356,6 +356,71 @@ class MusicBotClient:
         }
         return self._request("PUT", f"/api/users/{user_id}/permissions", payload)
 
+    def get_user_permissions(self, user_id: str) -> Tuple[bool, Any]:
+        """
+        获取指定用户的权限能力与机器人授权列表
+        """
+        return self._request("GET", f"/api/users/{user_id}/permissions")
+
+    def sync_bot_permissions(self) -> Tuple[bool, Dict[str, Any]]:
+        """
+        从音乐机器人后台拉取现有用户列表与权限配置，萃取平台支持的权限能力与模板用户
+        """
+        # 预定义标准权限能力字典（包含中文说明与分组）
+        standard_capabilities = [
+            {"key": "bot.control", "name": "机器人启停控制", "group": "bot", "desc": "允许启动、停止和重启音乐机器人实例"},
+            {"key": "bot.edit", "name": "机器人参数管理", "group": "bot", "desc": "允许修改机器人昵称、绑定频道与配置参数"},
+            {"key": "bot.view", "name": "机器人状态查看", "group": "bot", "desc": "允许查看机器人运行状态与实时日志"},
+            {"key": "bot.manage", "name": "机器人完全管理", "group": "bot", "desc": "具备机器人实例全功能运维操作权限"},
+            {"key": "player.control", "name": "播放与切歌控制", "group": "player", "desc": "允许暂停、继续、切换上一首/下一首及调节音量"},
+            {"key": "player.queue", "name": "点歌队列管理", "group": "player", "desc": "允许提交点歌链接、清空播放队列与调整顺序"},
+            {"key": "admin", "name": "全功能超级管理员", "group": "admin", "desc": "机器人平台最高管理员特权"}
+        ]
+
+        ok_users, users_res = self.get_users()
+        extracted_users = []
+        discovered_caps = set(c["key"] for c in standard_capabilities)
+
+        if ok_users and isinstance(users_res, dict) and "users" in users_res:
+            raw_users = users_res["users"]
+        elif ok_users and isinstance(users_res, list):
+            raw_users = users_res
+        else:
+            raw_users = []
+
+        for u in raw_users:
+            if not isinstance(u, dict):
+                continue
+            u_id = str(u.get("id") or u.get("userId") or "")
+            u_name = u.get("username") or u.get("name") or "未知用户"
+            u_role = u.get("role") or "member"
+            caps = u.get("capabilities") or []
+            if not caps and u_id:
+                # 尝试查询单个用户的权限详情
+                ok_p, p_res = self.get_user_permissions(u_id)
+                if ok_p and isinstance(p_res, dict):
+                    caps = p_res.get("capabilities", [])
+            
+            if isinstance(caps, list):
+                for c in caps:
+                    if isinstance(c, str) and c.strip():
+                        discovered_caps.add(c.strip())
+
+            extracted_users.append({
+                "id": u_id,
+                "username": u_name,
+                "role": u_role,
+                "capabilities": caps if isinstance(caps, list) else []
+            })
+
+        return True, {
+            "connected": ok_users,
+            "message": f"成功同步机器人平台！发现 {len(extracted_users)} 个平台用户" if ok_users else f"未能连接机器人平台 ({users_res})，已载入标准权限库",
+            "users": extracted_users,
+            "standard_capabilities": standard_capabilities,
+            "discovered_capabilities": sorted(list(discovered_caps))
+        }
+
     def delete_user(self, user_id: str) -> Tuple[bool, Any]:
         """
         删除音乐机器人后台的指定用户

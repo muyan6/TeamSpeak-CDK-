@@ -1,3 +1,4 @@
+import json
 import sqlite3
 import secrets
 import string
@@ -217,6 +218,53 @@ def set_bot_config(url: str, user: str, password: str, tutorial_url: Optional[st
         "bot_panel_user": cleaned_user,
         "bot_panel_pass": cleaned_pass,
         "bot_tutorial_url": cleaned_tut
+    }
+
+# --- 音乐机器人用户权限与能力配置 ---
+
+def get_bot_permission_config() -> Dict[str, Any]:
+    role = get_setting("bot_user_default_role", "member") or "member"
+    caps_raw = get_setting("bot_user_default_capabilities")
+    if caps_raw is not None:
+        try:
+            capabilities = json.loads(caps_raw)
+            if not isinstance(capabilities, list):
+                capabilities = ["player.control", "player.queue"]
+        except Exception:
+            capabilities = [c.strip() for c in caps_raw.split(",") if c.strip()]
+    else:
+        capabilities = ["player.control", "player.queue"]
+    
+    bot_scope = get_setting("bot_user_bot_scope", "current") or "current"
+    notice = get_setting("bot_user_permission_notice", "月卡用户仅有控制功能，年卡用户独享音乐后台")
+    return {
+        "role": role,
+        "capabilities": capabilities,
+        "bot_scope": bot_scope,
+        "permission_notice": notice
+    }
+
+def set_bot_permission_config(
+    role: str,
+    capabilities: List[str],
+    bot_scope: str = "current",
+    permission_notice: Optional[str] = None
+) -> Dict[str, Any]:
+    cleaned_role = role.strip() if role else "member"
+    cleaned_caps = [c.strip() for c in capabilities if isinstance(c, str) and c.strip()]
+    cleaned_scope = "all" if bot_scope == "all" else "current"
+    cleaned_notice = (permission_notice.strip() if permission_notice else "月卡用户仅有控制功能，年卡用户独享音乐后台")
+
+    set_setting("bot_user_default_role", cleaned_role)
+    set_setting("bot_user_default_capabilities", json.dumps(cleaned_caps, ensure_ascii=False))
+    set_setting("bot_user_bot_scope", cleaned_scope)
+    set_setting("bot_user_permission_notice", cleaned_notice)
+
+    return {
+        "role": cleaned_role,
+        "capabilities": cleaned_caps,
+        "bot_scope": cleaned_scope,
+        "permission_notice": cleaned_notice
     }
 
 # --- DNS 自动化绑定配置 ---

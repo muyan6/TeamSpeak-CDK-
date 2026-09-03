@@ -666,6 +666,154 @@
 
           <!-- 测试结果与当前连通状态反馈 -->
           <div id="testResultBox" style="display: none; padding: 1rem 1.25rem; border-radius: 10px; font-size: 0.88rem; margin-top: 1rem;"></div>
+
+          <!-- 分割线 -->
+          <div style="border-top: 1px dashed rgba(255, 255, 255, 0.12); margin: 2.2rem 0 1.5rem 0;"></div>
+
+          <!-- 机器人新建用户权限与后台同步配置 -->
+          <div>
+            <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 0.75rem; margin-bottom: 1.25rem;">
+              <div>
+                <h4 style="font-size: 1.1rem; font-weight: 700; color: #38bdf8; display: flex; align-items: center; gap: 0.5rem; margin: 0;">
+                  <i class="fa-solid fa-user-shield"></i> 机器人新建用户权限配置与后台同步
+                </h4>
+                <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem; line-height: 1.5;">
+                  配置前台用户通过 CDK 兑换创建机器人并开通 Web 点歌账号时的默认角色与权限能力（支持直接从机器人程序后台同步现有权限与模板用户）
+                </p>
+              </div>
+              <button type="button" id="syncBotPermBtn" class="btn-action" style="background: rgba(56, 189, 248, 0.15); border-color: rgba(56, 189, 248, 0.4); color: #38bdf8;" onclick="handleSyncBotPermissions()">
+                <span class="spinner" id="syncBotPermSpinner" style="display: none; width: 14px; height: 14px; vertical-align: middle; margin-right: 4px;"></span>
+                <i class="fa-solid fa-arrows-rotate" id="syncBotPermIcon"></i> 从机器人后台同步用户权限
+              </button>
+            </div>
+
+            <!-- 同步反馈状态栏 -->
+            <div id="syncPermStatusBox" style="display: none; padding: 0.85rem 1rem; border-radius: 8px; font-size: 0.84rem; margin-bottom: 1.25rem;"></div>
+
+            <!-- 机器人后台现有用户模板选择 (同步后出现) -->
+            <div id="remoteUserTemplateBox" style="display: none; background: rgba(30, 41, 59, 0.6); border: 1px solid rgba(148, 163, 184, 0.2); border-radius: 10px; padding: 1rem; margin-bottom: 1.25rem;">
+              <div style="font-size: 0.85rem; font-weight: 600; color: #cbd5e1; margin-bottom: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                <i class="fa-solid fa-users" style="color: #60a5fa;"></i> 机器人后台现有用户模板（点击可直接套用其权限配置）:
+              </div>
+              <div id="remoteUsersList" style="display: flex; flex-wrap: wrap; gap: 0.5rem;"></div>
+            </div>
+
+            <form id="botPermissionForm" onsubmit="handleSaveBotPermissions(event)">
+              <!-- 基础配置：默认角色与授权范围 -->
+              <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 1.25rem; margin-bottom: 1.25rem;">
+                <div>
+                  <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
+                    <i class="fa-solid fa-id-badge" style="color: #a78bfa;"></i> 新建用户默认角色 (Role)
+                  </label>
+                  <select id="cfgPermRole" class="form-control" style="width: 100%; padding: 0.65rem 0.9rem;">
+                    <option value="member">普通成员 (member)</option>
+                    <option value="admin">平台管理员 (admin)</option>
+                  </select>
+                  <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.35rem;">
+                    创建账号时写入机器人后台的用户身份角色
+                  </div>
+                </div>
+
+                <div>
+                  <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
+                    <i class="fa-solid fa-arrows-split-up-and-left" style="color: #34d399;"></i> 机器人授权访问范围 (Bots Scope)
+                  </label>
+                  <select id="cfgPermBotScope" class="form-control" style="width: 100%; padding: 0.65rem 0.9rem;">
+                    <option value="current">仅限绑定的当前机器人实例 (推荐/安全隔离)</option>
+                    <option value="all">可访问平台全部机器人 (all)</option>
+                  </select>
+                  <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.35rem;">
+                    控制新建点歌用户可以操作哪些机器人实例
+                  </div>
+                </div>
+              </div>
+
+              <!-- 权限能力 (Capabilities) 多选矩阵 -->
+              <div style="margin-bottom: 1.25rem;">
+                <label class="info-label" style="display: block; margin-bottom: 0.5rem; font-weight: 600;">
+                  <i class="fa-solid fa-key" style="color: #facc15;"></i> 授予的权限能力集合 (Capabilities)
+                  <span style="font-size: 0.78rem; font-weight: normal; color: var(--text-muted); margin-left: 0.5rem;">
+                    （勾选后创建机器人时自动同步赋予，无需更改任何代码）
+                  </span>
+                </label>
+
+                <!-- 机器人管理权限分组 -->
+                <div style="background: rgba(15, 23, 42, 0.45); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1rem; margin-bottom: 0.75rem;">
+                  <div style="font-size: 0.82rem; font-weight: 700; color: #38bdf8; margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.4rem;">
+                    <i class="fa-solid fa-robot"></i> 🤖 机器人管理权限 (Bot Management)
+                  </div>
+                  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.6rem;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; color: #f1f5f9;">
+                      <input type="checkbox" name="botCaps" value="bot.control">
+                      <span><strong>bot.control</strong> <span style="color: var(--text-muted); font-size: 0.78rem;">(启停/重启控制)</span></span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; color: #f1f5f9;">
+                      <input type="checkbox" name="botCaps" value="bot.edit">
+                      <span><strong>bot.edit</strong> <span style="color: var(--text-muted); font-size: 0.78rem;">(修改昵称/频道参数)</span></span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; color: #f1f5f9;">
+                      <input type="checkbox" name="botCaps" value="bot.view">
+                      <span><strong>bot.view</strong> <span style="color: var(--text-muted); font-size: 0.78rem;">(查看实例状态/日志)</span></span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; color: #f1f5f9;">
+                      <input type="checkbox" name="botCaps" value="bot.manage">
+                      <span><strong>bot.manage</strong> <span style="color: var(--text-muted); font-size: 0.78rem;">(全功能管理操作)</span></span>
+                    </label>
+                  </div>
+                </div>
+
+                <!-- 音乐播放与点歌分组 -->
+                <div style="background: rgba(15, 23, 42, 0.45); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px; padding: 1rem; margin-bottom: 0.75rem;">
+                  <div style="font-size: 0.82rem; font-weight: 700; color: #ec4899; margin-bottom: 0.6rem; display: flex; align-items: center; gap: 0.4rem;">
+                    <i class="fa-solid fa-music"></i> 🎵 音乐播放与点歌控制 (Player & Queue)
+                  </div>
+                  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 0.6rem;">
+                    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; color: #f1f5f9;">
+                      <input type="checkbox" name="botCaps" value="player.control">
+                      <span><strong>player.control</strong> <span style="color: var(--text-muted); font-size: 0.78rem;">(播放/暂停/切歌/音量)</span></span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; color: #f1f5f9;">
+                      <input type="checkbox" name="botCaps" value="player.queue">
+                      <span><strong>player.queue</strong> <span style="color: var(--text-muted); font-size: 0.78rem;">(提交点歌/管理队列)</span></span>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 0.5rem; font-size: 0.85rem; cursor: pointer; color: #f1f5f9;">
+                      <input type="checkbox" name="botCaps" value="admin">
+                      <span><strong>admin</strong> <span style="color: #fbbf24; font-size: 0.78rem;">(完全特权管理员)</span></span>
+                    </label>
+                  </div>
+                </div>
+
+                <!-- 自定义/后台发现的其他能力 -->
+                <div>
+                  <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-size: 0.82rem;">
+                    <i class="fa-solid fa-tags" style="color: #60a5fa;"></i> 额外/自定义能力标识 (逗号分隔)
+                  </label>
+                  <input type="text" id="cfgPermCustomCaps" class="form-control" style="width: 100%; padding: 0.55rem 0.8rem; font-size: 0.85rem;" placeholder="例如: bot.delete, custom.feature（可自由输入其他权限标识）">
+                </div>
+              </div>
+
+              <!-- 权限说明文案 (用于前台兑换展示) -->
+              <div style="margin-bottom: 1.5rem;">
+                <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
+                  <i class="fa-solid fa-comment-dots" style="color: #c084fc;"></i> 前台权限提示文案 (Permission Notice)
+                </label>
+                <input type="text" id="cfgPermNotice" class="form-control" style="width: 100%; padding: 0.65rem 0.9rem;" placeholder="如：月卡用户仅有控制功能，年卡用户独享音乐后台">
+                <div style="font-size: 0.78rem; color: var(--text-muted); margin-top: 0.35rem;">
+                  前台用户兑换成功及卡密查询卡片上显示的权限级别提示语
+                </div>
+              </div>
+
+              <!-- 保存按钮 -->
+              <div style="display: flex; gap: 0.75rem; align-items: center;">
+                <button type="submit" id="saveBotPermBtn" class="btn-primary" style="background: linear-gradient(135deg, #0284c7, #38bdf8); padding: 0.65rem 1.5rem;">
+                  <i class="fa-solid fa-floppy-disk"></i> 保存权限配置
+                </button>
+                <button type="button" class="btn-action" onclick="resetBotPermFormDefault()">
+                  <i class="fa-solid fa-rotate-left"></i> 恢复默认推荐
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       </div>
 
@@ -1434,6 +1582,7 @@
             <td style="text-align: right;">
               <div style="display: inline-flex; gap: 0.35rem;">
                 <a href="${escapeHtml(data.bot_panel_url || 'http://103.71.69.156:23467/')}" target="_blank" rel="noopener noreferrer" class="btn-action btn-action-sm btn-purple" title="进入点歌后台"><i class="fa-solid fa-arrow-up-right-from-square"></i></a>
+                ${b.web_username ? `<button class="btn-action btn-action-sm" style="color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);" title="按后台最新配置同步下发用户管理权限" onclick="syncSingleBotUserPerm(${jsString(b.bot_id)}, ${jsString(b.web_username)})"><i class="fa-solid fa-user-gear"></i></button>` : ''}
                 <button class="btn-action btn-action-sm btn-purple" title="续费 / 延期" onclick="openRenewBotModal(${jsString(b.bot_id)}, ${jsString(b.name)}, ${jsString(b.expire_at || '永久有效')})"><i class="fa-solid fa-clock-rotate-left"></i></button>
                 <button class="btn-action btn-action-sm" title="重启机器人" onclick="botAdminAction(${jsString(b.bot_id)}, 'restart')"><i class="fa-solid fa-rotate-right"></i></button>
                 <button class="btn-action btn-action-sm" title="停止机器人" onclick="botAdminAction(${jsString(b.bot_id)}, 'stop')"><i class="fa-solid fa-stop"></i></button>
@@ -2363,6 +2512,7 @@
     async function loadBotConfig() {
       const resultBox = document.getElementById('testResultBox');
       resultBox.style.display = 'none';
+      loadBotPermissions();
       try {
         const res = await fetch('/api/admin/bot-config', {
           headers: { 'X-Admin-Password': adminToken }
@@ -2485,6 +2635,256 @@
         testBtn.disabled = false;
         spinner.style.display = 'none';
         icon.style.display = 'inline-block';
+      }
+    }
+
+    // --- 音乐机器人新建用户权限与后台同步 ---
+
+    async function loadBotPermissions() {
+      try {
+        const res = await fetch('/api/admin/bot-permissions', {
+          headers: { 'X-Admin-Password': adminToken }
+        });
+        const data = await res.json();
+        if (data.success && data.config) {
+          renderBotPermissionConfig(data.config);
+        }
+      } catch (e) {
+        console.error('读取机器人用户权限配置异常:', e);
+      }
+    }
+
+    function renderBotPermissionConfig(cfg) {
+      if (!cfg) return;
+      const roleSelect = document.getElementById('cfgPermRole');
+      const scopeSelect = document.getElementById('cfgPermBotScope');
+      const noticeInput = document.getElementById('cfgPermNotice');
+      if (roleSelect) roleSelect.value = cfg.role || 'member';
+      if (scopeSelect) scopeSelect.value = cfg.bot_scope || 'current';
+      if (noticeInput) noticeInput.value = cfg.permission_notice || '月卡用户仅有控制功能，年卡用户独享音乐后台';
+
+      const configuredCaps = new Set(cfg.capabilities || []);
+      const checkboxes = document.querySelectorAll('input[name="botCaps"]');
+      const standardKeys = new Set();
+
+      checkboxes.forEach(cb => {
+        standardKeys.add(cb.value);
+        cb.checked = configuredCaps.has(cb.value);
+      });
+
+      // 提取非标准复选框的自定义权限能力
+      const customCaps = [];
+      configuredCaps.forEach(c => {
+        if (!standardKeys.has(c)) {
+          customCaps.push(c);
+        }
+      });
+      const customInput = document.getElementById('cfgPermCustomCaps');
+      if (customInput) customInput.value = customCaps.join(', ');
+    }
+
+    async function handleSaveBotPermissions(e) {
+      e.preventDefault();
+      const role = document.getElementById('cfgPermRole').value;
+      const bot_scope = document.getElementById('cfgPermBotScope').value;
+      const permission_notice = document.getElementById('cfgPermNotice').value.trim();
+
+      const capabilities = [];
+      document.querySelectorAll('input[name="botCaps"]:checked').forEach(cb => {
+        capabilities.push(cb.value);
+      });
+
+      const customInput = document.getElementById('cfgPermCustomCaps').value.trim();
+      if (customInput) {
+        customInput.split(/[,，\s]+/).forEach(item => {
+          const trimmed = item.trim();
+          if (trimmed && !capabilities.includes(trimmed)) {
+            capabilities.push(trimmed);
+          }
+        });
+      }
+
+      const saveBtn = document.getElementById('saveBotPermBtn');
+      saveBtn.disabled = true;
+      saveBtn.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在保存...';
+
+      try {
+        const res = await fetch('/api/admin/bot-permissions', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify({
+            role,
+            capabilities,
+            bot_scope,
+            permission_notice
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('🎉 机器人用户权限配置保存成功并已即时生效！', 'success');
+        } else {
+          showToast(data.message || '保存失败', 'error');
+        }
+      } catch (err) {
+        showToast('保存异常: ' + err.message, 'error');
+      } finally {
+        saveBtn.disabled = false;
+        saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> 保存权限配置';
+      }
+    }
+
+    async function handleSyncBotPermissions() {
+      const btn = document.getElementById('syncBotPermBtn');
+      const spinner = document.getElementById('syncBotPermSpinner');
+      const icon = document.getElementById('syncBotPermIcon');
+      const statusBox = document.getElementById('syncPermStatusBox');
+      const templateBox = document.getElementById('remoteUserTemplateBox');
+      const templateList = document.getElementById('remoteUsersList');
+
+      btn.disabled = true;
+      spinner.style.display = 'inline-block';
+      icon.style.display = 'none';
+
+      try {
+        const res = await fetch('/api/admin/bot-permissions/sync', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          }
+        });
+        const respData = await res.json();
+        const data = respData.data || {};
+
+        statusBox.style.display = 'block';
+        if (data.connected) {
+          statusBox.style.background = 'rgba(16, 185, 129, 0.15)';
+          statusBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
+          statusBox.style.color = '#34d399';
+          statusBox.replaceChildren(
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-check' }),
+            document.createTextNode(' 同步成功：' + String(data.message || '已成功与外部机器人程序同步用户管理与权限') + `，发现 ${(data.discovered_capabilities || []).length} 项能力标识`)
+          );
+          showToast('已从机器人后台成功同步权限！', 'success');
+        } else {
+          statusBox.style.background = 'rgba(234, 179, 8, 0.15)';
+          statusBox.style.border = '1px solid rgba(234, 179, 8, 0.4)';
+          statusBox.style.color = '#facc15';
+          statusBox.replaceChildren(
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-exclamation' }),
+            document.createTextNode(' 提示：' + String(data.message || '未能连接到远程机器人平台，已启用预置标准权限库'))
+          );
+        }
+
+        // 渲染远程用户模板列表
+        if (data.users && data.users.length > 0) {
+          templateBox.style.display = 'block';
+          templateList.replaceChildren(
+            ...data.users.map(u => {
+              const capsCount = (u.capabilities && Array.isArray(u.capabilities)) ? u.capabilities.length : 0;
+              const btnEl = document.createElement('button');
+              btnEl.type = 'button';
+              btnEl.className = 'btn-action btn-action-sm';
+              btnEl.style.background = 'rgba(56, 189, 248, 0.12)';
+              btnEl.style.borderColor = 'rgba(56, 189, 248, 0.35)';
+              btnEl.style.color = '#e2e8f0';
+              btnEl.style.fontSize = '0.8rem';
+              btnEl.style.padding = '0.3rem 0.65rem';
+              btnEl.replaceChildren(
+                Object.assign(document.createElement('i'), { className: 'fa-solid fa-user-tag', style: 'color: #38bdf8; margin-right: 4px;' }),
+                Object.assign(document.createElement('strong'), { textContent: String(u.username || '') }),
+                Object.assign(document.createElement('span'), { style: 'color: #facc15; font-size: 0.72rem; margin: 0 4px;', textContent: `[${String(u.role || 'member')}]` }),
+                Object.assign(document.createElement('span'), { style: 'color: var(--text-muted); font-size: 0.72rem;', textContent: `(${capsCount}项权限)` })
+              );
+              btnEl.onclick = () => applyTemplateUser(u.role || 'member', u.capabilities || []);
+              return btnEl;
+            })
+          );
+        } else {
+          templateBox.style.display = 'none';
+        }
+
+        // 如果发现了标准库以外的额外能力，合并到自定义输入框
+        if (data.discovered_capabilities && Array.isArray(data.discovered_capabilities)) {
+          const standardSet = new Set(['bot.control', 'bot.edit', 'bot.view', 'bot.manage', 'player.control', 'player.queue', 'admin']);
+          const extras = data.discovered_capabilities.filter(c => !standardSet.has(c));
+          if (extras.length > 0) {
+            const currCustom = document.getElementById('cfgPermCustomCaps').value.trim();
+            const currSet = new Set(currCustom ? currCustom.split(/[,，\s]+/) : []);
+            extras.forEach(e => currSet.add(e));
+            document.getElementById('cfgPermCustomCaps').value = Array.from(currSet).join(', ');
+          }
+        }
+      } catch (err) {
+        statusBox.style.display = 'block';
+        statusBox.style.background = 'rgba(239, 68, 68, 0.15)';
+        statusBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+        statusBox.style.color = '#f87171';
+        statusBox.replaceChildren(
+          Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark' }),
+          document.createTextNode(' 同步异常：' + String(err.message || ''))
+        );
+        showToast('同步权限失败: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        spinner.style.display = 'none';
+        icon.style.display = 'inline-block';
+      }
+    }
+
+    function applyTemplateUser(role, capabilities) {
+      if (role) {
+        document.getElementById('cfgPermRole').value = role;
+      }
+      const capsSet = new Set(capabilities || []);
+      const checkboxes = document.querySelectorAll('input[name="botCaps"]');
+      const standardKeys = new Set();
+      checkboxes.forEach(cb => {
+        standardKeys.add(cb.value);
+        cb.checked = capsSet.has(cb.value);
+      });
+
+      const extras = [];
+      capsSet.forEach(c => {
+        if (!standardKeys.has(c)) extras.push(c);
+      });
+      document.getElementById('cfgPermCustomCaps').value = extras.join(', ');
+      showToast('已套用该用户的角色与权限配置！请点击下方“保存权限配置”以生效', 'success');
+    }
+
+    function resetBotPermFormDefault() {
+      document.getElementById('cfgPermRole').value = 'member';
+      document.getElementById('cfgPermBotScope').value = 'current';
+      document.getElementById('cfgPermNotice').value = '月卡用户仅有控制功能，年卡用户独享音乐后台';
+      const checkboxes = document.querySelectorAll('input[name="botCaps"]');
+      checkboxes.forEach(cb => {
+        cb.checked = (cb.value === 'player.control' || cb.value === 'player.queue');
+      });
+      document.getElementById('cfgPermCustomCaps').value = '';
+      showToast('已重置为默认推荐配置', 'info');
+    }
+
+    async function syncSingleBotUserPerm(botId, username) {
+      if (!confirm(`确定要为机器人绑定的用户【${username}】重新下发并同步最新的后台权限吗？`)) return;
+      try {
+        const res = await fetch(`/api/admin/bot-instances/${encodeURIComponent(botId)}/sync-permission`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          }
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message || '权限下发同步成功！', 'success');
+        } else {
+          showToast(data.message || data.detail || '下发同步失败', 'error');
+        }
+      } catch (e) {
+        showToast('下发同步请求异常: ' + e.message, 'error');
       }
     }
 

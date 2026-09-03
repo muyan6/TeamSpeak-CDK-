@@ -1021,6 +1021,209 @@ class TestTeamSpeakManager(unittest.TestCase):
         database.delete_bot_instance(bot_id)
         database.delete_cdk(cdk)
 
+    def test_bot_permission_config_persistence(self):
+        """测试机器人用户权限配置的存取与持久化"""
+        # 读取默认配置
+        cfg = database.get_bot_permission_config()
+        self.assertIn("role", cfg)
+        self.assertIn("capabilities", cfg)
+        self.assertIn("bot_scope", cfg)
+        self.assertIn("permission_notice", cfg)
+
+        # 保存自定义权限配置 (包含机器人管理权限)
+        saved = database.set_bot_permission_config(
+            role="admin",
+            capabilities=["bot.control", "bot.edit", "bot.manage", "player.control", "player.queue"],
+            bot_scope="all",
+            permission_notice="VIP专属：完全机器人管理与点歌权限"
+        )
+        self.assertEqual(saved["role"], "admin")
+        self.assertEqual(saved["bot_scope"], "all")
+        self.assertIn("bot.manage", saved["capabilities"])
+        self.assertEqual(saved["permission_notice"], "VIP专属：完全机器人管理与点歌权限")
+
+        # 再次读取验证持久化
+        re_read = database.get_bot_permission_config()
+        self.assertEqual(re_read["role"], "admin")
+        self.assertEqual(re_read["bot_scope"], "all")
+        self.assertEqual(re_read["capabilities"], ["bot.control", "bot.edit", "bot.manage", "player.control", "player.queue"])
+        self.assertEqual(re_read["permission_notice"], "VIP专属：完全机器人管理与点歌权限")
+
+        # 恢复默认配置
+        database.set_bot_permission_config(
+            role="member",
+            capabilities=["player.control", "player.queue"],
+            bot_scope="current",
+            permission_notice="月卡用户仅有控制功能，年卡用户独享音乐后台"
+        )
+
+    def test_sync_bot_permissions_client(self):
+        """测试 MusicBotClient 中 sync_bot_permissions 远程权限同步逻辑"""
+        from unittest.mock import patch
+
+        client = music_bot_client
+
+        # 模拟远程平台返回现有用户
+        mock_remote_users = {
+            "users": [
+                {
+                    "id": "1",
+                    "username": "admin",
+                    "role": "admin",
+                    "capabilities": ["bot.control", "bot.edit", "bot.manage", "player.control", "custom.sound"]
+                },
+                {
+                    "id": "2",
+                    "username": "listener",
+                    "role": "member",
+                    "capabilities": ["player.control", "player.queue"]
+                }
+            ]
+        }
+
+        with patch.object(client, "get_users", return_value=(True, mock_remote_users)):
+            ok, data = client.sync_bot_permissions()
+            self.assertTrue(ok)
+            self.assertTrue(data["connected"])
+            self.assertEqual(len(data["users"]), 2)
+            # 验证萃取出的所有能力
+            self.assertIn("custom.sound", data["discovered_capabilities"])
+            self.assertIn("bot.manage", data["discovered_capabilities"])
+            self.assertIn("player.control", data["discovered_capabilities"])
+
+        # 模拟远程平台无法连接时，返回预置标准权限库优雅降级
+        with patch.object(client, "get_users", return_value=(False, "Connection timeout")):
+            ok, data = client.sync_bot_permissions()
+            self.assertTrue(ok)
+            self.assertFalse(data["connected"])
+            self.assertGreater(len(data["standard_capabilities"]), 0)
+            self.assertIn("bot.control", data["discovered_capabilities"])
+
+    def test_redeem_bot_with_custom_configured_permissions(self):
+        """测试兑换机器人自动应用后台配置的机器人管理权限，彻底告别改代码"""
+        from unittest.mock import patch, MagicMock
+        try:
+            import app as ts_app
+        except Exception:
+            self.skipTest("FastAPI 依赖环境在当前全局 Python 中未安装")
+
+        # 设置后台配置：赋予机器人管理权限 (bot.control, bot.edit) 及 admin 角色
+        database.set_bot_permission_config(
+            role="admin",
+            capabilities=["bot.control", "bot.edit", "player.control", "player.queue"],
+            bot_scope="current",
+            permission_notice="尊享机器人管理员权限与后台"
+        )
+
+        cdks = database.create_cdks(count=1, remark="管理权限测试机器人", cdk_type="music_bot", duration_months=1)
+        cdk = cdks[0]
+
+        with patch.object(ts_app.music_bot_client, "create_bot", return_value=(True, {"id": "remote-managed-bot-123"})) as mock_create_bot, \
+             patch.object(ts_app.music_bot_client, "create_user", return_value=(True, {"id": "remote-user-777", "username": "manager_user"})) as mock_create_user, \
+             patch.object(ts_app.music_bot_client, "set_user_permissions", return_value=(True, {"ok": True})) as mock_set_perm:
+
+            req = ts_app.RedeemBotRequest(
+                cdk=cdk,
+                name="可管理的音乐机器人",
+                serverAddress="ts.test.org",
+                serverPort=9987,
+                nickname="BotAdmin",
+                defaultChannel="管理员房间",
+                webUsername="manager_user",
+                webPassword="super_password_888"
+            )
+            resp = ts_app.redeem_bot_instance(req)
+
+            self.assertTrue(resp["success"])
+            self.assertEqual(resp["permission_notice"], "尊享机器人管理员权限与后台")
+
+            # 验证创建用户时动态应用了后台设置的角色 admin
+            mock_create_user.assert_called_once_with("manager_user", "super_password_888", role="admin")
+
+            # 验证权限分配中包含了后台配置的机器人管理权限 bot.control 与 bot.edit
+            mock_set_perm.assert_called_once_with(
+                user_id="remote-user-777",
+                capabilities=["bot.control", "bot.edit", "player.control", "player.queue"],
+                bots=["remote-managed-bot-123"]
+            )
+
+        # 清理与复原
+        database.delete_bot_instance("remote-managed-bot-123")
+        database.delete_cdk(cdk)
+        database.set_bot_permission_config(
+            role="member",
+            capabilities=["player.control", "player.queue"],
+            bot_scope="current",
+            permission_notice="月卡用户仅有控制功能，年卡用户独享音乐后台"
+        )
+
+    def test_admin_bot_permission_apis(self):
+        """测试管理员后台权限读取、更新、同步及对指定实例重新下发接口"""
+        from unittest.mock import patch
+        try:
+            import app as ts_app
+        except Exception:
+            self.skipTest("FastAPI 依赖环境在当前全局 Python 中未安装")
+
+        # 1. GET /api/admin/bot-permissions
+        get_res = ts_app.get_bot_permissions_admin_api(_=True)
+        self.assertTrue(get_res["success"])
+        self.assertIn("config", get_res)
+        self.assertIn("standard_capabilities", get_res)
+
+        # 2. POST /api/admin/bot-permissions
+        update_req = ts_app.BotPermissionConfigRequest(
+            role="admin",
+            capabilities=["bot.control", "bot.manage"],
+            bot_scope="all",
+            permission_notice="全域机器人管理"
+        )
+        post_res = ts_app.update_bot_permissions_admin_api(update_req, _=True)
+        self.assertTrue(post_res["success"])
+        self.assertEqual(post_res["config"]["role"], "admin")
+        self.assertEqual(post_res["config"]["capabilities"], ["bot.control", "bot.manage"])
+
+        # 3. POST /api/admin/bot-permissions/sync
+        with patch.object(ts_app.music_bot_client, "sync_bot_permissions", return_value=(True, {"connected": True, "users": []})):
+            sync_res = ts_app.sync_bot_permissions_admin_api(_=True)
+            self.assertTrue(sync_res["success"])
+            self.assertTrue(sync_res["data"]["connected"])
+
+        # 4. POST /api/admin/bot-instances/{bot_id}/sync-permission
+        bot_cdks = database.create_cdks(count=1, remark="实例同步测试", cdk_type="music_bot", duration_months=1)
+        cdk = bot_cdks[0]
+        inst = database.create_bot_instance(
+            bot_id="sync-bot-inst-001",
+            name="同步机器人",
+            server_address="127.0.0.1",
+            server_port=9987,
+            nickname="SyncBot",
+            cdk_code=cdk,
+            duration_months=1,
+            expire_at="2026-10-01 12:00:00",
+            web_username="user_sync_test",
+            web_user_id="user-uid-456"
+        )
+        with patch.object(ts_app.music_bot_client, "set_user_permissions", return_value=(True, "ok")) as mock_set:
+            single_sync_res = ts_app.sync_single_bot_instance_permission("sync-bot-inst-001", _=True)
+            self.assertTrue(single_sync_res["success"])
+            mock_set.assert_called_once_with(
+                user_id="user-uid-456",
+                capabilities=["bot.control", "bot.manage"],
+                bots="all"
+            )
+
+        # 清理
+        database.delete_bot_instance("sync-bot-inst-001")
+        database.delete_cdk(cdk)
+        database.set_bot_permission_config(
+            role="member",
+            capabilities=["player.control", "player.queue"],
+            bot_scope="current",
+            permission_notice="月卡用户仅有控制功能，年卡用户独享音乐后台"
+        )
+
 if __name__ == "__main__":
     unittest.main()
+
 

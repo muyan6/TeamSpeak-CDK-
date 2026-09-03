@@ -54,6 +54,8 @@ from database import (
     set_admin_password,
     get_bot_config,
     set_bot_config,
+    get_bot_permission_config,
+    set_bot_permission_config,
     has_server_used_trial,
     record_trial_server,
     get_all_trial_records,
@@ -265,6 +267,12 @@ class TestBotConfigRequest(BaseModel):
     url: Optional[str] = None
     user: Optional[str] = None
     password: Optional[str] = None
+
+class BotPermissionConfigRequest(BaseModel):
+    role: str = Field(default="member", min_length=1, max_length=64)
+    capabilities: List[str] = Field(default_factory=list)
+    bot_scope: Literal["current", "all"] = "current"
+    permission_notice: Optional[str] = Field(default=None, max_length=255)
 
 class ParseTsTargetRequest(BaseModel):
     input: str = Field(min_length=1, max_length=5000)
@@ -622,7 +630,7 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                     "instance": bot,
                     "bot_panel_url": get_bot_config()["bot_panel_url"],
                     "bot_tutorial_url": get_bot_config().get("bot_tutorial_url", "http://103.71.69.156:23452/"),
-                    "permission_notice": "月卡用户仅有控制功能，年卡用户独享音乐后台"
+                    "permission_notice": get_bot_permission_config().get("permission_notice", "月卡用户仅有控制功能，年卡用户独享音乐后台")
                 }
             return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 已被激活使用，但绑定的音乐机器人实例已不存在"})
 
@@ -900,11 +908,17 @@ def redeem_bot_instance(req: RedeemBotRequest):
     else:
         expire_at = "permanent"
 
-    # 如果填写了 Web 账号密码，在机器人后台创建该用户并配置仅限本机器人的受限权限 (播放控制+队列管理)
+    # 如果填写了 Web 账号密码，在机器人后台创建该用户并按系统后台配置分配权限
     created_web_user_id = None
+    perm_cfg = get_bot_permission_config()
+    configured_role = perm_cfg.get("role", "member")
+    configured_caps = perm_cfg.get("capabilities", ["player.control", "player.queue"])
+    configured_scope = perm_cfg.get("bot_scope", "current")
+    target_bots = "all" if configured_scope == "all" else [str(bot_id)]
+
     if web_username and web_password:
         try:
-            ok_u, res_u = music_bot_client.create_user(web_username, web_password, role="member")
+            ok_u, res_u = music_bot_client.create_user(web_username, web_password, role=configured_role)
             if not ok_u:
                 err_msg = str(res_u)
                 if "already" in err_msg.lower() or "409" in err_msg or "exists" in err_msg.lower() or "HTTP 400" in err_msg:
@@ -920,12 +934,12 @@ def redeem_bot_instance(req: RedeemBotRequest):
             
             created_web_user_id = res_u.get("id") if isinstance(res_u, dict) else None
             
-            # 分配受限能力：仅播放控制 (player.control) 与队列管理 (player.queue)，机器人范围仅限刚刚创建的 bot_id
+            # 分配管理员在后台配置的能力权限 (包含机器人管理权限、播放控制等)，按授权范围绑定
             if created_web_user_id:
                 ok_p, res_p = music_bot_client.set_user_permissions(
                     user_id=str(created_web_user_id),
-                    capabilities=["player.control", "player.queue"],
-                    bots=[str(bot_id)]
+                    capabilities=configured_caps,
+                    bots=target_bots
                 )
                 if not ok_p:
                     music_bot_client.delete_user(str(created_web_user_id))
@@ -1009,7 +1023,7 @@ def redeem_bot_instance(req: RedeemBotRequest):
         "instance": bot_inst,
         "bot_panel_url": get_bot_config()["bot_panel_url"],
         "bot_tutorial_url": get_bot_config().get("bot_tutorial_url", "http://103.71.69.156:23452/"),
-        "permission_notice": "月卡用户仅有控制功能，年卡用户独享音乐后台"
+        "permission_notice": perm_cfg.get("permission_notice", "月卡用户仅有控制功能，年卡用户独享音乐后台")
     }
 
 @app.post("/api/bot-instances/{bot_id}/action")
@@ -1688,6 +1702,84 @@ def test_bot_config_api(req: Optional[TestBotConfigRequest] = None, _: bool = De
             "message": msg,
             "data": data
         })
+
+# --- 音乐机器人用户权限与后台同步 API ---
+
+@app.get("/api/admin/bot-permissions")
+def get_bot_permissions_admin_api(_: bool = Depends(verify_admin)):
+    cfg = get_bot_permission_config()
+    standard_capabilities = [
+        {"key": "bot.control", "name": "机器人启停控制", "group": "bot", "desc": "允许启动、停止和重启音乐机器人实例"},
+        {"key": "bot.edit", "name": "机器人参数管理", "group": "bot", "desc": "允许修改机器人昵称、绑定频道与配置参数"},
+        {"key": "bot.view", "name": "机器人状态查看", "group": "bot", "desc": "允许查看机器人运行状态与实时日志"},
+        {"key": "bot.manage", "name": "机器人完全管理", "group": "bot", "desc": "具备机器人实例全功能运维操作权限"},
+        {"key": "player.control", "name": "播放与切歌控制", "group": "player", "desc": "允许暂停、继续、切换上一首/下一首及调节音量"},
+        {"key": "player.queue", "name": "点歌队列管理", "group": "player", "desc": "允许提交点歌链接、清空播放队列与调整顺序"},
+        {"key": "admin", "name": "全功能超级管理员", "group": "admin", "desc": "机器人平台最高管理员特权"}
+    ]
+    return {
+        "success": True,
+        "config": cfg,
+        "standard_capabilities": standard_capabilities
+    }
+
+@app.post("/api/admin/bot-permissions")
+def update_bot_permissions_admin_api(req: BotPermissionConfigRequest, _: bool = Depends(verify_admin)):
+    saved = set_bot_permission_config(
+        role=req.role,
+        capabilities=req.capabilities,
+        bot_scope=req.bot_scope,
+        permission_notice=req.permission_notice
+    )
+    return {
+        "success": True,
+        "message": "机器人用户权限配置已成功保存并即时生效！后续新建用户将自动分配此权限",
+        "config": saved
+    }
+
+@app.post("/api/admin/bot-permissions/sync")
+def sync_bot_permissions_admin_api(_: bool = Depends(verify_admin)):
+    ok, result = music_bot_client.sync_bot_permissions()
+    return {
+        "success": ok,
+        "data": result
+    }
+
+@app.post("/api/admin/bot-instances/{bot_id}/sync-permission")
+def sync_single_bot_instance_permission(bot_id: str, _: bool = Depends(verify_admin)):
+    bot = get_bot_instance_by_id(bot_id)
+    if not bot:
+        raise HTTPException(status_code=404, detail="未找到该机器人实例")
+    web_user_id = bot.get("web_user_id")
+    if not web_user_id:
+        # 尝试通过绑定的用户名查找 ID
+        web_username = bot.get("web_username")
+        if web_username:
+            ok_u, u_res = music_bot_client.get_users()
+            if ok_u and isinstance(u_res, dict) and "users" in u_res:
+                for u in u_res["users"]:
+                    if isinstance(u, dict) and u.get("username") == web_username:
+                        web_user_id = str(u.get("id"))
+                        break
+        if not web_user_id:
+            raise HTTPException(status_code=400, detail="该机器人实例未关联 Web 点歌用户或找不到用户 ID")
+    
+    perm_cfg = get_bot_permission_config()
+    target_bots = "all" if perm_cfg.get("bot_scope") == "all" else [str(bot_id)]
+    ok, res = music_bot_client.set_user_permissions(
+        user_id=str(web_user_id),
+        capabilities=perm_cfg.get("capabilities", ["player.control", "player.queue"]),
+        bots=target_bots
+    )
+    if not ok:
+        return JSONResponse(status_code=500, content={"success": False, "message": f"权限同步失败: {res}"})
+    return {
+        "success": True,
+        "message": f"成功为用户【{bot.get('web_username', web_user_id)}】重新同步并应用了最新权限！",
+        "capabilities": perm_cfg.get("capabilities", []),
+        "bots": target_bots
+    }
+
 
 # --- DNS 自动化绑定配置 API ---
 
