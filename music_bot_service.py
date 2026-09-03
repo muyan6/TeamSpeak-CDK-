@@ -366,20 +366,19 @@ class MusicBotClient:
         """
         从音乐机器人后台拉取现有用户列表与权限配置，萃取平台支持的权限能力与模板用户
         """
-        # 预定义标准权限能力字典（包含中文说明与分组）
+        # 与音乐机器人程序后台 (Settings.vue -> CAPABILITIES) 严格一一对应的 6 项能力配置
         standard_capabilities = [
-            {"key": "bot.control", "name": "机器人启停控制", "group": "bot", "desc": "允许启动、停止和重启音乐机器人实例"},
-            {"key": "bot.edit", "name": "机器人参数管理", "group": "bot", "desc": "允许修改机器人昵称、绑定频道与配置参数"},
-            {"key": "bot.view", "name": "机器人状态查看", "group": "bot", "desc": "允许查看机器人运行状态与实时日志"},
-            {"key": "bot.manage", "name": "机器人完全管理", "group": "bot", "desc": "具备机器人实例全功能运维操作权限"},
-            {"key": "player.control", "name": "播放与切歌控制", "group": "player", "desc": "允许暂停、继续、切换上一首/下一首及调节音量"},
-            {"key": "player.queue", "name": "点歌队列管理", "group": "player", "desc": "允许提交点歌链接、清空播放队列与调整顺序"},
-            {"key": "admin", "name": "全功能超级管理员", "group": "admin", "desc": "机器人平台最高管理员特权"}
+            {"token": "player.control", "key": "player.control", "label": "播放控制", "name": "播放控制", "desc": "允许暂停、继续、切歌及调节音量等"},
+            {"token": "player.queue", "key": "player.queue", "label": "队列管理", "name": "队列管理", "desc": "允许提交点歌、清空队列与排队调整"},
+            {"token": "bot.manage", "key": "bot.manage", "label": "机器人管理", "name": "机器人管理", "desc": "允许启停机器人、修改配置与频道（机器人管理权限）"},
+            {"token": "bot.create", "key": "bot.create", "label": "创建新实例", "name": "创建新实例", "desc": "允许在机器人后台创建新的机器人"},
+            {"token": "platform.auth", "key": "platform.auth", "label": "平台登录凭据", "name": "平台登录凭据", "desc": "允许配置网易云/QQ音乐/B站登录凭据"},
+            {"token": "quality", "key": "quality", "label": "音质设置", "name": "音质设置", "desc": "允许调整音质比特率与采样率参数"}
         ]
 
         ok_users, users_res = self.get_users()
         extracted_users = []
-        discovered_caps = set(c["key"] for c in standard_capabilities)
+        discovered_caps = set(c["token"] for c in standard_capabilities)
 
         if ok_users and isinstance(users_res, dict) and "users" in users_res:
             raw_users = users_res["users"]

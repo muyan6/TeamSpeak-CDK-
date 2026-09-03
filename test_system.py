@@ -1030,10 +1030,10 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertIn("bot_scope", cfg)
         self.assertIn("permission_notice", cfg)
 
-        # 保存自定义权限配置 (包含机器人管理权限)
+        # 保存自定义权限配置 (包含机器人管理权限 bot.manage)
         saved = database.set_bot_permission_config(
             role="admin",
-            capabilities=["bot.control", "bot.edit", "bot.manage", "player.control", "player.queue"],
+            capabilities=["player.control", "player.queue", "bot.manage"],
             bot_scope="all",
             permission_notice="VIP专属：完全机器人管理与点歌权限"
         )
@@ -1046,7 +1046,7 @@ class TestTeamSpeakManager(unittest.TestCase):
         re_read = database.get_bot_permission_config()
         self.assertEqual(re_read["role"], "admin")
         self.assertEqual(re_read["bot_scope"], "all")
-        self.assertEqual(re_read["capabilities"], ["bot.control", "bot.edit", "bot.manage", "player.control", "player.queue"])
+        self.assertEqual(re_read["capabilities"], ["player.control", "player.queue", "bot.manage"])
         self.assertEqual(re_read["permission_notice"], "VIP专属：完全机器人管理与点歌权限")
 
         # 恢复默认配置
@@ -1070,7 +1070,7 @@ class TestTeamSpeakManager(unittest.TestCase):
                     "id": "1",
                     "username": "admin",
                     "role": "admin",
-                    "capabilities": ["bot.control", "bot.edit", "bot.manage", "player.control", "custom.sound"]
+                    "capabilities": ["player.control", "player.queue", "bot.manage", "bot.create", "platform.auth", "quality"]
                 },
                 {
                     "id": "2",
@@ -1087,8 +1087,10 @@ class TestTeamSpeakManager(unittest.TestCase):
             self.assertTrue(data["connected"])
             self.assertEqual(len(data["users"]), 2)
             # 验证萃取出的所有能力
-            self.assertIn("custom.sound", data["discovered_capabilities"])
             self.assertIn("bot.manage", data["discovered_capabilities"])
+            self.assertIn("bot.create", data["discovered_capabilities"])
+            self.assertIn("platform.auth", data["discovered_capabilities"])
+            self.assertIn("quality", data["discovered_capabilities"])
             self.assertIn("player.control", data["discovered_capabilities"])
 
         # 模拟远程平台无法连接时，返回预置标准权限库优雅降级
@@ -1096,8 +1098,8 @@ class TestTeamSpeakManager(unittest.TestCase):
             ok, data = client.sync_bot_permissions()
             self.assertTrue(ok)
             self.assertFalse(data["connected"])
-            self.assertGreater(len(data["standard_capabilities"]), 0)
-            self.assertIn("bot.control", data["discovered_capabilities"])
+            self.assertEqual(len(data["standard_capabilities"]), 6)
+            self.assertIn("bot.manage", data["discovered_capabilities"])
 
     def test_redeem_bot_with_custom_configured_permissions(self):
         """测试兑换机器人自动应用后台配置的机器人管理权限，彻底告别改代码"""
@@ -1107,10 +1109,10 @@ class TestTeamSpeakManager(unittest.TestCase):
         except Exception:
             self.skipTest("FastAPI 依赖环境在当前全局 Python 中未安装")
 
-        # 设置后台配置：赋予机器人管理权限 (bot.control, bot.edit) 及 admin 角色
+        # 设置后台配置：赋予机器人管理权限 (bot.manage) 及 admin 角色
         database.set_bot_permission_config(
             role="admin",
-            capabilities=["bot.control", "bot.edit", "player.control", "player.queue"],
+            capabilities=["player.control", "player.queue", "bot.manage"],
             bot_scope="current",
             permission_notice="尊享机器人管理员权限与后台"
         )
@@ -1140,10 +1142,10 @@ class TestTeamSpeakManager(unittest.TestCase):
             # 验证创建用户时动态应用了后台设置的角色 admin
             mock_create_user.assert_called_once_with("manager_user", "super_password_888", role="admin")
 
-            # 验证权限分配中包含了后台配置的机器人管理权限 bot.control 与 bot.edit
+            # 验证权限分配中包含了后台配置的机器人管理权限 bot.manage
             mock_set_perm.assert_called_once_with(
                 user_id="remote-user-777",
-                capabilities=["bot.control", "bot.edit", "player.control", "player.queue"],
+                capabilities=["player.control", "player.queue", "bot.manage"],
                 bots=["remote-managed-bot-123"]
             )
 
@@ -1174,14 +1176,14 @@ class TestTeamSpeakManager(unittest.TestCase):
         # 2. POST /api/admin/bot-permissions
         update_req = ts_app.BotPermissionConfigRequest(
             role="admin",
-            capabilities=["bot.control", "bot.manage"],
+            capabilities=["player.control", "bot.manage"],
             bot_scope="all",
             permission_notice="全域机器人管理"
         )
         post_res = ts_app.update_bot_permissions_admin_api(update_req, _=True)
         self.assertTrue(post_res["success"])
         self.assertEqual(post_res["config"]["role"], "admin")
-        self.assertEqual(post_res["config"]["capabilities"], ["bot.control", "bot.manage"])
+        self.assertEqual(post_res["config"]["capabilities"], ["player.control", "bot.manage"])
 
         # 3. POST /api/admin/bot-permissions/sync
         with patch.object(ts_app.music_bot_client, "sync_bot_permissions", return_value=(True, {"connected": True, "users": []})):
@@ -1209,7 +1211,7 @@ class TestTeamSpeakManager(unittest.TestCase):
             self.assertTrue(single_sync_res["success"])
             mock_set.assert_called_once_with(
                 user_id="user-uid-456",
-                capabilities=["bot.control", "bot.manage"],
+                capabilities=["player.control", "bot.manage"],
                 bots="all"
             )
 
