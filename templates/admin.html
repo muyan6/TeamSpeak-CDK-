@@ -1458,7 +1458,24 @@
               <div style="font-size: 0.75rem; color: var(--text-muted);">ID: ${escapeHtml(inst.id)}</div>
             </td>
             <td>
-              ${inst.subdomain ? `<div style="font-weight: 700; color: #38bdf8; font-family: monospace; font-size: 0.85rem;"><i class="fa-solid fa-globe"></i> ${escapeHtml(inst.subdomain)} <button class="btn-action btn-action-sm" onclick="copyToClipboard(${jsString(inst.subdomain)}, '已复制二级域名')"><i class="fa-regular fa-copy"></i></button></div><div style="font-size: 0.72rem; color: #34d399;"><i class="fa-solid fa-bolt"></i> SRV已绑定</div>` : '<span style="color: var(--text-muted); font-size: 0.78rem;">未绑定 (IP直连)</span>'}
+              ${inst.subdomain ? `
+                <div style="font-weight: 700; color: #38bdf8; font-family: monospace; font-size: 0.85rem;">
+                  <i class="fa-solid fa-globe"></i> ${escapeHtml(inst.subdomain)} 
+                  <button class="btn-action btn-action-sm" onclick="copyToClipboard(${jsString(inst.subdomain)}, '已复制二级域名')"><i class="fa-regular fa-copy"></i></button>
+                </div>
+                <div style="display: flex; gap: 0.35rem; align-items: center; margin-top: 3px;">
+                  <span style="font-size: 0.72rem; color: #34d399;"><i class="fa-solid fa-bolt"></i> SRV已绑定</span>
+                  <button class="btn-action btn-action-sm" style="font-size: 0.7rem; padding: 0.1rem 0.35rem;" onclick="openBindDomainModal(${inst.id}, ${jsString(inst.name)}, ${jsString(inst.subdomain)})" title="更换域名">换绑</button>
+                  <button class="btn-action btn-action-sm btn-danger" style="font-size: 0.7rem; padding: 0.1rem 0.35rem;" onclick="unbindInstanceDomain(${inst.id})" title="解绑域名">解绑</button>
+                </div>
+              ` : `
+                <div style="display: flex; flex-direction: column; gap: 0.3rem;">
+                  <span style="color: var(--text-muted); font-size: 0.78rem;">未绑定 (IP直连)</span>
+                  <button class="btn-action btn-action-sm" style="font-size: 0.72rem; padding: 0.15rem 0.45rem; width: fit-content; color: #60a5fa; border-color: rgba(59,130,246,0.4);" onclick="openBindDomainModal(${inst.id}, ${jsString(inst.name)}, '')" title="为该服务器开通绑定专属二级域名">
+                    <i class="fa-solid fa-plus"></i> 绑定域名
+                  </button>
+                </div>
+              `}
             </td>
             <td>
               <div style="font-family: monospace; font-size: 0.8rem; color: #a78bfa;">${escapeHtml(inst.dir_path)}</div>
@@ -1505,6 +1522,58 @@
         `).join('');
       } catch (e) {
         tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
+      }
+    }
+
+    async function openBindDomainModal(instanceId, instName, currentDomain) {
+      const defaultVal = currentDomain ? currentDomain.split('.')[0] : '';
+      const prefix = prompt(`请输入要为 [${instName}] 绑定的专属二级域名前缀（如 11 / play / room）:`, defaultVal);
+      if (prefix === null) return;
+      const cleanPrefix = prefix.trim();
+      if (!cleanPrefix) {
+        showToast('域名前缀不能为空', 'error');
+        return;
+      }
+      try {
+        showToast('正在向 DNS 服务商申请创建解析...', 'info');
+        const res = await fetch(`/api/admin/instances/${instanceId}/bind-domain`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-Admin-Password': adminToken
+          },
+          body: JSON.stringify({ subdomain_prefix: cleanPrefix })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message, 'success');
+          loadInstances();
+        } else {
+          showToast(data.message || '绑定失败', 'error');
+        }
+      } catch (e) {
+        showToast('请求异常: ' + e, 'error');
+      }
+    }
+
+    async function unbindInstanceDomain(instanceId) {
+      if (!confirm('⚠️ 确定要解绑该服务器的二级域名吗？解绑后将删除 DNS 解析记录并恢复为 IP 直连。')) return;
+      try {
+        const res = await fetch(`/api/admin/instances/${instanceId}/unbind-domain`, {
+          method: 'POST',
+          headers: {
+            'X-Admin-Password': adminToken
+          }
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast(data.message, 'success');
+          loadInstances();
+        } else {
+          showToast(data.message || '解绑失败', 'error');
+        }
+      } catch (e) {
+        showToast('请求异常: ' + e, 'error');
       }
     }
 

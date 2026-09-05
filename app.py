@@ -219,6 +219,9 @@ class GenerateCdksRequest(BaseModel):
 class InstanceActionRequest(BaseModel):
     action: Literal["start", "stop", "restart", "destroy"]
 
+class BindInstanceDomainRequest(BaseModel):
+    subdomain_prefix: str = Field(min_length=2, max_length=32)
+
 class BotActionRequest(BaseModel):
     action: Literal["start", "stop", "restart", "delete"]
     cdk: Optional[str] = Field(default=None, max_length=128)
@@ -662,6 +665,37 @@ def redeem_cdk(req: RedeemRequest, request: Request):
         instance_id = cdk_info.get("instance_id")
         instance = get_instance_by_id(instance_id) if instance_id else None
         if instance:
+            dns_cfg = get_dns_config()
+            dns_enabled = dns_cfg.get("dns_enabled", False)
+            subdomain_input = (req.subdomain or "").strip()
+
+            # 智能补绑：如果当前实例尚未绑定二级域名，且用户在前台填写了二级域名前缀，且系统开启了DNS，则自动补绑！
+            if dns_enabled and subdomain_input and not instance.get("subdomain"):
+                avail, err_msg, full_domain = is_subdomain_available(subdomain_input)
+                if not avail:
+                    return JSONResponse(status_code=400, content={"success": False, "message": f"二级域名不可用: {err_msg}"})
+                target_host = dns_cfg.get("dns_target_host") or client_host
+                ok_dns, rec_id, full_d, err_dns = dns_service.create_ts_srv_record(
+                    subdomain_prefix=subdomain_input,
+                    target_host=target_host,
+                    voice_port=instance["voice_port"],
+                    dns_cfg=dns_cfg
+                )
+                if ok_dns:
+                    update_instance_domain(instance["id"], full_d, rec_id)
+                    instance["subdomain"] = full_d
+                    instance["domain_record_id"] = rec_id
+                    instance["public_host"] = full_d
+                    instance["has_domain"] = True
+                    return {
+                        "success": True,
+                        "type": "teamspeak",
+                        "message": f"该 CDK 已激活。已成功为您的服务器补绑专属二级域名: {full_d}（免输入端口直连）！",
+                        "instance": instance
+                    }
+                else:
+                    return JSONResponse(status_code=400, content={"success": False, "message": f"域名补绑失败: {err_dns}"})
+
             instance["public_host"] = instance.get("subdomain") or client_host
             instance["has_domain"] = bool(instance.get("subdomain"))
             return {
@@ -1481,6 +1515,65 @@ def manage_instance(instance_id: int, req: InstanceActionRequest, _: bool = Depe
 
     else:
         raise HTTPException(status_code=400, detail="不支持的操作指令")
+
+@app.post("/api/admin/instances/{instance_id}/bind-domain")
+def admin_bind_instance_domain_api(instance_id: int, req: BindInstanceDomainRequest, request: Request, _: bool = Depends(verify_admin)):
+    inst = get_instance_by_id(instance_id)
+    if not inst:
+        raise HTTPException(status_code=404, detail="未找到该实例")
+
+    dns_cfg = get_dns_config()
+    if not dns_cfg.get("dns_enabled", False):
+        return JSONResponse(status_code=400, content={"success": False, "message": "系统尚未开启 DNS 自动化绑定功能，请先在【域名与 DNS 自动绑定】页面启用并保存配置"})
+
+    subdomain_prefix = req.subdomain_prefix.strip()
+    avail, err_msg, full_domain = is_subdomain_available(subdomain_prefix)
+    if not avail:
+        return JSONResponse(status_code=400, content={"success": False, "message": f"二级域名不可用: {err_msg}"})
+
+    # 如果原先已经有绑定记录，先尝试删除旧记录
+    old_record_id = inst.get("domain_record_id")
+    if old_record_id:
+        try:
+            dns_service.delete_ts_srv_record(old_record_id, dns_cfg=dns_cfg)
+        except Exception:
+            pass
+
+    client_host = get_public_host(request)
+    target_host = dns_cfg.get("dns_target_host") or client_host
+    ok_dns, rec_id, full_d, err_dns = dns_service.create_ts_srv_record(
+        subdomain_prefix=subdomain_prefix,
+        target_host=target_host,
+        voice_port=inst["voice_port"],
+        dns_cfg=dns_cfg
+    )
+    if not ok_dns:
+        return JSONResponse(status_code=400, content={"success": False, "message": f"DNS 绑定失败: {err_dns}"})
+
+    update_instance_domain(instance_id, full_d, rec_id)
+    return {
+        "success": True,
+        "message": f"成功为实例 ts{instance_id} 绑定专属二级域名: {full_d}！",
+        "subdomain": full_d,
+        "domain_record_id": rec_id
+    }
+
+@app.post("/api/admin/instances/{instance_id}/unbind-domain")
+def admin_unbind_instance_domain_api(instance_id: int, _: bool = Depends(verify_admin)):
+    inst = get_instance_by_id(instance_id)
+    if not inst:
+        raise HTTPException(status_code=404, detail="未找到该实例")
+
+    old_record_id = inst.get("domain_record_id")
+    if old_record_id:
+        try:
+            dns_cfg = get_dns_config()
+            dns_service.delete_ts_srv_record(old_record_id, dns_cfg=dns_cfg)
+        except Exception as e:
+            print(f"[Warning] 解绑域名时删除 DNS 记录异常: {e}")
+
+    update_instance_domain(instance_id, None, None)
+    return {"success": True, "message": f"实例 ts{instance_id} 已成功解绑二级域名，恢复为 IP 直连"}
 
 @app.post("/api/admin/instances/batch-action")
 def batch_manage_instances_api(req: BatchActionInstancesRequest, _: bool = Depends(verify_admin)):
