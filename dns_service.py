@@ -362,8 +362,8 @@ class TencentDnsProvider:
         
         # 腾讯云 subDomain 格式: _ts3._udp.<subdomain>
         sub_domain = f"_ts3._udp.{sub_p}"
-        # value: <weight> <port> <target> （注：腾讯云 priority 由独立字段 MX 传递或直接包含在 value）
-        value = f"{weight} {int(voice_port)} {target_host.strip().rstrip('.')}"
+        # SRV 记录 Value 标准格式: <优先级> <权重> <端口> <目标主机> (必须包含这 4 个字段)
+        value = f"{int(priority)} {int(weight)} {int(voice_port)} {target_host.strip().rstrip('.')}"
 
         try:
             res = cls._request_tc3(
@@ -375,8 +375,7 @@ class TencentDnsProvider:
                     "SubDomain": sub_domain,
                     "RecordType": "SRV",
                     "RecordLine": "默认",
-                    "Value": value,
-                    "MX": priority
+                    "Value": value
                 }
             )
             resp_data = res.get("Response", {})
