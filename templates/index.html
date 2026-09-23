@@ -1285,6 +1285,16 @@
       }
     }
 
+    function escapeHtml(value) {
+      return String(value ?? '').replace(/[&<>"']/g, char => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;'
+      }[char]));
+    }
+
     // Toast 浮动通知提示
     function showToast(msg, type = 'info') {
       const container = document.getElementById('toastContainer');
@@ -1642,12 +1652,12 @@
           radioHtml = `
             <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
               <input type="radio" name="applyTargetType" value="ip" checked style="accent-color: #a855f7;">
-              <strong style="color: #4ade80;">优先使用国内直连 IP (${ipVal})</strong>
+              <strong style="color: #4ade80;">优先使用国内直连 IP (${escapeHtml(ipVal)})</strong>
               <span style="font-size: 0.76rem; color: var(--text-muted);">（推荐，直接连接国内机房，免 DNS 解析开销与失败风险）</span>
             </label>
             <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
               <input type="radio" name="applyTargetType" value="domain" style="accent-color: #a855f7;">
-              <span>使用原始域名 (${domainHost})</span>
+              <span>使用原始域名 (${escapeHtml(domainHost)})</span>
               <span style="font-size: 0.76rem; color: var(--text-muted);">（备用域名连接）</span>
             </label>
           `;
@@ -1658,12 +1668,12 @@
           radioHtml = `
             <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
               <input type="radio" name="applyTargetType" value="transit" checked style="accent-color: #a855f7;">
-              <strong style="color: #4ade80;">优先使用国内中转地址 (${relayVal})</strong>
+              <strong style="color: #4ade80;">优先使用国内中转地址 (${escapeHtml(relayVal)})</strong>
               <span style="font-size: 0.76rem; color: var(--text-muted);">（推荐，国内免翻墙、低延迟）</span>
             </label>
             <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
               <input type="radio" name="applyTargetType" value="origin" style="accent-color: #a855f7;">
-              <span>使用境外源站直连 IP (${originVal})</span>
+              <span>使用境外源站直连 IP (${escapeHtml(originVal)})</span>
               <span style="font-size: 0.76rem; color: var(--text-muted);">（仅限海外或翻墙直连环境）</span>
             </label>
           `;
@@ -1672,7 +1682,7 @@
           radioHtml = `
             <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
               <input type="radio" name="applyTargetType" value="recommended" checked style="accent-color: #a855f7;">
-              <strong style="color: #facc15;">使用境外服务器地址 (${recHost})</strong>
+              <strong style="color: #facc15;">使用境外服务器地址 (${escapeHtml(recHost)})</strong>
               <span style="font-size: 0.76rem; color: var(--text-muted);">（海外机房直连，延迟稍高）</span>
             </label>
           `;
@@ -1682,7 +1692,7 @@
           radioHtml = `
             <label style="display: flex; align-items: center; gap: 0.35rem; cursor: pointer; color: var(--text-main);">
               <input type="radio" name="applyTargetType" value="ip" checked style="accent-color: #a855f7;">
-              <strong style="color: #4ade80;">使用国内直连 IP (${ipVal})</strong>
+              <strong style="color: #4ade80;">使用国内直连 IP (${escapeHtml(ipVal)})</strong>
               <span style="font-size: 0.76rem; color: var(--text-muted);">（推荐，直连国内机房）</span>
             </label>
           `;

@@ -96,6 +96,7 @@ class CloudflareDnsProvider:
         # name: _ts3._udp.subdomain
         payload = {
             "type": "SRV",
+            "name": f"_ts3._udp.{sub_p}",
             "data": {
                 "service": "_ts3",
                 "proto": "_udp",
@@ -474,6 +475,20 @@ class DnsService:
 
         if not root_domain:
             return False, None, None, "系统未配置主域名"
+
+        # RFC 2782 国际标准: SRV 目标主机必须为主机域名(FQDN)，不可直接为纯 IP
+        import ipaddress
+        is_raw_ip = False
+        try:
+            ipaddress.ip_address(final_target.strip("[]"))
+            is_raw_ip = True
+        except ValueError:
+            pass
+        if is_raw_ip:
+            return False, None, None, (
+                f"SRV 目标地址 [{final_target}] 不能为纯 IP 地址（遵循 RFC 2782 规范）。"
+                f"请在管理后台【域名与 DNS 自动绑定】中配置「目标节点主机名」(如 node1.{root_domain})。"
+            )
 
         if provider == "cloudflare":
             token = (dns_cfg.get("dns_cf_token") or "").strip()

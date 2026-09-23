@@ -1,6 +1,7 @@
 import shutil
 import subprocess
 from typing import List, Tuple
+from config import SERVER_PORT, BASE_VOICE_PORT, BASE_FILE_PORT, BASE_QUERY_PORT, BASE_TSDNS_PORT
 
 def run_cmd(cmd: List[str]) -> Tuple[bool, str]:
     try:
@@ -15,13 +16,13 @@ def auto_open_firewall_ports():
     """
     print("[*] 正在自动检测并配置服务器本地防火墙规则...")
 
-    # 待放行的端口段
+    # 动态构建待放行的端口段（根据 config.py 基础配置）
     port_rules = [
-        ("12345", "tcp"),       # Web 管理平台
-        ("60000-60100", "udp"), # TeamSpeak 语音端口段
-        ("20000-20100", "tcp"), # 文件传输端口段
-        ("30000-30100", "tcp"), # ServerQuery 查询端口段
-        ("40000-40100", "tcp"), # TSDNS 端口段
+        (str(SERVER_PORT), "tcp"),                                    # Web 管理平台
+        (f"{BASE_VOICE_PORT}-{BASE_VOICE_PORT + 200}", "udp"),        # TeamSpeak 语音端口段
+        (f"{BASE_FILE_PORT}-{BASE_FILE_PORT + 200}", "tcp"),          # 文件传输端口段
+        (f"{BASE_QUERY_PORT}-{BASE_QUERY_PORT + 200}", "tcp"),        # ServerQuery 查询端口段
+        (f"{BASE_TSDNS_PORT}-{BASE_TSDNS_PORT + 200}", "tcp"),        # TSDNS 端口段
     ]
 
     # 1. 优先检测 firewalld (CentOS / RHEL / OpenCloudOS / Fedora)
@@ -73,3 +74,13 @@ def open_single_instance_ports(voice_port: int, file_port: int, query_port: int,
             run_cmd(["firewall-cmd", "--permanent", f"--add-port={query_port}/tcp"])
             run_cmd(["firewall-cmd", "--permanent", f"--add-port={tsdns_port}/tcp"])
             run_cmd(["firewall-cmd", "--reload"])
+            return
+
+    if shutil.which("ufw"):
+        ok, out = run_cmd(["ufw", "status"])
+        if ok and "active" in out:
+            run_cmd(["ufw", "allow", f"{voice_port}/udp"])
+            run_cmd(["ufw", "allow", f"{file_port}/tcp"])
+            run_cmd(["ufw", "allow", f"{query_port}/tcp"])
+            run_cmd(["ufw", "allow", f"{tsdns_port}/tcp"])
+            return

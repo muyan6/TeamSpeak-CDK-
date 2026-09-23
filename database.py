@@ -10,11 +10,21 @@ from datetime import datetime, timedelta
 from typing import Optional, List, Dict, Any, Tuple
 from config import DB_PATH
 
+import os
+
 @contextmanager
 def get_connection():
+    db_parent = os.path.dirname(os.path.abspath(DB_PATH))
+    if db_parent and not os.path.exists(db_parent):
+        os.makedirs(db_parent, exist_ok=True)
     conn = sqlite3.connect(DB_PATH, timeout=30)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA busy_timeout = 30000")
+    try:
+        conn.execute("PRAGMA journal_mode = WAL")
+        conn.execute("PRAGMA synchronous = NORMAL")
+    except Exception:
+        pass
     try:
         yield conn
     finally:
@@ -101,6 +111,8 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_trial_server_key ON trial_server_records(server_key)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_trial_resolved_key ON trial_server_records(resolved_key)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_trial_server_addr ON trial_server_records(server_address)")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_instances_voice_port ON instances(voice_port)")
+        cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_instances_container_name ON instances(container_name)")
 
         # 创建系统配置表
         cursor.execute('''
@@ -525,17 +537,14 @@ def has_server_used_trial(addr: str, port: Optional[int] = 9987) -> Tuple[bool, 
     检测目标服务器是否已在本地使用过体验卡（同一 IP 不同端口视为独立服务器）
     """
     server_key, clean_addr, target_port, resolved_ip, resolved_key = normalize_server_target(addr, port)
+    stale_pending_before = (datetime.now() - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
     with get_connection() as conn:
         cursor = conn.cursor()
-        stale_pending_before = (datetime.now() - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+        # 1. 检查 server_key 匹配（排除超时的临时预占）
         cursor.execute(
-            "DELETE FROM trial_server_records "
-            "WHERE target_id LIKE 'pending:%' AND used_at < ?",
-            (stale_pending_before,)
+            "SELECT * FROM trial_server_records WHERE server_key = ? AND (target_id NOT LIKE 'pending:%' OR used_at >= ?)",
+            (server_key, stale_pending_before)
         )
-        conn.commit()
-        # 1. 检查 server_key 匹配
-        cursor.execute("SELECT * FROM trial_server_records WHERE server_key = ?", (server_key,))
         row = cursor.fetchone()
         if row:
             return True, dict(row)
@@ -544,8 +553,8 @@ def has_server_used_trial(addr: str, port: Optional[int] = 9987) -> Tuple[bool, 
         if resolved_key:
             cursor.execute("""
                 SELECT * FROM trial_server_records 
-                WHERE server_key = ? OR resolved_key = ?
-            """, (resolved_key, resolved_key))
+                WHERE (server_key = ? OR resolved_key = ?) AND (target_id NOT LIKE 'pending:%' OR used_at >= ?)
+            """, (resolved_key, resolved_key, stale_pending_before))
             row = cursor.fetchone()
             if row:
                 return True, dict(row)

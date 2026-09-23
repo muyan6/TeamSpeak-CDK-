@@ -5,6 +5,7 @@ import subprocess
 import ipaddress
 import urllib.request
 import json
+import secrets
 from pathlib import Path
 from typing import Optional, Literal, Dict, Any, Tuple, List
 from fastapi import FastAPI, Request, HTTPException, Depends, Header
@@ -30,6 +31,7 @@ from database import (
     get_instance_by_cdk,
     get_all_instances,
     create_instance,
+    update_instance_credentials,
     update_instance_token,
     update_instance_status,
     update_instance_expiry,
@@ -74,6 +76,7 @@ from database import (
     update_instance_domain
 )
 from port_manager import allocate_ports_for_instance
+import docker_service
 from docker_service import (
     deploy_teamspeak_instance,
     get_container_status,
@@ -81,7 +84,8 @@ from docker_service import (
     stop_instance_container,
     restart_instance_container,
     destroy_instance_container,
-    fetch_container_logs
+    fetch_container_logs,
+    extract_credentials_from_container
 )
 from music_bot_service import music_bot_client
 from firewall_service import auto_open_firewall_ports, open_single_instance_ports
@@ -335,7 +339,7 @@ def get_ip_geo_info(ip_str: str) -> Dict[str, Any]:
 
 def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
     current_pwd = get_admin_password()
-    if not x_admin_password or x_admin_password != current_pwd:
+    if not x_admin_password or not secrets.compare_digest(str(x_admin_password), str(current_pwd)):
         raise HTTPException(status_code=401, detail="管理员密码错误或未提供")
     return True
 
@@ -413,13 +417,25 @@ def parse_ts_target_endpoint(req: ParseTsTargetRequest):
     m_conn = list(re.finditer(r"Connect to server:\s*([^\s\r\n]+)", raw_text, re.I))
     if m_conn:
         val = m_conn[-1].group(1).strip()
-        if ":" in val and not val.startswith("http"):
+        if val.startswith("[") and "]" in val:
+            bracket_end = val.find("]")
+            connect_host = val[1:bracket_end].strip()
+            rest = val[bracket_end + 1:]
+            if rest.startswith(":"):
+                try:
+                    connect_port = int(rest[1:].strip())
+                except Exception:
+                    pass
+        elif ":" in val and not val.startswith("http"):
             parts = val.split(":")
-            connect_host = parts[0].strip()
-            try:
-                connect_port = int(parts[1].strip())
-            except Exception:
-                pass
+            if len(parts) == 2:
+                connect_host = parts[0].strip()
+                try:
+                    connect_port = int(parts[1].strip())
+                except Exception:
+                    pass
+            else:
+                connect_host = val
         else:
             connect_host = val
 
@@ -466,7 +482,7 @@ def parse_ts_target_endpoint(req: ParseTsTargetRequest):
     # 语音端口判定优先级
     final_port = srv_target_port or lookup_port or direct_port or connect_port or 9987
 
-    # 若输入了域名且尚未提取到 SRV，主动通过后端 DNS 查询 SRV
+    # 若输入了域名且尚未提取到 SRV，且日志中未直接包含已解析的真实IP，主动通过后端 DNS 查询 SRV
     host_to_query = connect_host or direct_ip
     is_domain = False
     if host_to_query:
@@ -474,7 +490,7 @@ def parse_ts_target_endpoint(req: ParseTsTargetRequest):
             ipaddress.ip_address(host_to_query)
         except ValueError:
             is_domain = True
-            if not srv_target_host:
+            if not srv_target_host and not (direct_ip or lookup_ip):
                 s_host, s_port = resolve_srv_record(host_to_query)
                 if s_host:
                     srv_target_host = s_host
@@ -665,6 +681,21 @@ def redeem_cdk(req: RedeemRequest, request: Request):
         instance_id = cdk_info.get("instance_id")
         instance = get_instance_by_id(instance_id) if instance_id else None
         if instance:
+            # 凭据自愈：若首次开机慢导致凭据未提取，再次使用 CDK 访问时从日志尝试提取并持久化
+            if not instance.get("admin_token"):
+                try:
+                    recovered = docker_service.extract_credentials_from_container(instance["id"])
+                    if recovered.get("admin_token"):
+                        update_instance_credentials(
+                            instance["id"],
+                            recovered.get("admin_token", ""),
+                            recovered.get("query_password", ""),
+                            recovered.get("query_apikey", "")
+                        )
+                        instance.update(recovered)
+                except Exception:
+                    pass
+
             dns_cfg = get_dns_config()
             dns_enabled = dns_cfg.get("dns_enabled", False)
             subdomain_input = (req.subdomain or "").strip()
@@ -687,22 +718,28 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                     instance["domain_record_id"] = rec_id
                     instance["public_host"] = full_d
                     instance["has_domain"] = True
+                    instance_view = dict(instance)
+                    instance_view.pop("dir_path", None)
+                    instance_view.pop("domain_record_id", None)
                     return {
                         "success": True,
                         "type": "teamspeak",
                         "message": f"该 CDK 已激活。已成功为您的服务器补绑专属二级域名: {full_d}（免输入端口直连）！",
-                        "instance": instance
+                        "instance": instance_view
                     }
                 else:
                     return JSONResponse(status_code=400, content={"success": False, "message": f"域名补绑失败: {err_dns}"})
 
             instance["public_host"] = instance.get("subdomain") or client_host
             instance["has_domain"] = bool(instance.get("subdomain"))
+            instance_view = dict(instance)
+            instance_view.pop("dir_path", None)
+            instance_view.pop("domain_record_id", None)
             return {
                 "success": True,
                 "type": "teamspeak",
                 "message": f"该 CDK 已于 {cdk_info['used_at']} 激活，已为您加载服务器连接信息",
-                "instance": instance
+                "instance": instance_view
             }
         return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 已被激活使用，但绑定的 TeamSpeak 实例已不存在"})
 
@@ -737,17 +774,17 @@ def redeem_cdk(req: RedeemRequest, request: Request):
 
     # 执行 Docker 部署流水线
     try:
-        success, creds, msg = deploy_teamspeak_instance(instance_id, ports)
+        success, creds, msg = docker_service.deploy_teamspeak_instance(instance_id, ports)
     except Exception as e:
         success, creds, msg = False, {}, f"部署过程异常: {e}"
     if not success:
-        destroy_instance_container(instance_id, delete_files=True)
+        docker_service.destroy_instance_container(instance_id, delete_files=True)
         release_cdk_claim(code)
         return JSONResponse(status_code=500, content={"success": False, "message": f"服务器创建失败: {msg}"})
 
-    live_status = get_container_status(instance_id)
-    if live_status != "running":
-        destroy_instance_container(instance_id, delete_files=True)
+    live_status = docker_service.get_container_status(instance_id)
+    if live_status not in ("running", "unknown"):
+        docker_service.destroy_instance_container(instance_id, delete_files=True)
         release_cdk_claim(code)
         return JSONResponse(status_code=500, content={
             "success": False,
@@ -770,9 +807,10 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     domain_record_id = None
     dns_bind_msg = ""
     if dns_enabled and subdomain_input:
+        target_host = dns_cfg.get("dns_target_host") or client_host
         ok_dns, rec_id, full_domain, err_dns = dns_service.create_ts_srv_record(
             subdomain_prefix=subdomain_input,
-            target_host=client_host,
+            target_host=target_host,
             voice_port=ports["voice"],
             dns_cfg=dns_cfg
         )
@@ -815,7 +853,7 @@ def redeem_cdk(req: RedeemRequest, request: Request):
             except Exception as d_err:
                 print(f"[Warning] 回滚时删除 DNS 记录异常: {d_err}")
         delete_instance(instance_id)
-        destroy_instance_container(instance_id, delete_files=True)
+        docker_service.destroy_instance_container(instance_id, delete_files=True)
         release_cdk_claim(code)
         return JSONResponse(status_code=500, content={"success": False, "message": f"服务器记录失败: {str(e)}"})
     instance["public_host"] = bound_subdomain or client_host
@@ -842,7 +880,7 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                 except Exception as d_err:
                     print(f"[Warning] 体验卡回滚时删除 DNS 记录异常: {d_err}")
             delete_instance(instance_id)
-            destroy_instance_container(instance_id, delete_files=True)
+            docker_service.destroy_instance_container(instance_id, delete_files=True)
             unbind_cdk_instance(code, instance_id)
             release_cdk_claim(code)
             return JSONResponse(status_code=500, content={"success": False, "message": f"体验记录失败: {str(e)}"})
@@ -855,11 +893,14 @@ def redeem_cdk(req: RedeemRequest, request: Request):
 
     expire_desc = f"到期时间: {expire_at}" if expire_at != "permanent" else "永久有效"
     credential_desc = "凭据已提取" if instance["credentials_ready"] else "容器已启动，但首次凭据仍在日志中等待提取"
+    instance_view = dict(instance)
+    instance_view.pop("dir_path", None)
+    instance_view.pop("domain_record_id", None)
     return {
         "success": True,
         "type": "teamspeak",
         "message": f"恭喜！TeamSpeak 服务器 ({name}) 已成功开通并启动！{dns_bind_msg} ({expire_desc}；{credential_desc})",
-        "instance": instance
+        "instance": instance_view
     }
 
 @app.post("/api/redeem-bot")
@@ -1511,6 +1552,8 @@ def manage_instance(instance_id: int, req: InstanceActionRequest, _: bool = Depe
                 "message": f"实例 ts{instance_id} 清理失败，数据库记录已保留，请检查 Docker 和数据目录"
             })
         delete_instance(instance_id)
+        if instance.get("cdk_code"):
+            unbind_cdk_instance(instance["cdk_code"], instance_id)
         return {"success": True, "message": f"实例 ts{instance_id} 及其存储目录已彻底销毁"}
 
     else:
@@ -1602,6 +1645,8 @@ def batch_manage_instances_api(req: BatchActionInstancesRequest, _: bool = Depen
                 except Exception as d_err:
                     print(f"[Warning] 批量销毁实例 ts{instance_id} 时删除 DNS 记录异常: {d_err}")
             if destroy_instance_container(instance_id, delete_files=True) and delete_instance(instance_id):
+                if inst and inst.get("cdk_code"):
+                    unbind_cdk_instance(inst["cdk_code"], instance_id)
                 success_count += 1
     return {"success": True, "count": success_count, "message": f"已成功对 {success_count} 个 TS 实例执行【{action}】操作"}
 

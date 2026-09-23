@@ -219,6 +219,25 @@ def restart_instance_container(instance_id: int) -> bool:
     except Exception:
         return False
 
+def _robust_rmtree(path: str):
+    import stat
+    def on_err(func, p, exc_info):
+        try:
+            os.chmod(p, stat.S_IWRITE | stat.S_IREAD | stat.S_IEXEC)
+            func(p)
+        except Exception:
+            pass
+    try:
+        shutil.rmtree(path, onerror=on_err)
+    except Exception:
+        pass
+    if os.path.exists(path):
+        time.sleep(0.5)
+        try:
+            shutil.rmtree(path, ignore_errors=True)
+        except Exception:
+            pass
+
 def destroy_instance_container(instance_id: int, delete_files: bool = True) -> bool:
     instance_dir = get_instance_dir(instance_id)
     cmd = get_compose_cmd() + ["down", "-v"]
@@ -236,8 +255,8 @@ def destroy_instance_container(instance_id: int, delete_files: bool = True) -> b
         )
         if res.returncode != 0:
             return False
-        if delete_files:
-            shutil.rmtree(instance_dir, ignore_errors=False)
+        if delete_files and os.path.exists(instance_dir):
+            _robust_rmtree(instance_dir)
             if os.path.exists(instance_dir):
                 return False
         return True
@@ -257,3 +276,18 @@ def fetch_container_logs(instance_id: int, tail_lines: int = 150) -> str:
         return res.stdout + (("\n[STDERR]\n" + res.stderr) if res.stderr else "")
     except Exception as e:
         return f"获取日志出错: {str(e)}"
+
+def extract_credentials_from_container(instance_id: int) -> Dict[str, str]:
+    container_name = f"ts-teamspeak-{instance_id}"
+    try:
+        log_res = subprocess.run(
+            ["docker", "logs", container_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            timeout=10
+        )
+        logs = log_res.stdout + "\n" + log_res.stderr
+        return extract_credentials_from_logs(logs)
+    except Exception:
+        return {"admin_token": "", "query_user": "serveradmin", "query_password": "", "query_apikey": ""}
