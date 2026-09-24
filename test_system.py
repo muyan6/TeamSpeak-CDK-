@@ -161,8 +161,10 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertEqual(creds["query_password"], "SecretPassword123!")
         self.assertEqual(creds["query_apikey"], "AbCdEf123456")
 
+    @unittest.skipUnless(os.getenv("RUN_NETWORK_TESTS") == "1",
+                         "依赖真实远程平台的联网测试，需设置 RUN_NETWORK_TESTS=1 才执行")
     def test_music_bot_client_connectivity(self):
-        # 测试音乐机器人远程平台鉴权与信息抓取（若远程服务离线则跳过或模拟）
+        # 测试音乐机器人远程平台鉴权与信息抓取（真实联网，CI/离线环境默认跳过）
         ok, res = music_bot_client.get_all_bots()
         if ok:
             self.assertIsInstance(res, dict)

@@ -2461,6 +2461,7 @@
         const res = await fetch('/api/admin/trial-records', {
           headers: { 'X-Admin-Password': '' }
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
         const data = await res.json();
         if (data.success) {
           _allTrialRecords = data.records || [];
