@@ -156,17 +156,24 @@ class MusicBotClient:
         with self._cookie_lock:
             return self._session_cookie
 
+    # 仅这些幂等方法可安全重试。
+    # POST 创建机器人 / 创建用户不是幂等的：请求可能已到达远端并执行成功，只是响应丢失，
+    # 重试会重复创建实例与账号，因此 POST / PUT / DELETE 一律不自动重试。
+    _RETRYABLE_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
     def _do_request(self, method: str, url: str, headers: Dict[str, str], body: Optional[bytes]) -> httpx.Response:
-        """带指数退避的请求执行，缓解远端瞬时抖动/超时。"""
+        """带指数退避的请求执行，缓解远端瞬时抖动/超时（只重试幂等方法）。"""
+        upper = method.upper()
+        max_attempts = (_MAX_RETRIES + 1) if upper in self._RETRYABLE_METHODS else 1
         last_err: Optional[Exception] = None
-        for attempt in range(_MAX_RETRIES + 1):
+        for attempt in range(max_attempts):
             try:
                 return self._client.request(
-                    method.upper(), url, content=body, headers=headers, timeout=_REQUEST_TIMEOUT
+                    upper, url, content=body, headers=headers, timeout=_REQUEST_TIMEOUT
                 )
             except Exception as err:
                 last_err = err
-                if attempt < _MAX_RETRIES:
+                if attempt < max_attempts - 1:
                     time.sleep(0.5 * (2 ** attempt))
         raise last_err if last_err else RuntimeError("请求失败")
 
@@ -333,7 +340,8 @@ class MusicBotClient:
         stop_ok, stop_res = self.stop_bot(bot_id)
         if not stop_ok:
             logger.info("restart_bot: 停止机器人 [%s] 响应: %s（可能处于非运行状态，继续尝试启动）", bot_id, stop_res)
-        time.sleep(1)
+        # 给远端留出释放资源的窗口，但避免在请求线程里长睡（原 1s 在批量重启时会线性放大）
+        time.sleep(0.5)
         return self.start_bot(bot_id)
 
     def delete_bot(self, bot_id: str) -> Tuple[bool, Any]:

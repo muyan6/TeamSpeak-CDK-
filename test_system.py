@@ -911,7 +911,10 @@ class TestTeamSpeakManager(unittest.TestCase):
                 webUsername="vip_music_user",
                 webPassword="password_888"
             )
-            resp = ts_app.redeem_bot_instance(req)
+            mock_request = MagicMock()
+            mock_request.client.host = "127.0.0.1"
+            mock_request.headers = {}
+            resp = ts_app.redeem_bot_instance(req, mock_request)
 
             self.assertIsInstance(resp, dict)
             self.assertTrue(resp["success"])
@@ -960,21 +963,33 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertIsNotNone(bot)
         database.bind_cdk_bot(cdk, bot_id)
 
-        # 模拟误删
+        # 模拟管理员删除（现为「吊销」语义：保留记录但置为 disabled，防止自愈复活已作废卡密）
         del_ok = database.delete_cdk(cdk)
         self.assertTrue(del_ok)
-        self.assertIsNone(database.get_cdk(cdk))
+        revoked = database.get_cdk(cdk)
+        self.assertIsNotNone(revoked)
+        self.assertEqual(revoked["status"], "disabled")
 
         # 验证能通过 bot_instances 查找到绑定的机器人
         found_bot = database.get_bot_instance_by_cdk(cdk)
         self.assertIsNotNone(found_bot)
         self.assertEqual(found_bot["bot_id"], bot_id)
 
-        # 验证手动/自愈补全函数 restore_bot_cdk
+        # 已吊销的卡密即使被自愈逻辑触碰，也必须保持 disabled（不得复活）
         restored = database.restore_bot_cdk(cdk, bot_id, 1)
         self.assertIsNotNone(restored)
-        self.assertEqual(restored["status"], "used")
+        self.assertEqual(restored["status"], "disabled")
         self.assertEqual(restored["bot_id"], bot_id)
+
+        # 物理删除后再自愈，才应恢复为 used（模拟「记录被误删」的真实场景）
+        with database.get_connection() as conn:
+            conn.execute("DELETE FROM cdks WHERE code = ?", (cdk,))
+            conn.commit()
+        self.assertIsNone(database.get_cdk(cdk))
+        restored_again = database.restore_bot_cdk(cdk, bot_id, 1)
+        self.assertIsNotNone(restored_again)
+        self.assertEqual(restored_again["status"], "used")
+        self.assertEqual(restored_again["bot_id"], bot_id)
 
         # 验证机器人延期函数 renew_bot_instance
         renewed = database.renew_bot_instance(bot_id, 2)
@@ -989,9 +1004,9 @@ class TestTeamSpeakManager(unittest.TestCase):
             database.delete_cdk(cdk)
             return
 
-        # 模拟再次删除 CDK 并调用 /api/redeem 触发自动自愈
+        # 管理员「删除」= 吊销：记录保留但置 disabled，前台必须明确拒绝，不得自愈复活
         database.delete_cdk(cdk)
-        self.assertIsNone(database.get_cdk(cdk))
+        self.assertEqual(database.get_cdk(cdk)["status"], "disabled")
 
         mock_request = MagicMock()
         mock_request.client.host = "127.0.0.1"
@@ -1000,20 +1015,33 @@ class TestTeamSpeakManager(unittest.TestCase):
         with patch.object(ts_app.music_bot_client, "get_bot", return_value=(True, {"status": "running"})):
             query_req = ts_app.RedeemRequest(cdk=cdk)
             res = ts_app.redeem_cdk(query_req, mock_request)
-            self.assertIsInstance(res, dict)
-            self.assertTrue(res["success"])
-            self.assertEqual(res["instance"]["bot_id"], bot_id)
+            self.assertEqual(getattr(res, "status_code", 200), 403)
+            self.assertEqual(database.get_cdk(cdk)["status"], "disabled")
 
+        # 物理删除记录（模拟误删）后，前台兑换应触发自愈恢复并正常返回
+        with database.get_connection() as conn:
+            conn.execute("DELETE FROM cdks WHERE code = ?", (cdk,))
+            conn.commit()
+        self.assertIsNone(database.get_cdk(cdk))
+
+        with patch.object(ts_app.music_bot_client, "get_bot", return_value=(True, {"status": "running"})):
+            query_req2 = ts_app.RedeemRequest(cdk=cdk)
+            res2 = ts_app.redeem_cdk(query_req2, mock_request)
+            self.assertIsInstance(res2, dict)
+            self.assertTrue(res2["success"])
+            self.assertEqual(res2["instance"]["bot_id"], bot_id)
         self.assertIsNotNone(database.get_cdk(cdk))
 
-        # 测试管理员续费接口
+        # 测试管理员续费接口（duration_months 现在被限制为 0/1/3/6/12，使用 3）
         with patch.object(ts_app.music_bot_client, "start_bot", return_value=(True, "ok")):
-            renew_req = ts_app.AdminRenewBotRequest(duration_months=2)
+            renew_req = ts_app.AdminRenewBotRequest(duration_months=3)
             renew_res = ts_app.admin_renew_bot_api(bot_id, renew_req, _=True)
             self.assertTrue(renew_res["success"])
 
-        # 测试管理员一键恢复 CDK 接口
-        database.delete_cdk(cdk)
+        # 测试管理员一键恢复 CDK 接口（先物理删除，模拟记录丢失）
+        with database.get_connection() as conn:
+            conn.execute("DELETE FROM cdks WHERE code = ?", (cdk,))
+            conn.commit()
         self.assertIsNone(database.get_cdk(cdk))
         restore_res = ts_app.admin_restore_bot_cdk_api(bot_id, _=True)
         self.assertTrue(restore_res["success"])
@@ -1136,7 +1164,10 @@ class TestTeamSpeakManager(unittest.TestCase):
                 webUsername="manager_user",
                 webPassword="super_password_888"
             )
-            resp = ts_app.redeem_bot_instance(req)
+            mock_request = MagicMock()
+            mock_request.client.host = "127.0.0.1"
+            mock_request.headers = {}
+            resp = ts_app.redeem_bot_instance(req, mock_request)
 
             self.assertTrue(resp["success"])
             self.assertEqual(resp["permission_notice"], "尊享机器人管理员权限与后台")

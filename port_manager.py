@@ -2,7 +2,7 @@ import os
 import socket
 import subprocess
 import threading
-from typing import Tuple, Dict, Any
+from typing import Tuple, Dict, Any, Callable, Optional
 from config import BASE_VOICE_PORT, BASE_FILE_PORT, BASE_QUERY_PORT, BASE_TSDNS_PORT, DATA_BASE_DIR
 from database import get_all_used_ports, get_next_instance_id, get_instance_by_id
 
@@ -46,13 +46,21 @@ def is_container_name_taken(container_name: str) -> bool:
     except Exception:
         return False
 
-def allocate_ports_for_instance(desired_id: int = None) -> Tuple[int, Dict[str, int]]:
+def allocate_ports_for_instance(
+    desired_id: int = None,
+    reserve: Optional[Callable[[int, Dict[str, int]], bool]] = None
+) -> Tuple[int, Dict[str, int]]:
     """
     为新开通的实例分配唯一编号及端口：
     1. 避让官方已被占用的基础端口 (9987, 30033, 10011, 41144)
     2. 检查数据库已分配端口
     3. 检查宿主机当前实际网络 Socket 占用
     4. 检查宿主机 Docker 是否已有历史同名容器 / 历史目录
+
+    reserve 回调（可选）：在持有分配锁的临界区内被调用，入参为 (instance_id, ports)。
+    回调内应把「实例编号 + 四类端口」以 provisioning 状态原子落库（依赖端口上的 UNIQUE 索引）。
+    返回 False 表示该编号已被其它并发请求抢占，分配器会自动顺延到下一个候选编号。
+
     返回: (instance_id, {"voice": 9988, "file": 30034, "query": 10012, "tsdns": 41145})
     """
     with _ALLOCATION_LOCK:
@@ -130,10 +138,18 @@ def allocate_ports_for_instance(desired_id: int = None) -> Tuple[int, Dict[str, 
                 candidate_id += 1
                 continue
 
-            # 找到完美可用的端口组与实例ID
-            return candidate_id, {
+            ports = {
                 "voice": voice_p,
                 "file": file_p,
                 "query": query_p,
                 "tsdns": tsdns_p
             }
+
+            # 在锁内完成预占，确保并发请求无法拿到同一编号/端口
+            if reserve is not None:
+                if not reserve(candidate_id, ports):
+                    candidate_id += 1
+                    continue
+
+            # 找到完美可用的端口组与实例ID
+            return candidate_id, ports

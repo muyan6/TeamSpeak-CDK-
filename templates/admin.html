@@ -644,7 +644,8 @@
                   <i class="fa-solid fa-lock" style="color: #facc15;"></i> 平台管理员密码 (Password)
                 </label>
                 <div style="position: relative; display: flex; align-items: center;">
-                  <input type="password" id="cfgBotPass" class="form-control" style="width: 100%; padding: 0.65rem 2.5rem 0.65rem 0.9rem;" placeholder="输入对接平台的登录密码" required>
+                  <!-- 不加 required：加载配置后密码框会留空表示「保持原密码不变」，若强制必填将无法只改 URL -->
+                  <input type="password" id="cfgBotPass" class="form-control" style="width: 100%; padding: 0.65rem 2.5rem 0.65rem 0.9rem;" placeholder="输入对接平台的登录密码（已配置时可留空表示不修改）">
                   <button type="button" class="btn-action" style="position: absolute; right: 6px; padding: 0.3rem 0.5rem; border: none; background: transparent;" onclick="toggleBotPassVisibility()">
                     <i class="fa-regular fa-eye" id="toggleBotPassIcon" style="color: var(--text-muted);"></i>
                   </button>
@@ -1529,13 +1530,14 @@
             </td>
             <td>
               <div style="font-size: 0.8rem; color: #fca5a5; display: flex; align-items: center; gap: 0.3rem;">
-                <span title="${escapeHtml(inst.admin_token || '')}">Token: ${inst.admin_token ? escapeHtml(inst.admin_token.slice(0, 10) + '...') : '无'}</span>
-                ${inst.admin_token ? `<button class="btn-action btn-action-sm" onclick="copyToClipboard(${jsString(inst.admin_token)}, '已复制管理员 Token')"><i class="fa-regular fa-copy"></i></button>` : ''}
+                <span>Token: ${inst.has_admin_token ? '已提取' : '无'}</span>
+                ${inst.has_admin_token ? `<button class="btn-action btn-action-sm" title="复制管理员 Token" onclick="copyInstanceCredential(${inst.id}, 'admin_token')"><i class="fa-regular fa-copy"></i></button>` : ''}
               </div>
               <div style="font-size: 0.78rem; color: #facc15; margin-top: 3px; display: flex; align-items: center; gap: 0.3rem;">
-                <span title="${escapeHtml(inst.query_password || '')}">密码: ${inst.query_password ? escapeHtml(inst.query_password.slice(0, 10) + '...') : '无'}</span>
-                ${inst.query_password ? `<button class="btn-action btn-action-sm" onclick="copyToClipboard(${jsString(inst.query_password)}, '已复制 Query 密码')"><i class="fa-regular fa-copy"></i></button>` : ''}
+                <span>密码: ${inst.has_query_password ? '已提取' : '无'}</span>
+                ${inst.has_query_password ? `<button class="btn-action btn-action-sm" title="复制 Query 密码" onclick="copyInstanceCredential(${inst.id}, 'query_password')"><i class="fa-regular fa-copy"></i></button>` : ''}
               </div>
+              ${inst.has_query_apikey ? `<div style="font-size: 0.78rem; color: #a78bfa; margin-top: 3px; display: flex; align-items: center; gap: 0.3rem;"><span>API Key: 已提取</span><button class="btn-action btn-action-sm" title="复制 API Key" onclick="copyInstanceCredential(${inst.id}, 'query_apikey')"><i class="fa-regular fa-copy"></i></button></div>` : ''}
             </td>
              <td style="font-size: 0.85rem; color: #facc15;">${escapeHtml(inst.expire_at || '永久有效')}</td>
             <td>
@@ -1562,7 +1564,31 @@
           </tr>
         `).join('');
       } catch (e) {
-        tbody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
+        tbody.innerHTML = '<tr><td colspan="12" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
+      }
+    }
+
+    // 凭据按需单取：列表接口只回传「是否已提取」，真实值在这里点击时才拉取并复制
+    async function copyInstanceCredential(instanceId, field) {
+      try {
+        const res = await fetch(`/api/admin/instances/${instanceId}/credentials`, {
+          headers: { 'X-Admin-Password': '' }
+        });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
+        const data = await res.json();
+        if (!data.success || !data.credentials) {
+          showToast(data.message || data.detail || '读取凭据失败', 'error');
+          return;
+        }
+        const labels = { admin_token: '管理员 Token', query_password: 'Query 密码', query_apikey: 'API Key' };
+        const value = data.credentials[field];
+        if (!value) {
+          showToast(`该实例尚未提取${labels[field] || '凭据'}`, 'error');
+          return;
+        }
+        copyToClipboard(value, `已复制${labels[field] || '凭据'}`);
+      } catch (e) {
+        showToast('读取凭据请求异常', 'error');
       }
     }
 
@@ -1626,6 +1652,7 @@
         const res = await fetch('/api/admin/bots', {
           headers: { 'X-Admin-Password': '' }
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
         const data = await res.json();
         if (data.bot_panel_url) {
           updateBotPanelUrls(data.bot_panel_url);
@@ -2257,6 +2284,8 @@
         const res = await fetch('/api/admin/cdks', {
           headers: { 'X-Admin-Password': '' }
         });
+        // 会话过期时回登录页，而不是停留在「加载失败」的死界面
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
         const data = await res.json();
         if (!data.success) {
           tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; color: #f87171; padding: 2rem;">加载失败</td></tr>';
@@ -2671,10 +2700,11 @@
       const user = document.getElementById('cfgBotUser').value.trim();
       const password = document.getElementById('cfgBotPass').value.trim();
 
-      if (!url || !user || !password) {
-        showToast('请先输入网站地址、账号和密码后再测试', 'error');
+      if (!url || !user) {
+        showToast('请先输入网站地址与账号后再测试', 'error');
         return;
       }
+      // 密码留空时后端会回落到数据库中的真实配置，因此这里不再强制要求填写
 
       const testBtn = document.getElementById('testBotConfigBtn');
       const spinner = document.getElementById('testConfigSpinner');

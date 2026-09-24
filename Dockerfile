@@ -20,10 +20,15 @@ WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app.py config.py database.py dns_service.py docker_service.py firewall_service.py music_bot_service.py port_manager.py requirements.txt ./
+COPY app.py config.py database.py dns_service.py docker_service.py firewall_service.py \
+     music_bot_service.py port_manager.py rate_limit.py requirements.txt ./
 COPY templates ./templates
 COPY static ./static
 
 EXPOSE 12345
+
+# 健康检查：命中管理员会话探测接口，未登录返回 401 也说明进程存活
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD curl -fsS http://127.0.0.1:12345/api/admin/session > /dev/null || exit 1
 
 CMD ["python", "app.py"]

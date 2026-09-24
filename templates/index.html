@@ -338,7 +338,7 @@
               </div>
               <div>
                 <label class="info-label">后台登录密码 (≥8位)</label>
-                <input type="text" id="botWebPassInput" class="form-control" style="width: 100%; font-family: 'Consolas', 'Courier New', monospace;" placeholder="请输入至少 8 位密码" maxlength="64">
+                <input type="text" id="botWebPassInput" class="form-control" style="width: 100%; font-family: 'Consolas', 'Courier New', monospace;" placeholder="请输入至少 8 位密码" maxlength="64" autocomplete="off">
               </div>
             </div>
           </div>
@@ -782,6 +782,10 @@
     function handleCdkInputChange() {
       const cdkInput = document.getElementById('cdkInput');
       const val = (cdkInput ? cdkInput.value : '').trim().toUpperCase();
+      // 同时把输入框值规范为大写，保证提交到后端的内容与这里判断的类型一致
+      if (cdkInput && cdkInput.value !== val) {
+        cdkInput.value = val;
+      }
       const wrapper = document.getElementById('subdomainWrapper');
       const botNotice = document.getElementById('botDetectedNotice');
       const accordion = document.getElementById('subdomainAccordion');
@@ -791,7 +795,8 @@
         return;
       }
 
-      if (val.startsWith('BOT-') || val.startsWith('BOT')) {
+      // 只按规范前缀 BOT- 判断，避免 BOTANY 之类的普通卡密被误识别为机器人卡
+      if (val.startsWith('BOT-')) {
         // 识别到音乐机器人卡密：隐藏二级域名折叠面板，展示轻量提示
         if (wrapper) wrapper.style.display = 'block';
         if (accordion) accordion.style.display = 'none';
@@ -805,15 +810,29 @@
     }
 
     let botTutorialUrl = "{{ bot_tutorial_url or 'http://103.71.69.156:23452/' }}";
+    // 只允许 http/https 跳转，防止后台配置被污染后注入 javascript: 伪协议链接
+    function safeExternalUrl(url) {
+      const val = String(url || '').trim();
+      if (!val) return '';
+      try {
+        const parsed = new URL(val, window.location.origin);
+        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') return parsed.href;
+      } catch (e) {
+        return '';
+      }
+      return '';
+    }
+
     function updateBotTutorialLinks(url) {
-      if (!url) return;
-      botTutorialUrl = url;
+      const safeUrl = safeExternalUrl(url);
+      if (!safeUrl) return;
+      botTutorialUrl = safeUrl;
       const btn1 = document.getElementById('botConfigTutorialBtn');
       const btn2 = document.getElementById('botConfigTutorialBannerLink');
       const btn3 = document.getElementById('botResultTutorialLink');
-      if (btn1) btn1.href = url;
-      if (btn2) btn2.href = url;
-      if (btn3) btn3.href = url;
+      if (btn1) btn1.href = safeUrl;
+      if (btn2) btn2.href = safeUrl;
+      if (btn3) btn3.href = safeUrl;
     }
 
     async function fetchDnsInfo() {
@@ -851,12 +870,15 @@
 
       clearTimeout(checkSubdomainTimer);
       if (!val) {
+        // 关键：清空输入也要让在途请求失效，否则旧响应回来会把已清空的输入渲染成「✓ 可用」
+        subdomainCheckSeq++;
         if (badge) badge.style.display = 'none';
         if (feedback) feedback.style.display = 'none';
         return;
       }
 
       if (val.length < 2) {
+        subdomainCheckSeq++;
         if (badge) {
           badge.style.display = 'inline-block';
           badge.className = 'badge badge-warning';
@@ -884,6 +906,13 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ subdomain: val })
           });
+          if (!resp.ok) {
+            if (seq === subdomainCheckSeq && badge) {
+              badge.className = 'badge badge-warning';
+              badge.innerText = '查重失败';
+            }
+            return;
+          }
           const data = await resp.json();
           // 异步竞态保护：仅渲染最后一次输入的响应，避免旧响应覆盖新状态
           if (seq !== subdomainCheckSeq) return;
@@ -933,12 +962,14 @@
       if (addrInput && portInput) {
         addrInput.addEventListener('input', (e) => {
           const val = e.target.value.trim();
-          if (val.includes(':') && !val.startsWith('http://') && !val.startsWith('https://')) {
-            const parts = val.split(':');
+          // 跳过 IPv6 字面量（含多个冒号，或 [::1]:9987 形式），否则会把地址拆坏
+          if (val.startsWith('[') || (val.match(/:/g) || []).length !== 1) return;
+          if (val.startsWith('http://') || val.startsWith('https://')) return;
+          const parts = val.split(':');
+          const portCandidate = parts[1].trim();
+          if (/^\d{1,5}$/.test(portCandidate)) {
             e.target.value = parts[0].trim();
-            if (parts[1] && !isNaN(parts[1])) {
-              portInput.value = parseInt(parts[1]);
-            }
+            portInput.value = parseInt(portCandidate, 10);
           }
         });
       }
@@ -947,7 +978,8 @@
     async function handleRedeem(e) {
       e.preventDefault();
       const cdkInput = document.getElementById('cdkInput');
-      const cdk = cdkInput.value.trim();
+      // 后端 get_cdk 按原样匹配（大小写敏感），必须与前端的视觉大写保持一致，否则用户输入小写会「卡密不存在」
+      const cdk = cdkInput.value.trim().toUpperCase();
       if (!cdk) return;
 
       const subInput = document.getElementById('subdomainInput');
@@ -977,9 +1009,12 @@
           body: JSON.stringify({ cdk: cdk, subdomain: subdomain })
         });
 
+        if (!response.ok) {
+          throw new Error(await readApiError(response));
+        }
         const res = await response.json();
 
-        if (!response.ok || !res.success) {
+        if (!res.success) {
           throw new Error(res.message || '操作失败，请重试');
         }
 
@@ -1109,8 +1144,11 @@
           body: JSON.stringify(payload)
         });
 
+        if (!response.ok) {
+          throw new Error(await readApiError(response, '创建机器人失败'));
+        }
         const res = await response.json();
-        if (!response.ok || !res.success) {
+        if (!res.success) {
           throw new Error(res.message || '创建机器人失败');
         }
 
@@ -1149,22 +1187,40 @@
       document.getElementById('resBotNick').innerText = bot.nickname || 'MusicBot';
       document.getElementById('resBotExpire').innerText = bot.expire_at || '永久有效';
       document.getElementById('resBotChannel').innerText = bot.default_channel || '默认大厅';
-      document.getElementById('resBotStatusBadge').innerText = bot.status === 'active' ? '运行中 (Active)' : (bot.status === 'expired' ? '已到期 (Expired)' : '已停止 (Stopped)');
+      // 完整映射后端可能返回的状态，避免把 provisioning / pending 等中间态一律显示成「已停止」
+      const botBadge = document.getElementById('resBotStatusBadge');
+      const botStatusMap = {
+        active: ['运行中 (Active)', 'badge-success'],
+        stopped: ['已停止 (Stopped)', 'badge-warning'],
+        expired: ['已到期 (Expired)', 'badge-danger'],
+        error: ['异常 (Error)', 'badge-danger'],
+        provisioning: ['启动中 (Provisioning)', 'badge-info'],
+        pending: ['等待中 (Pending)', 'badge-info'],
+      };
+      const mapped = botStatusMap[bot.status] || [`未知状态 (${bot.status || '-'})`, 'badge-info'];
+      botBadge.innerText = mapped[0];
+      botBadge.className = `badge ${mapped[1]}`;
 
       // 渲染 Web 点歌账号凭据
       const webBox = document.getElementById('resBotWebAccountBox');
       const webUserSpan = document.getElementById('resBotWebUser');
       const webPassSpan = document.getElementById('resBotWebPass');
-      if (bot.web_username && bot.web_password) {
+      if (bot.web_username) {
         if (webBox) webBox.style.display = 'block';
         if (webUserSpan) webUserSpan.innerText = bot.web_username;
-        if (webPassSpan) webPassSpan.innerText = bot.web_password;
+        if (webPassSpan) {
+          // 后端在查询既有实例时不会回传明文密码（只给 has_web_password），此时给出明确指引
+          webPassSpan.innerText = bot.web_password
+            ? bot.web_password
+            : (bot.has_web_password ? '（为安全起见不重复显示，请使用您开通时设置的密码）' : '-');
+        }
       } else {
         if (webBox) webBox.style.display = 'none';
       }
 
-      if (panelUrl) {
-        document.getElementById('botWebPanelLink').href = panelUrl;
+      const safePanelUrl = safeExternalUrl(panelUrl);
+      if (safePanelUrl) {
+        document.getElementById('botWebPanelLink').href = safePanelUrl;
       }
 
       botResultCard.scrollIntoView({ behavior: 'smooth' });
@@ -1187,8 +1243,11 @@
           body: JSON.stringify({ cdk: cdk, bot_id: currentBotInstance.bot_id })
         });
 
+        if (!response.ok) {
+          throw new Error(await readApiError(response, '续费失败'));
+        }
         const res = await response.json();
-        if (!response.ok || !res.success) {
+        if (!res.success) {
           throw new Error(res.message || '续费失败');
         }
 
@@ -1204,16 +1263,31 @@
 
     async function botAction(action) {
       if (!currentBotInstance || !currentBotInstance.bot_id) return;
+      // 后端以 cdk 作为访问凭据校验，缺失时直接提示而不是发一个必然 403 的请求
+      const accessCdk = currentBotInstance.cdk_code || currentBotInstance.cdk || '';
+      if (!accessCdk) {
+        showToast('缺少机器人访问凭据（CDK），请重新输入原 CDK 后再操作', 'error');
+        return;
+      }
       try {
-        const res = await fetch(`/api/bot-instances/${currentBotInstance.bot_id}/action`, {
+        const res = await fetch(`/api/bot-instances/${encodeURIComponent(currentBotInstance.bot_id)}/action`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ action, cdk: currentBotInstance.cdk_code || '' })
+          body: JSON.stringify({ action, cdk: accessCdk })
         });
+        if (!res.ok) {
+          throw new Error(await readApiError(res, '操作失败'));
+        }
         const data = await res.json();
-        alert(data.message || '操作完成');
+        showToast(data.message || '操作完成', 'success');
+        // 操作后刷新展示的状态徽标
+        if (data.success) {
+          if (action === 'start' || action === 'restart') currentBotInstance.status = 'active';
+          if (action === 'stop') currentBotInstance.status = 'stopped';
+          renderBotResult(currentBotInstance);
+        }
       } catch (e) {
-        alert('操作失败');
+        showToast(e.message || '操作失败', 'error');
       }
     }
 
@@ -1288,8 +1362,11 @@
           body: JSON.stringify({ cdk: cdk, instance_id: currentInstance.id })
         });
 
+        if (!response.ok) {
+          throw new Error(await readApiError(response, '续费失败'));
+        }
         const res = await response.json();
-        if (!response.ok || !res.success) {
+        if (!res.success) {
           throw new Error(res.message || '续费失败');
         }
 
@@ -1311,6 +1388,37 @@
         '"': '&quot;',
         "'": '&#39;'
       }[char]));
+    }
+
+    // 统一的接口错误解析：
+    // FastAPI 抛 HTTPException 时返回体是 {detail: "..."}，而业务错误用 {message: "..."}；
+    // 另外 500 错误可能返回 HTML，此时 response.json() 会直接抛 SyntaxError。
+    // 这里同时兼容三种情况，避免用户只看到 "Unexpected token" 这类无意义提示。
+    async function readApiError(response, fallback = '操作失败，请稍后重试') {
+      let text = '';
+      try {
+        text = await response.text();
+      } catch (e) {
+        return fallback;
+      }
+      if (!text) return fallback;
+      try {
+        const data = JSON.parse(text);
+        if (data && typeof data === 'object') {
+          const detail = data.detail;
+          if (typeof detail === 'string' && detail) return detail;
+          if (Array.isArray(detail) && detail.length) {
+            // Pydantic 校验错误：拼出可读字段说明
+            return detail.map(d => d.msg || JSON.stringify(d)).join('；');
+          }
+          if (typeof data.message === 'string' && data.message) return data.message;
+        }
+      } catch (e) {
+        // 非 JSON 响应（如网关 HTML 错误页）：截取一段纯文本提示
+        const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (plain) return plain.slice(0, 200);
+      }
+      return fallback;
     }
 
     // Toast 浮动通知提示

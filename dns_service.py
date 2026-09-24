@@ -29,19 +29,17 @@ def validate_subdomain_format(prefix: str, root_domain: Optional[str] = None) ->
             break
     if not p:
         return False, "二级域名前缀不能为空"
+    # 单标签上限 63（RFC 1035）；业务上限收紧到 32，两者一并在这里判定
     if len(p) < 2 or len(p) > 32:
-        return False, "二级域名前缀长度必须在 2 到 32 个字符之间"
+        return False, "二级域名前缀长度必须在 2 到 32 个字符之间（单标签上限 63）"
     if not re.match(r"^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$", p):
         return False, "二级域名前缀只能包含小写字母、数字或中划线(-)，且不能以中划线开头或结尾"
 
-    # 拼接主域名后不得超出 DNS 单标签 63 与完整域名 253 的上限
-    if len(p) > 63:
-        return False, "二级域名前缀过长（单标签不能超过 63 个字符）"
     root = (root_domain or "").strip().lower().rstrip(".")
     if root:
-        full_domain = f"{p}.{root}"
         if len(root) > 253:
             return False, "主域名过长（不能超过 253 个字符）"
+        full_domain = f"{p}.{root}"
         if len(full_domain) > 253:
             return False, f"拼接后的完整域名过长（{len(full_domain)} > 253），请缩短前缀或主域名"
 

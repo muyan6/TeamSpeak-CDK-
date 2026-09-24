@@ -1,7 +1,10 @@
 import shutil
 import subprocess
 from typing import List, Tuple
-from config import SERVER_PORT, BASE_VOICE_PORT, BASE_FILE_PORT, BASE_QUERY_PORT, BASE_TSDNS_PORT
+from config import (
+    SERVER_PORT, BASE_VOICE_PORT, BASE_FILE_PORT, BASE_QUERY_PORT, BASE_TSDNS_PORT,
+    FIREWALL_PORT_SPAN,
+)
 
 
 def run_cmd(cmd: List[str]) -> Tuple[bool, str]:
@@ -17,20 +20,44 @@ def _normalize_port_arg(port: str) -> str:
     return port.replace("-", ":") if "-" in port else port
 
 
+def _port_span() -> int:
+    """
+    计算需要预放行的端口段宽度。
+    端口分配允许一路递增到 65535，固定的 200 宽度会漏放后续实例，
+    因此这里以「数据库已分配的最大实例号」为准动态扩展（至少保留配置的基础宽度）。
+    """
+    span = max(1, int(FIREWALL_PORT_SPAN or 200))
+    try:
+        from database import get_all_instances
+        instances = get_all_instances() or []
+        if instances:
+            max_id = max(int(i.get("id") or 0) for i in instances)
+            # 额外预留 20 个空位，避免每次新建实例都要重新放宽规则
+            span = max(span, max_id + 20)
+    except Exception:
+        pass
+    return span
+
+
+def _build_port_rules() -> List[Tuple[str, str]]:
+    span = _port_span()
+    return [
+        (str(SERVER_PORT), "tcp"),                                    # Web 管理平台
+        (f"{BASE_VOICE_PORT}-{BASE_VOICE_PORT + span}", "udp"),       # TeamSpeak 语音端口段
+        (f"{BASE_FILE_PORT}-{BASE_FILE_PORT + span}", "tcp"),         # 文件传输端口段
+        (f"{BASE_QUERY_PORT}-{BASE_QUERY_PORT + span}", "tcp"),       # ServerQuery 查询端口段
+        (f"{BASE_TSDNS_PORT}-{BASE_TSDNS_PORT + span}", "tcp"),       # TSDNS 端口段
+    ]
+
+
 def auto_open_firewall_ports():
     """
     自动检测系统内部防火墙（firewalld / ufw / iptables）并放行 TeamSpeak 规划端口段与 Web 端口
     """
     print("[*] 正在自动检测并配置服务器本地防火墙规则...")
 
-    # 动态构建待放行的端口段（根据 config.py 基础配置）
-    port_rules = [
-        (str(SERVER_PORT), "tcp"),                                    # Web 管理平台
-        (f"{BASE_VOICE_PORT}-{BASE_VOICE_PORT + 200}", "udp"),        # TeamSpeak 语音端口段
-        (f"{BASE_FILE_PORT}-{BASE_FILE_PORT + 200}", "tcp"),          # 文件传输端口段
-        (f"{BASE_QUERY_PORT}-{BASE_QUERY_PORT + 200}", "tcp"),        # ServerQuery 查询端口段
-        (f"{BASE_TSDNS_PORT}-{BASE_TSDNS_PORT + 200}", "tcp"),        # TSDNS 端口段
-    ]
+    # 动态构建待放行的端口段（根据 config.py 基础配置 + 实际已分配的最大实例号）
+    port_rules = _build_port_rules()
 
     # 1. 优先检测 firewalld (CentOS / RHEL / OpenCloudOS / Fedora)
     if shutil.which("firewall-cmd"):

@@ -6,8 +6,9 @@ import ipaddress
 import urllib.request
 import json
 import secrets
-import functools
+import threading
 from pathlib import Path
+from urllib.parse import urlsplit
 from typing import Optional, Literal, Dict, Any, Tuple, List
 from fastapi import FastAPI, Request, HTTPException, Depends, Header
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -16,6 +17,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 
 import asyncio
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta
 import config
 from database import (
@@ -31,15 +33,14 @@ from database import (
     get_instance_by_id,
     get_instance_by_cdk,
     get_all_instances,
-    create_instance,
-    update_instance_credentials,
-    update_instance_token,
+    reserve_instance_slot,
+    finalize_instance,
+    update_instance_credentials_if_empty,
     update_instance_status,
     update_instance_expiry,
     get_expired_active_instances,
     renew_instance,
     delete_instance,
-    delete_instances,
     get_all_used_ports,
     create_bot_instance,
     get_bot_instance_by_id,
@@ -49,7 +50,6 @@ from database import (
     restore_instance_cdk,
     update_bot_instance_status,
     delete_bot_instance,
-    delete_bot_instances,
     get_expired_active_bots,
     renew_bot_instance,
     update_bot_instance_expiry,
@@ -60,11 +60,9 @@ from database import (
     MASKED_SECRET,
     get_bot_permission_config,
     set_bot_permission_config,
-    has_server_used_trial,
     record_trial_server,
     get_all_trial_records,
     delete_trial_record,
-    delete_trial_record_for_target,
     claim_cdk,
     release_cdk_claim,
     release_stale_cdk_claims,
@@ -72,33 +70,38 @@ from database import (
     unbind_cdk_bot,
     reserve_trial_server,
     release_trial_reservation,
+    reserve_trial_client_ip,
+    release_trial_client_ip,
+    confirm_trial_client_ip,
     normalize_server_target,
     get_dns_config,
+    get_dns_config_for_provider,
     set_dns_config,
     is_subdomain_available,
     update_instance_domain,
     save_admin_session,
     delete_admin_session,
+    delete_all_admin_sessions,
     is_admin_session_valid,
     prune_admin_sessions,
+    touch_admin_session,
     has_ip_used_teamspeak_trial,
     update_bot_instance_web_user_id
 )
 from port_manager import allocate_ports_for_instance
+import rate_limit
 import docker_service
 from docker_service import (
-    deploy_teamspeak_instance,
     get_container_status,
     start_instance_container,
     stop_instance_container,
     restart_instance_container,
     destroy_instance_container,
-    fetch_container_logs,
-    extract_credentials_from_container
+    fetch_container_logs
 )
 from music_bot_service import music_bot_client
 from firewall_service import auto_open_firewall_ports, open_single_instance_ports
-from dns_service import dns_service, validate_subdomain_format, clean_subdomain_prefix
+from dns_service import dns_service
 
 from contextlib import asynccontextmanager
 
@@ -117,32 +120,37 @@ async def system_expiry_checker():
             except Exception as claim_err:
                 print(f"[Warning] 回收超时 CDK 占用失败: {claim_err}")
             # 1. 扫描已到期的音乐机器人
-            expired_bots = get_expired_active_bots()
+            expired_bots = await asyncio.to_thread(get_expired_active_bots)
             for b in expired_bots:
+                stop_ok = False
+                stop_res = None
                 try:
                     print(f"[*] ⏰ 监测到机器人 [{b['name']}] (ID: {b['bot_id']}) 已到达有效期限 ({b['expire_at']})，正在执行自动停机下线...")
                     stop_ok, stop_res = await asyncio.to_thread(music_bot_client.stop_bot, b["bot_id"])
-                    if not stop_ok:
-                        print(f"[Warning] 机器人 [{b['bot_id']}] 停机响应: {stop_res}，依然标记状态为 expired")
                 except Exception as b_err:
                     print(f"[Warning] 停止机器人 [{b['bot_id']}] 发生异常: {b_err}")
+                # 关键：必须真正停机成功才标记 expired。
+                # 若停机失败仍写入 expired，该实例会因状态不再是 active 而永远逃出本扫描（查询条件为 status='active'），
+                # 造成「库中已过期、容器仍在运行」的资源白占与免费续用。
+                if stop_ok:
+                    await asyncio.to_thread(update_bot_instance_status, b["bot_id"], "expired")
                 else:
-                    # 仅在停止流程未抛异常时才标记过期，避免容器仍在运行但库里已过期导致资源被白占
-                    update_bot_instance_status(b["bot_id"], "expired")
+                    print(f"[Warning] 机器人 [{b['bot_id']}] 停机失败（{stop_res}），保留 active 状态等待下一轮重试")
 
             # 2. 扫描已到期的 TeamSpeak 语音服务器
-            expired_instances = get_expired_active_instances()
+            expired_instances = await asyncio.to_thread(get_expired_active_instances)
             for inst in expired_instances:
+                stop_ok = False
                 try:
                     print(f"[*] ⏰ 监测到 TeamSpeak 服务器 [{inst['name']}] (ID: {inst['id']}) 已到达有效期限 ({inst['expire_at']})，正在执行自动停机下线...")
                     stop_ok = await asyncio.to_thread(stop_instance_container, inst["id"])
-                    if not stop_ok:
-                        print(f"[Warning] TeamSpeak 容器 [{inst['id']}] 停止未成功，依然标记状态为 expired")
                 except Exception as inst_err:
                     print(f"[Warning] 停止 TeamSpeak 容器 [{inst['id']}] 发生异常: {inst_err}")
+                # 同上：停机未成功就保留 running 状态，下一轮继续尝试，绝不让容器偷偷活着
+                if stop_ok:
+                    await asyncio.to_thread(update_instance_status, inst["id"], "expired")
                 else:
-                    # 仅在停止流程未抛异常时才标记过期，避免容器仍在运行但库里已过期导致资源被白占
-                    update_instance_status(inst["id"], "expired")
+                    print(f"[Warning] TeamSpeak 容器 [{inst['id']}] 停机失败，保留 running 状态等待下一轮重试")
         except Exception as err:
             print(f"[Error in system_expiry_checker]: {err}")
         await asyncio.sleep(30)
@@ -150,11 +158,13 @@ async def system_expiry_checker():
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
-    # 确保存储目录存在
-    try:
-        os.makedirs(config.DATA_BASE_DIR, exist_ok=True)
-    except Exception as e:
-        print(f"[Warning] 无法创建数据根目录: {config.DATA_BASE_DIR}, 错误: {e}")
+    # 目录创建属于启动动作，放到 lifespan 而非模块导入期，
+    # 避免 import 阶段产生副作用（只读部署 / 多进程启动时会直接抛错）
+    for _dir in (config.DATA_BASE_DIR, str(static_path / "css"), str(static_path / "js"), str(templates_path)):
+        try:
+            os.makedirs(_dir, exist_ok=True)
+        except Exception as e:
+            print(f"[Warning] 无法创建目录 {_dir}: {e}")
 
     # 自动放行服务器本地防火墙端口（同步命令，放入线程池避免阻塞事件循环）
     try:
@@ -168,13 +178,20 @@ async def lifespan(app: FastAPI):
     
     # 启动到期自动停机监控后台任务
     checker_task = asyncio.create_task(system_expiry_checker())
-    yield
-    checker_task.cancel()
-    # 关闭音乐机器人 HTTP 连接池，避免进程退出时连接泄漏
     try:
-        await asyncio.to_thread(music_bot_client.close)
-    except Exception:
-        pass
+        yield
+    finally:
+        # 先取消并等待任务真正结束，避免关闭时报 "Task was destroyed but it is pending"
+        checker_task.cancel()
+        try:
+            await asyncio.gather(checker_task, return_exceptions=True)
+        except Exception:
+            pass
+        # 关闭音乐机器人 HTTP 连接池，避免进程退出时连接泄漏
+        try:
+            await asyncio.to_thread(music_bot_client.close)
+        except Exception:
+            pass
 
 app = FastAPI(
     title="TeamSpeak Automated Hosting Platform",
@@ -186,10 +203,6 @@ app = FastAPI(
 BASE_DIR = Path(__file__).parent.resolve()
 static_path = BASE_DIR / "static"
 templates_path = BASE_DIR / "templates"
-
-os.makedirs(static_path / "css", exist_ok=True)
-os.makedirs(static_path / "js", exist_ok=True)
-os.makedirs(templates_path, exist_ok=True)
 
 app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
 templates = Jinja2Templates(directory=str(templates_path))
@@ -269,7 +282,8 @@ class BatchDeleteFilter(BaseModel):
     status: Literal["all", "unused", "used", "disabled", "processing"] = "all"
 
 class BatchDeleteCdksRequest(BaseModel):
-    codes: Optional[List[str]] = None
+    # 限制单请求可携带的卡密数量，避免超大请求体在解析/清洗阶段打满线程
+    codes: Optional[List[str]] = Field(default=None, max_length=2000)
     filter: Optional[BatchDeleteFilter] = None
 
 class BatchActionInstancesRequest(BaseModel):
@@ -281,8 +295,9 @@ class BatchActionBotsRequest(BaseModel):
     action: Literal["start", "stop", "restart", "delete"]
 
 class AdminRenewBotRequest(BaseModel):
-    duration_months: Optional[int] = 1
-    cdk: Optional[str] = None
+    # 与前台一致：仅允许 0(永久)/1/3/6/12 个月，避免负数或超大值生成非法到期时间
+    duration_months: Optional[Literal[0, 1, 3, 6, 12]] = 1
+    cdk: Optional[str] = Field(default=None, max_length=128)
 
 class ChangePasswordRequest(BaseModel):
     old_password: str = Field(min_length=1, max_length=255)
@@ -333,8 +348,33 @@ def resolve_srv_record(domain: str) -> Tuple[Optional[str], Optional[int]]:
         pass
     return None, None
 
-@functools.lru_cache(maxsize=512)
+# GeoIP 结果缓存：带 TTL，避免 IP 归属被永久缓存（原 lru_cache 无过期时间）
+_GEO_CACHE_TTL_SECONDS = 6 * 3600
+_GEO_CACHE: Dict[str, Tuple[float, Tuple[bool, str, str]]] = {}
+_GEO_CACHE_LOCK = threading.Lock()
+
+
 def _cached_ip_geo(ip_str: str) -> Tuple[bool, str, str]:
+    """查询 IP 归属，带 TTL 缓存；缓存命中时直接返回，避免频繁打公共 API 触发限流。"""
+    now_ts = datetime.now().timestamp()
+    with _GEO_CACHE_LOCK:
+        hit = _GEO_CACHE.get(ip_str)
+        if hit and now_ts < hit[0]:
+            return hit[1]
+        if len(_GEO_CACHE) > 4096:
+            # 简单淘汰：清掉所有已过期项，仍超量则整体清空，避免无界增长
+            for key in [k for k, v in _GEO_CACHE.items() if v[0] <= now_ts]:
+                _GEO_CACHE.pop(key, None)
+            if len(_GEO_CACHE) > 4096:
+                _GEO_CACHE.clear()
+
+    result = _fetch_ip_geo(ip_str)
+    with _GEO_CACHE_LOCK:
+        _GEO_CACHE[ip_str] = (now_ts + _GEO_CACHE_TTL_SECONDS, result)
+    return result
+
+
+def _fetch_ip_geo(ip_str: str) -> Tuple[bool, str, str]:
     try:
         ip = ipaddress.ip_address(ip_str)
         if ip.is_private or ip.is_loopback:
@@ -368,13 +408,29 @@ def get_ip_geo_info(ip_str: str) -> Dict[str, Any]:
     is_overseas, country, location = _cached_ip_geo(ip_str)
     return {"is_overseas": is_overseas, "country": country, "location": location}
 
-def get_real_client_ip(request: Request) -> str:
-    """提取客户端真实 IP，优先 X-Forwarded-For，降级至 request.client.host"""
-    xff = request.headers.get("x-forwarded-for")
-    if xff:
-        client_ip = xff.split(",")[0].strip()
-        if client_ip:
-            return client_ip
+def get_real_client_ip(request: Optional[Request]) -> str:
+    """
+    提取客户端真实 IP。
+
+    安全前提：X-Forwarded-For / X-Real-IP 是客户端可任意伪造的请求头。
+    过去无条件信任 XFF 首段，导致体验卡 IP 防刷可被「每次换一个 XFF」绕过，
+    也可让调用方伪装成任意 IP。因此默认只使用 TCP 对端地址（request.client.host），
+    仅当显式配置 TRUST_PROXY_HEADERS=1（确认部署在自建可信反向代理之后）时才采信代理头。
+    """
+    if request is None:
+        return "127.0.0.1"
+    if config.TRUST_PROXY_HEADERS:
+        for header_name in ("x-forwarded-for", "x-real-ip"):
+            raw = request.headers.get(header_name)
+            if not raw:
+                continue
+            candidate = raw.split(",")[0].strip()
+            if not candidate:
+                continue
+            try:
+                return str(ipaddress.ip_address(candidate))
+            except ValueError:
+                continue
     if request.client and request.client.host:
         return request.client.host
     return "127.0.0.1"
@@ -398,7 +454,23 @@ def _prune_admin_sessions() -> None:
         pass
 
 
-def create_admin_session(response: JSONResponse) -> str:
+def _is_https_request(request: Optional[Request]) -> bool:
+    """判断当前请求是否走 HTTPS（含反代终止 TLS 的情形），用于决定 Cookie 是否附加 Secure。"""
+    if request is None:
+        return False
+    try:
+        if request.url.scheme == "https":
+            return True
+    except Exception:
+        pass
+    if config.TRUST_PROXY_HEADERS:
+        proto = (request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+        if proto == "https":
+            return True
+    return False
+
+
+def create_admin_session(response: JSONResponse, request: Optional[Request] = None) -> str:
     """创建服务端会话并通过 HttpOnly Cookie 下发，并持久化到数据库以支持重启保持登录。"""
     _prune_admin_sessions()
     token = secrets.token_urlsafe(32)
@@ -406,14 +478,16 @@ def create_admin_session(response: JSONResponse) -> str:
     _admin_sessions[token] = expires_at
     try:
         save_admin_session(token, expires_at)
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"[Warning] 持久化管理员会话失败（服务重启后需重新登录）: {e}")
     response.set_cookie(
         ADMIN_SESSION_COOKIE,
         token,
         max_age=_ADMIN_SESSION_TTL_SECONDS,
         httponly=True,
         samesite="lax",
+        # HTTPS 部署时自动附加 Secure，避免会话在明文链路上被嗅探
+        secure=_is_https_request(request),
         path="/",
     )
     return token
@@ -441,7 +515,13 @@ def _is_valid_admin_session(request: Request) -> bool:
     # 2. 进程内未命中（如服务重启），查询 SQLite 持久化会话表
     try:
         if is_admin_session_valid(token):
-            _admin_sessions[token] = datetime.now().timestamp() + _ADMIN_SESSION_TTL_SECONDS
+            new_expires = datetime.now().timestamp() + _ADMIN_SESSION_TTL_SECONDS
+            _admin_sessions[token] = new_expires
+            # 滑动续期必须回写持久化表，否则重启后过期时间会回退，且续期永远不落库
+            try:
+                touch_admin_session(token, new_expires)
+            except Exception:
+                pass
             return True
     except Exception:
         pass
@@ -478,13 +558,19 @@ def _safe_host_candidate(value: str) -> Optional[str]:
 def get_public_host(request: Request) -> str:
     """
     只返回规范化主机名，避免直接信任 Host 头造成错误连接地址。
-    优先级：PUBLIC_SERVER_IP > X-Forwarded-Host > Host，且每一层都要通过格式白名单校验，
-    防止攻击者伪造 Host 使返回值（并写入 DNS SRV 记录）指向任意主机。
+
+    优先级：PUBLIC_SERVER_IP > (可信反代时才采信 X-Forwarded-Host) > Host > 127.0.0.1。
+    Host 头同样可被伪造，因此每一层都要通过格式白名单校验；
+    真正面向公网部署时应显式配置 PUBLIC_SERVER_IP，否则默认会退化为实际访问用的 Host。
     """
     candidate = (config.PUBLIC_SERVER_IP or "").strip()
     if not candidate:
-        candidate = (
+        forwarded = (
             _safe_host_candidate(request.headers.get("x-forwarded-host", ""))
+            if config.TRUST_PROXY_HEADERS else None
+        )
+        candidate = (
+            forwarded
             or _safe_host_candidate(request.headers.get("host", ""))
             or "127.0.0.1"
         )
@@ -536,12 +622,21 @@ def admin_page(request: Request):
 @app.post("/api/admin/login")
 def admin_login_api(req: AdminLoginRequest, request: Request):
     """管理员登录：校验口令后下发 HttpOnly 会话 Cookie，前端不再长期保存明文口令。"""
+    client_ip = get_real_client_ip(request)
+    allowed, retry_after = rate_limit.LOGIN_LIMITER.hit(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"success": False, "message": f"登录尝试过于频繁，请 {retry_after} 秒后再试"},
+        )
     current_pwd = get_admin_password()
     provided = (req.password or "").strip()
     if not provided or not secrets.compare_digest(provided, str(current_pwd)):
         return JSONResponse(status_code=401, content={"success": False, "message": "管理员密码错误"})
+    # 登录成功即重置该 IP 的失败计数，避免正常用户被历史失败次数拖累
+    rate_limit.reset_rate_limit(f"{rate_limit.LOGIN_LIMITER.name}:{client_ip}")
     resp = JSONResponse(content={"success": True, "message": "登录成功"})
-    create_admin_session(resp)
+    create_admin_session(resp, request)
     return resp
 
 @app.post("/api/admin/logout")
@@ -564,10 +659,21 @@ def admin_session_api(request: Request):
 # --- 用户端 API ---
 
 @app.post("/api/parse-ts-target")
-def parse_ts_target_endpoint(req: ParseTsTargetRequest):
+def parse_ts_target_endpoint(req: ParseTsTargetRequest, request: Request):
     """
     智能解析 TeamSpeak 日志/域名/IP，区分境外源站与国内中转节点，优先提取中转地址
+
+    该接口内部会触发 nslookup / DNS 解析 / 外部 GeoIP HTTP 请求，
+    因此必须限流，否则会被当作 DNS/HTTP 放大器批量滥用。
     """
+    client_ip = get_real_client_ip(request)
+    allowed, retry_after = rate_limit.PARSE_LOG_LIMITER.hit(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"success": False, "message": f"解析请求过于频繁，请 {retry_after} 秒后再试"},
+        )
+
     raw_text = req.input.strip()
     if not raw_text:
         return JSONResponse(status_code=400, content={"success": False, "message": "输入内容不能为空"})
@@ -766,7 +872,15 @@ def get_dns_info_endpoint():
     }
 
 @app.post("/api/check-subdomain")
-def check_subdomain_endpoint(req: CheckSubdomainRequest):
+def check_subdomain_endpoint(req: CheckSubdomainRequest, request: Request):
+    client_ip = get_real_client_ip(request)
+    allowed, retry_after = rate_limit.PUBLIC_LOOKUP_LIMITER.hit(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"success": False, "available": False,
+                     "message": f"查询过于频繁，请 {retry_after} 秒后再试"},
+        )
     sub = (req.subdomain or "").strip()
     available, msg, full_domain = is_subdomain_available(sub)
     return {
@@ -779,6 +893,14 @@ def check_subdomain_endpoint(req: CheckSubdomainRequest):
 
 @app.post("/api/redeem")
 def redeem_cdk(req: RedeemRequest, request: Request):
+    client_ip = get_real_client_ip(request)
+    allowed, retry_after = rate_limit.REDEEM_LIMITER.hit(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"success": False, "message": f"兑换请求过于频繁，请 {retry_after} 秒后再试"},
+        )
+
     code = req.cdk.strip().upper()
     cdk_info = get_cdk(code)
     if not cdk_info:
@@ -795,7 +917,13 @@ def redeem_cdk(req: RedeemRequest, request: Request):
         return JSONResponse(status_code=400, content={"success": False, "message": "CDK 无效或不存在，请检查后重试"})
 
     if cdk_info["status"] == "disabled":
-        return JSONResponse(status_code=403, content={"success": False, "message": "该 CDK 已被系统禁用"})
+        return JSONResponse(status_code=403, content={"success": False, "message": "该 CDK 已被系统禁用或吊销"})
+
+    if cdk_info["status"] == "processing":
+        return JSONResponse(status_code=409, content={
+            "success": False,
+            "message": "该 CDK 正在处理中，请稍后重新查询结果"
+        })
 
     cdk_type = cdk_info.get("cdk_type", "teamspeak")
 
@@ -810,6 +938,8 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                 ok, remote_status = music_bot_client.get_bot(bot["bot_id"])
                 if ok and isinstance(remote_status, dict):
                     bot["remote_status"] = remote_status
+                # 出参脱敏：web_password 绝不回传前端（只保留是否存在标记）
+                bot = _mask_bot_secrets(bot)
                 return {
                     "success": True,
                     "type": "music_bot",
@@ -848,19 +978,30 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     if cdk_info["status"] == "used":
         instance_id = cdk_info.get("instance_id")
         instance = get_instance_by_id(instance_id) if instance_id else None
+        # 预占中的实例（provisioning）对用户不可见，提示稍后重试即可
+        if instance and instance.get("status") == "provisioning":
+            return JSONResponse(status_code=409, content={
+                "success": False,
+                "message": "该 CDK 对应的服务器正在开通中，请稍等片刻后重新查询"
+            })
         if instance:
             # 凭据自愈：若首次开机慢导致凭据未提取，再次使用 CDK 访问时从日志尝试提取并持久化
             if not instance.get("admin_token"):
                 try:
                     recovered = docker_service.extract_credentials_from_container(instance["id"])
                     if recovered.get("admin_token"):
-                        update_instance_credentials(
+                        # 逐字段仅在库中为空时补写：整组覆盖会把已成功提取到的
+                        # query_password / query_apikey 清空
+                        refreshed = update_instance_credentials_if_empty(
                             instance["id"],
                             recovered.get("admin_token", ""),
                             recovered.get("query_password", ""),
                             recovered.get("query_apikey", "")
                         )
-                        instance.update(recovered)
+                        if refreshed:
+                            instance.update(refreshed)
+                        else:
+                            instance.update(recovered)
                 except Exception:
                     pass
 
@@ -932,7 +1073,10 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     is_trial = bool(cdk_info.get("is_trial", 0))
     real_client_ip = get_real_client_ip(request)
 
-    # 体验卡开通防白嫖校验：针对动态分配端口的 TS 实例，限制同一客户端 IP 7天内只能体验开通一次
+    # 体验卡开通防白嫖校验：针对动态分配端口的 TS 实例，限制同一客户端 IP 7天内只能体验开通一次。
+    # 这里的「先查后写」存在竞态窗口（同 IP 并发两发可同时通过），因此额外用服务端 IP 做一次原子预占，
+    # 预占失败立即释放 CDK 占用并拒绝；预占成功则无论后续成功或失败都必须释放，避免占位泄漏。
+    trial_reserved = False
     if is_trial:
         has_used, trial_rec = has_ip_used_teamspeak_trial(real_client_ip)
         if has_used:
@@ -941,11 +1085,56 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                 "success": False,
                 "message": f"您的 IP ({real_client_ip}) 近期已兑换过 TeamSpeak 体验服务器（CDK: {trial_rec.get('cdk_code', '')}），7 天内限体验 1 次！"
             })
+        reserved_ok, _reserved_rec = reserve_trial_client_ip(real_client_ip, code, "teamspeak")
+        if not reserved_ok:
+            release_cdk_claim(code)
+            return JSONResponse(status_code=400, content={
+                "success": False,
+                "message": "该客户端近期已领取过体验服务器，7 天内限体验 1 次！"
+            })
+        trial_reserved = True
 
-    # 未使用：开始分配端口与开通
+    duration_m = cdk_info.get("duration_months", 0)
+    if duration_m > 0:
+        expire_at = (datetime.now() + timedelta(days=30 * duration_m)).strftime("%Y-%m-%d %H:%M:%S")
+    else:
+        expire_at = "permanent"
+
+    # === 关键并发防护：在分配锁内先落库预占实例编号与四类端口 ===
+    # 端口/容器名上的 UNIQUE 索引是真正的并发防线。若不做预占，两个并发兑换会拿到同一 instance_id，
+    # 后失败的一方回滚时执行 destroy_instance_container(delete_files=True)，
+    # 会把另一方正在运行的容器与数据目录一起删掉。
+    reservation: Dict[str, Any] = {}
+
+    def _reserve_slot(candidate_id: int, candidate_ports: Dict[str, int]) -> bool:
+        slot_name = f"ts{candidate_id}"
+        slot = reserve_instance_slot(
+            instance_id=candidate_id,
+            name=slot_name,
+            container_name=f"ts-teamspeak-{candidate_id}",
+            dir_path=os.path.join(config.DATA_BASE_DIR, slot_name),
+            voice_port=candidate_ports["voice"],
+            file_port=candidate_ports["file"],
+            query_port=candidate_ports["query"],
+            tsdns_port=candidate_ports["tsdns"],
+            cdk_code=code,
+            duration_months=duration_m,
+            expire_at=expire_at,
+            subdomain=subdomain_input or None,
+        )
+        if slot is None:
+            return False
+        reservation["slot"] = slot
+        return True
+
     try:
-        instance_id, ports = allocate_ports_for_instance()
+        instance_id, ports = allocate_ports_for_instance(reserve=_reserve_slot)
     except Exception as e:
+        if trial_reserved:
+            try:
+                release_trial_client_ip(real_client_ip, code)
+            except Exception:
+                pass
         release_cdk_claim(code)
         return JSONResponse(status_code=500, content={"success": False, "message": f"端口分配失败: {str(e)}"})
 
@@ -953,40 +1142,52 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     container_name = f"ts-teamspeak-{instance_id}"
     instance_dir = os.path.join(config.DATA_BASE_DIR, name)
 
+    def _release_trial_hold():
+        """释放体验卡 IP 维度的原子预占，避免部署失败后把该 IP 的体验资格白白占掉。"""
+        if not trial_reserved:
+            return
+        try:
+            release_trial_client_ip(real_client_ip, code)
+        except Exception as t_err:
+            print(f"[Warning] 释放体验卡 IP 预占失败: {t_err}")
+
+    def _rollback_provision(extra_msg: str = ""):
+        """部署失败回滚：只清理本次预占的槽位与容器，绝不触碰其它实例。"""
+        _release_trial_hold()
+        try:
+            docker_service.destroy_instance_container(instance_id, delete_files=True)
+        except Exception as d_err:
+            print(f"[Warning] 回滚销毁容器失败 instance_id={instance_id}: {d_err}")
+        try:
+            delete_instance(instance_id)
+        except Exception as db_err:
+            print(f"[Warning] 回滚删除实例预占记录失败 instance_id={instance_id}: {db_err}")
+        release_cdk_claim(code)
+        return JSONResponse(status_code=500, content={"success": False, "message": extra_msg})
+
     # 执行 Docker 部署流水线
     try:
         success, creds, msg = docker_service.deploy_teamspeak_instance(instance_id, ports)
     except Exception as e:
         success, creds, msg = False, {}, f"部署过程异常: {e}"
     if not success:
-        docker_service.destroy_instance_container(instance_id, delete_files=True)
-        release_cdk_claim(code)
-        return JSONResponse(status_code=500, content={"success": False, "message": f"服务器创建失败: {msg}"})
+        return _rollback_provision(f"服务器创建失败: {msg}")
 
     live_status = docker_service.get_container_status(instance_id)
     # 仅 running 视为成功：docker 不可用/查询异常返回 error，不能当作开通成功入库
     if live_status != "running":
-        docker_service.destroy_instance_container(instance_id, delete_files=True)
-        release_cdk_claim(code)
-        return JSONResponse(status_code=500, content={
-            "success": False,
-            "message": f"服务器容器未处于运行状态（当前状态: {live_status}），已自动回滚，请检查服务器 Docker 服务后重试"
-        })
+        return _rollback_provision(
+            f"服务器容器未处于运行状态（当前状态: {live_status}），已自动回滚，请检查服务器 Docker 服务后重试"
+        )
 
     admin_token = creds.get("admin_token", "")
     query_password = creds.get("query_password", "")
     query_apikey = creds.get("query_apikey", "")
 
-    is_trial = cdk_info.get("is_trial", 0)
-    duration_m = cdk_info.get("duration_months", 0)
-    if duration_m > 0:
-        expire_at = (datetime.now() + timedelta(days=30 * duration_m)).strftime("%Y-%m-%d %H:%M:%S")
-    else:
-        expire_at = "permanent"
-
     # 执行 DNS 自动绑定 (SRV 记录)
     bound_subdomain = None
     domain_record_id = None
+    bound_dns_provider = None
     dns_bind_msg = ""
     if dns_enabled and subdomain_input:
         target_host = dns_cfg.get("dns_target_host") or client_host
@@ -999,32 +1200,27 @@ def redeem_cdk(req: RedeemRequest, request: Request):
         if ok_dns:
             bound_subdomain = full_domain
             domain_record_id = rec_id
+            # 记录本次使用的服务商：后续销毁/换绑时即便管理员切换了默认服务商，也能删对记录
+            bound_dns_provider = (dns_cfg.get("dns_provider") or "").lower() or None
             dns_bind_msg = f"（已自动绑定二级域名: {bound_subdomain}，客户端直连无需输入端口）"
         else:
             dns_bind_msg = f"（DNS 自动绑定提示: {err_dns}）"
 
-    # 记录到数据库；数据库失败时回收已经启动的容器和临时 CDK 占用。
+    # 把预占槽位补齐凭据并转为 running；失败时回收已经启动的容器和临时 CDK 占用。
     try:
-        instance = create_instance(
+        instance = finalize_instance(
             instance_id=instance_id,
-            name=name,
-            container_name=container_name,
-            dir_path=instance_dir,
-            voice_port=ports["voice"],
-            file_port=ports["file"],
-            query_port=ports["query"],
-            tsdns_port=ports["tsdns"],
             admin_token=admin_token,
             query_password=query_password,
             query_apikey=query_apikey,
-            cdk_code=code,
-            duration_months=duration_m,
-            expire_at=expire_at,
             status="running",
             subdomain=bound_subdomain,
-            domain_record_id=domain_record_id
+            domain_record_id=domain_record_id,
+            domain_provider=bound_dns_provider
         )
-        if not instance or not bind_cdk_instance(code, instance_id):
+        if not instance:
+            raise RuntimeError("实例记录写入失败")
+        if not bind_cdk_instance(code, instance_id):
             raise RuntimeError("CDK 绑定失败")
     except Exception as e:
         if domain_record_id:
@@ -1034,6 +1230,7 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                     print(f"[Warning] 回滚时删除 DNS 记录失败: {err_del}")
             except Exception as d_err:
                 print(f"[Warning] 回滚时删除 DNS 记录异常: {d_err}")
+        _release_trial_hold()
         # 回滚顺序：先销毁容器与目录，再删库，最后释放 CDK 占用；每步独立兜底，避免半成品残留
         try:
             docker_service.destroy_instance_container(instance_id, delete_files=True)
@@ -1064,6 +1261,8 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                 raw_input=f"{bound_subdomain or client_host}:{ports['voice']}",
                 client_ip=real_client_ip
             )
+            # 体验记录已正式落库，把 IP 维度的 pending 预占转为正式记录
+            confirm_trial_client_ip(real_client_ip, code, target_id=str(instance_id))
         except Exception as e:
             if domain_record_id:
                 try:
@@ -1072,6 +1271,7 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                         print(f"[Warning] 体验卡回滚时删除 DNS 记录失败: {err_del}")
                 except Exception as d_err:
                     print(f"[Warning] 体验卡回滚时删除 DNS 记录异常: {d_err}")
+            _release_trial_hold()
             delete_instance(instance_id)
             docker_service.destroy_instance_container(instance_id, delete_files=True)
             unbind_cdk_instance(code, instance_id)
@@ -1097,7 +1297,15 @@ def redeem_cdk(req: RedeemRequest, request: Request):
     }
 
 @app.post("/api/redeem-bot")
-def redeem_bot_instance(req: RedeemBotRequest):
+def redeem_bot_instance(req: RedeemBotRequest, request: Request):
+    client_ip = get_real_client_ip(request)
+    allowed, retry_after = rate_limit.REDEEM_LIMITER.hit(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"success": False, "message": f"兑换请求过于频繁，请 {retry_after} 秒后再试"},
+        )
+
     code = req.cdk.strip().upper()
     cdk_info = get_cdk(code)
     if not cdk_info:
@@ -1105,6 +1313,9 @@ def redeem_bot_instance(req: RedeemBotRequest):
 
     if cdk_info.get("cdk_type") != "music_bot":
         return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 不是音乐机器人兑换码"})
+
+    if cdk_info.get("status") == "disabled":
+        return JSONResponse(status_code=403, content={"success": False, "message": "该 CDK 已被系统禁用"})
 
     if cdk_info["status"] != "unused":
         return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 已经使用或不可用"})
@@ -1188,8 +1399,11 @@ def redeem_bot_instance(req: RedeemBotRequest):
         try:
             ok_u, res_u = music_bot_client.create_user(web_username, web_password, role=configured_role)
             if not ok_u:
-                err_msg = str(res_u)
-                if "already" in err_msg.lower() or "409" in err_msg or "exists" in err_msg.lower() or "HTTP 400" in err_msg:
+                err_msg = str(res_u).lower()
+                # 远端平台对「用户名已存在」的返回文案不固定，这里放宽匹配面，
+                # 同时保留原始错误便于排查（不再依赖单一字符串）
+                conflict_markers = ("already", "exist", "duplicate", "conflict", "409", "http 400", "用户名")
+                if any(marker in err_msg for marker in conflict_markers):
                     friendly_err = f"Web 点歌用户名【{web_username}】可能已存在或不合规，请更换其他用户名重试"
                 else:
                     friendly_err = f"Web 点歌账号创建失败: {res_u}"
@@ -1269,7 +1483,8 @@ def redeem_bot_instance(req: RedeemBotRequest):
                 cdk_code=code,
                 cdk_type="music_bot",
                 target_id=bot_id,
-                raw_input=req.serverAddress
+                raw_input=req.serverAddress,
+                client_ip=client_ip
             )
         except Exception as e:
             if created_web_user_id:
@@ -1288,6 +1503,7 @@ def redeem_bot_instance(req: RedeemBotRequest):
         "success": True,
         "type": "music_bot",
         "message": f"🎉 音乐机器人已成功创建并对接！请在 TS 客户端右键机器人赋予【服务器管理员】权限。到期时间: {expire_at}",
+        # 开通成功后本次仍回传明文密码供用户一次性保存，后续查询走掩码
         "instance": bot_inst,
         "bot_panel_url": get_bot_config()["bot_panel_url"],
         "bot_tutorial_url": get_bot_config().get("bot_tutorial_url", "http://103.71.69.156:23452/"),
@@ -1350,11 +1566,22 @@ def user_bot_action(bot_id: str, req: BotActionRequest):
         raise HTTPException(status_code=400, detail="不支持的操作指令")
 
 @app.post("/api/renew-bot")
-def renew_bot_endpoint(req: RenewBotRequest):
+def renew_bot_endpoint(req: RenewBotRequest, request: Request):
+    client_ip = get_real_client_ip(request)
+    allowed, retry_after = rate_limit.REDEEM_LIMITER.hit(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"success": False, "message": f"续费请求过于频繁，请 {retry_after} 秒后再试"},
+        )
+
     code = req.cdk.strip().upper()
     cdk_info = get_cdk(code)
     if not cdk_info:
         return JSONResponse(status_code=400, content={"success": False, "message": "CDK 无效或不存在"})
+
+    if cdk_info.get("status") == "disabled":
+        return JSONResponse(status_code=403, content={"success": False, "message": "该 CDK 已被系统禁用"})
 
     if cdk_info["status"] != "unused":
         return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 已经使用或不可用"})
@@ -1365,6 +1592,13 @@ def renew_bot_endpoint(req: RenewBotRequest):
     bot = get_bot_instance_by_id(req.bot_id)
     if not bot:
         return JSONResponse(status_code=404, content={"success": False, "message": "未找到要续费的机器人实例"})
+
+    # 永久有效的实例再消耗付费 CDK 续费只会白白浪费一张卡，直接拦截
+    if (bot.get("expire_at") or "") == "permanent" and not cdk_info.get("is_trial", 0):
+        return JSONResponse(status_code=400, content={
+            "success": False,
+            "message": "该机器人已是永久有效，无需使用续费卡（卡密未消耗，可用于其他实例）"
+        })
 
     claimed_cdk = claim_cdk(code, "music_bot")
     if not claimed_cdk:
@@ -1439,10 +1673,21 @@ def renew_bot_endpoint(req: RenewBotRequest):
 
 @app.post("/api/renew-instance")
 def renew_instance_endpoint(req: RenewInstanceRequest, request: Request):
+    client_ip = get_real_client_ip(request)
+    allowed, retry_after = rate_limit.REDEEM_LIMITER.hit(client_ip)
+    if not allowed:
+        return JSONResponse(
+            status_code=429,
+            content={"success": False, "message": f"续费请求过于频繁，请 {retry_after} 秒后再试"},
+        )
+
     code = req.cdk.strip().upper()
     cdk_info = get_cdk(code)
     if not cdk_info:
         return JSONResponse(status_code=400, content={"success": False, "message": "CDK 无效或不存在"})
+
+    if cdk_info.get("status") == "disabled":
+        return JSONResponse(status_code=403, content={"success": False, "message": "该 CDK 已被系统禁用"})
 
     if cdk_info["status"] != "unused":
         return JSONResponse(status_code=400, content={"success": False, "message": "该 CDK 已经使用或不可用"})
@@ -1453,6 +1698,13 @@ def renew_instance_endpoint(req: RenewInstanceRequest, request: Request):
     instance = get_instance_by_id(req.instance_id)
     if not instance:
         return JSONResponse(status_code=404, content={"success": False, "message": "未找到要续费的 TeamSpeak 实例"})
+
+    # 永久有效实例无需续费，避免空耗卡密
+    if (instance.get("expire_at") or "") == "permanent" and not cdk_info.get("is_trial", 0):
+        return JSONResponse(status_code=400, content={
+            "success": False,
+            "message": "该服务器已是永久有效，无需使用续费卡（卡密未消耗，可用于其他实例）"
+        })
 
     claimed_cdk = claim_cdk(code, "teamspeak")
     if not claimed_cdk:
@@ -1550,6 +1802,25 @@ def get_system_status(_: bool = Depends(verify_admin)):
         "bot_panel_url": get_bot_config()["bot_panel_url"]
     }
 
+def _mask_instance_secrets(inst: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    列表接口出参脱敏：只回传「凭据是否存在」的布尔标记，不再把 admin_token / query 密码明文塞进响应体。
+    管理员需要真实值时走 /api/admin/instances/{id}/credentials 按需单取，避免密钥进入 DOM、浏览器历史与日志。
+    """
+    view = dict(inst)
+    for field in ("admin_token", "query_password", "query_apikey"):
+        view[f"has_{field}"] = bool(view.get(field))
+        view.pop(field, None)
+    return view
+
+
+def _mask_bot_secrets(bot: Dict[str, Any]) -> Dict[str, Any]:
+    view = dict(bot)
+    view["has_web_password"] = bool(view.get("web_password"))
+    view.pop("web_password", None)
+    return view
+
+
 @app.get("/api/admin/instances")
 def list_instances(_: bool = Depends(verify_admin)):
     instances = get_all_instances()
@@ -1569,7 +1840,7 @@ def list_instances(_: bool = Depends(verify_admin)):
         else:
             inst["days_left"] = "永久"
             inst["is_expired"] = False
-    return {"success": True, "instances": instances}
+    return {"success": True, "instances": [_mask_instance_secrets(i) for i in instances]}
 
 @app.get("/api/admin/bots")
 def list_admin_bots(_: bool = Depends(verify_admin)):
@@ -1604,7 +1875,7 @@ def list_admin_bots(_: bool = Depends(verify_admin)):
             bot["days_left"] = "永久"
             bot["is_expired"] = False
 
-    return {"success": True, "bots": bots, "bot_panel_url": get_bot_config()["bot_panel_url"]}
+    return {"success": True, "bots": [_mask_bot_secrets(b) for b in bots], "bot_panel_url": get_bot_config()["bot_panel_url"]}
 
 @app.post("/api/admin/bots/{bot_id}/action")
 def manage_admin_bot(bot_id: str, req: BotActionRequest, _: bool = Depends(verify_admin)):
@@ -1667,7 +1938,11 @@ def admin_renew_bot_api(bot_id: str, req: AdminRenewBotRequest, _: bool = Depend
         if not renewed_bot:
             release_cdk_claim(code)
             return JSONResponse(status_code=500, content={"success": False, "message": "续费失败"})
-        bind_cdk_bot(code, bot_id)
+        if not bind_cdk_bot(code, bot_id):
+            # 绑定失败必须回滚到期时间并释放占用，否则卡密会永久卡在 processing，而有效期已经顺延
+            update_bot_instance_expiry(bot_id, bot.get("expire_at"))
+            release_cdk_claim(code)
+            return JSONResponse(status_code=500, content={"success": False, "message": "续费卡绑定失败，已自动回滚"})
     else:
         add_m = req.duration_months if req.duration_months is not None else 1
         renewed_bot = renew_bot_instance(bot_id, add_m)
@@ -1731,19 +2006,23 @@ def manage_instance(instance_id: int, req: InstanceActionRequest, _: bool = Depe
         return JSONResponse(status_code=500, content={"success": False, "message": "重启失败"})
 
     elif action == "destroy":
-        if instance.get("domain_record_id"):
-            try:
-                ok_del, err_del = dns_service.delete_ts_srv_record(instance["domain_record_id"])
-                if not ok_del:
-                    print(f"[Warning] 销毁实例 ts{instance_id} 时删除 DNS 记录失败: {err_del}")
-            except Exception as e:
-                print(f"[Warning] 销毁实例 ts{instance_id} 时删除 DNS 记录异常: {e}")
+        # 顺序很关键：先销毁容器与数据目录，成功后再删 DNS 记录。
+        # 若先删 DNS 而容器清理失败，会留下「可连但无域名」且库中 domain_record_id 已悬空的中间态。
         ok = destroy_instance_container(instance_id, delete_files=True)
         if not ok:
             return JSONResponse(status_code=500, content={
                 "success": False,
-                "message": f"实例 ts{instance_id} 清理失败，数据库记录已保留，请检查 Docker 和数据目录"
+                "message": f"实例 ts{instance_id} 清理失败，数据库记录与 DNS 解析均已保留，请检查 Docker 和数据目录"
             })
+        if instance.get("domain_record_id"):
+            try:
+                # 必须传入实例绑定时的 dns_cfg：切换过服务商后，用「当前」配置去删旧服务商记录会失败并残留 SRV
+                inst_dns_cfg = instance.get("dns_cfg") or get_dns_config()
+                ok_del, err_del = dns_service.delete_ts_srv_record(instance["domain_record_id"], dns_cfg=inst_dns_cfg)
+                if not ok_del:
+                    print(f"[Warning] 销毁实例 ts{instance_id} 时删除 DNS 记录失败: {err_del}")
+            except Exception as e:
+                print(f"[Warning] 销毁实例 ts{instance_id} 时删除 DNS 记录异常: {e}")
         delete_instance(instance_id)
         if instance.get("cdk_code"):
             unbind_cdk_instance(instance["cdk_code"], instance_id)
@@ -1767,14 +2046,8 @@ def admin_bind_instance_domain_api(instance_id: int, req: BindInstanceDomainRequ
     if not avail:
         return JSONResponse(status_code=400, content={"success": False, "message": f"二级域名不可用: {err_msg}"})
 
-    # 如果原先已经有绑定记录，先尝试删除旧记录
-    old_record_id = inst.get("domain_record_id")
-    if old_record_id:
-        try:
-            dns_service.delete_ts_srv_record(old_record_id, dns_cfg=dns_cfg)
-        except Exception:
-            pass
-
+    # 换绑策略：先创建新记录，成功后再删除旧记录。
+    # 若先删后建，一旦创建失败实例会彻底失去解析，而库里仍保留已被删除的旧 record_id。
     client_host = get_public_host(request)
     target_host = dns_cfg.get("dns_target_host") or client_host
     ok_dns, rec_id, full_d, err_dns = dns_service.create_ts_srv_record(
@@ -1784,7 +2057,17 @@ def admin_bind_instance_domain_api(instance_id: int, req: BindInstanceDomainRequ
         dns_cfg=dns_cfg
     )
     if not ok_dns:
-        return JSONResponse(status_code=400, content={"success": False, "message": f"DNS 绑定失败: {err_dns}"})
+        return JSONResponse(status_code=400, content={
+            "success": False,
+            "message": f"DNS 绑定失败: {err_dns}（原有解析未受影响，可修正后重试）"
+        })
+
+    old_record_id = inst.get("domain_record_id")
+    if old_record_id and old_record_id != rec_id:
+        try:
+            dns_service.delete_ts_srv_record(old_record_id, dns_cfg=dns_cfg)
+        except Exception as e:
+            print(f"[Warning] 换绑域名时删除旧 DNS 记录失败（不影响新解析）: {e}")
 
     update_instance_domain(instance_id, full_d, rec_id)
     return {
@@ -1811,68 +2094,167 @@ def admin_unbind_instance_domain_api(instance_id: int, _: bool = Depends(verify_
     update_instance_domain(instance_id, None, None)
     return {"success": True, "message": f"实例 ts{instance_id} 已成功解绑二级域名，恢复为 IP 直连"}
 
-@app.post("/api/admin/instances/batch-action")
-def batch_manage_instances_api(req: BatchActionInstancesRequest, _: bool = Depends(verify_admin)):
-    action = req.action.lower()
-    success_count = 0
-    for instance_id in req.ids:
+# 批量操作并发度：串行 30s×N 会长时间占满线程池，并发执行可把总耗时压到个位数量级
+_BATCH_MAX_WORKERS = 8
+
+
+def _batch_instance_one(instance_id: int, action: str) -> Tuple[int, bool, str]:
+    try:
         if action == "start":
             if start_instance_container(instance_id):
                 update_instance_status(instance_id, "running")
-                success_count += 1
-        elif action == "stop":
+                return instance_id, True, ""
+            return instance_id, False, "启动失败"
+        if action == "stop":
             if stop_instance_container(instance_id):
                 update_instance_status(instance_id, "stopped")
-                success_count += 1
-        elif action == "restart":
+                return instance_id, True, ""
+            return instance_id, False, "停止失败"
+        if action == "restart":
             if restart_instance_container(instance_id):
                 update_instance_status(instance_id, "running")
-                success_count += 1
-        elif action == "destroy":
+                return instance_id, True, ""
+            return instance_id, False, "重启失败"
+        if action == "destroy":
             inst = get_instance_by_id(instance_id)
-            if inst and inst.get("domain_record_id"):
+            if not inst:
+                return instance_id, False, "实例不存在"
+            # 先清理容器与目录，成功后再删 DNS 记录，避免留下「可连但无域名」的悬空状态
+            if not destroy_instance_container(instance_id, delete_files=True):
+                return instance_id, False, "容器或数据目录清理失败"
+            if inst.get("domain_record_id"):
                 try:
-                    ok_del, err_del = dns_service.delete_ts_srv_record(inst["domain_record_id"])
+                    inst_dns_cfg = get_dns_config_for_provider(inst.get("domain_provider"))
+                    ok_del, err_del = dns_service.delete_ts_srv_record(
+                        inst["domain_record_id"], dns_cfg=inst_dns_cfg
+                    )
                     if not ok_del:
                         print(f"[Warning] 批量销毁实例 ts{instance_id} 时删除 DNS 记录失败: {err_del}")
                 except Exception as d_err:
                     print(f"[Warning] 批量销毁实例 ts{instance_id} 时删除 DNS 记录异常: {d_err}")
-            if destroy_instance_container(instance_id, delete_files=True) and delete_instance(instance_id):
-                if inst and inst.get("cdk_code"):
-                    unbind_cdk_instance(inst["cdk_code"], instance_id)
-                success_count += 1
-    return {"success": True, "count": success_count, "message": f"已成功对 {success_count} 个 TS 实例执行【{action}】操作"}
+            if not delete_instance(instance_id):
+                return instance_id, False, "数据库记录删除失败"
+            if inst.get("cdk_code"):
+                unbind_cdk_instance(inst["cdk_code"], instance_id)
+            return instance_id, True, ""
+        return instance_id, False, f"不支持的操作: {action}"
+    except Exception as e:
+        return instance_id, False, str(e)
+
+
+@app.post("/api/admin/instances/batch-action")
+def batch_manage_instances_api(req: BatchActionInstancesRequest, _: bool = Depends(verify_admin)):
+    action = req.action.lower()
+    results: List[Tuple[int, bool, str]] = []
+    # 并发执行：既避免线程池被长任务占满，也让 200 个实例的批量操作在可接受时间内返回
+    with ThreadPoolExecutor(max_workers=min(_BATCH_MAX_WORKERS, max(1, len(req.ids)))) as pool:
+        futures = [pool.submit(_batch_instance_one, i, action) for i in req.ids]
+        for fut in as_completed(futures):
+            try:
+                results.append(fut.result())
+            except Exception as e:
+                results.append((-1, False, str(e)))
+
+    ok_ids = [r[0] for r in results if r[1]]
+    failed = [{"id": r[0], "reason": r[2]} for r in results if not r[1]]
+    return {
+        "success": True,
+        "count": len(ok_ids),
+        "failed_count": len(failed),
+        "failed": failed,
+        "message": (
+            f"已成功对 {len(ok_ids)} 个 TS 实例执行【{action}】操作"
+            + (f"，{len(failed)} 个失败" if failed else "")
+        ),
+    }
+
+
+def _batch_bot_one(bot_id: str, action: str) -> Tuple[str, bool, str]:
+    try:
+        if action == "start":
+            ok, res = music_bot_client.start_bot(bot_id)
+            if ok:
+                update_bot_instance_status(bot_id, "active")
+                return bot_id, True, ""
+            return bot_id, False, str(res)
+        if action == "stop":
+            ok, res = music_bot_client.stop_bot(bot_id)
+            if ok:
+                update_bot_instance_status(bot_id, "stopped")
+                return bot_id, True, ""
+            return bot_id, False, str(res)
+        if action == "restart":
+            ok, res = music_bot_client.restart_bot(bot_id)
+            if ok:
+                update_bot_instance_status(bot_id, "active")
+                return bot_id, True, ""
+            return bot_id, False, str(res)
+        if action == "delete":
+            ok, res = music_bot_client.delete_bot(bot_id)
+            if not ok:
+                return bot_id, False, str(res)
+            if not delete_bot_instance(bot_id):
+                return bot_id, False, "远程已删除，但本地记录清理失败"
+            return bot_id, True, ""
+        return bot_id, False, f"不支持的操作: {action}"
+    except Exception as e:
+        return bot_id, False, str(e)
+
 
 @app.post("/api/admin/bots/batch-action")
 def batch_manage_bots_api(req: BatchActionBotsRequest, _: bool = Depends(verify_admin)):
     action = req.action.lower()
-    success_count = 0
-    for bot_id in req.bot_ids:
-        if action == "start":
-            ok, _ = music_bot_client.start_bot(bot_id)
-            if ok:
-                update_bot_instance_status(bot_id, "active")
-                success_count += 1
-        elif action == "stop":
-            ok, _ = music_bot_client.stop_bot(bot_id)
-            if ok:
-                update_bot_instance_status(bot_id, "stopped")
-                success_count += 1
-        elif action == "restart":
-            ok, _ = music_bot_client.restart_bot(bot_id)
-            if ok:
-                update_bot_instance_status(bot_id, "active")
-                success_count += 1
-        elif action == "delete":
-            ok, _ = music_bot_client.delete_bot(bot_id)
-            if ok and delete_bot_instance(bot_id):
-                success_count += 1
-    return {"success": True, "count": success_count, "message": f"已成功对 {success_count} 个音乐机器人执行【{action}】操作"}
+    results: List[Tuple[str, bool, str]] = []
+    with ThreadPoolExecutor(max_workers=min(_BATCH_MAX_WORKERS, max(1, len(req.bot_ids)))) as pool:
+        futures = [pool.submit(_batch_bot_one, b, action) for b in req.bot_ids]
+        for fut in as_completed(futures):
+            try:
+                results.append(fut.result())
+            except Exception as e:
+                results.append(("", False, str(e)))
+
+    ok_ids = [r[0] for r in results if r[1]]
+    failed = [{"bot_id": r[0], "reason": r[2]} for r in results if not r[1]]
+    return {
+        "success": True,
+        "count": len(ok_ids),
+        "failed_count": len(failed),
+        "failed": failed,
+        "message": (
+            f"已成功对 {len(ok_ids)} 个音乐机器人执行【{action}】操作"
+            + (f"，{len(failed)} 个失败" if failed else "")
+        ),
+    }
+
 
 @app.get("/api/admin/instances/{instance_id}/logs")
-def get_instance_logs_api(instance_id: int, _: bool = Depends(verify_admin)):
-    logs = fetch_container_logs(instance_id)
-    return {"success": True, "logs": logs}
+def get_instance_logs_api(instance_id: int, tail: int = 150, _: bool = Depends(verify_admin)):
+    # 限制 tail 范围，避免一次拉取超长日志撑爆响应体
+    safe_tail = max(10, min(int(tail or 150), 2000))
+    logs = fetch_container_logs(instance_id, tail_lines=safe_tail)
+    return {"success": True, "logs": logs, "tail": safe_tail}
+
+
+@app.get("/api/admin/instances/{instance_id}/credentials")
+def get_instance_credentials_api(instance_id: int, _: bool = Depends(verify_admin)):
+    """
+    按需单取实例凭据。
+
+    列表接口已做脱敏（只回传 has_admin_token 等布尔标记），管理员需要复制真实值时走本接口，
+    避免密钥在页面加载时就进入 DOM 与浏览器历史。
+    """
+    inst = get_instance_by_id(instance_id)
+    if not inst:
+        raise HTTPException(status_code=404, detail="未找到该实例")
+    return {
+        "success": True,
+        "credentials": {
+            "query_user": "serveradmin",
+            "admin_token": inst.get("admin_token") or "",
+            "query_password": inst.get("query_password") or "",
+            "query_apikey": inst.get("query_apikey") or "",
+        },
+    }
 
 @app.get("/api/admin/cdks")
 def list_cdks(_: bool = Depends(verify_admin)):
@@ -1882,13 +2264,17 @@ def list_cdks(_: bool = Depends(verify_admin)):
 def generate_cdks_api(req: GenerateCdksRequest, _: bool = Depends(verify_admin)):
     if req.count < 1 or req.count > 200:
         raise HTTPException(status_code=400, detail="生成数量必须在 1 到 200 之间")
-    created = create_cdks(
-        count=req.count,
-        remark=req.remark or "",
-        cdk_type=req.cdk_type or "teamspeak",
-        duration_months=req.duration_months or 0,
-        is_trial=req.is_trial or 0
-    )
+    try:
+        created = create_cdks(
+            count=req.count,
+            remark=req.remark or "",
+            cdk_type=req.cdk_type or "teamspeak",
+            duration_months=req.duration_months or 0,
+            is_trial=req.is_trial or 0
+        )
+    except ValueError as e:
+        # 参数非法属于客户端错误，不应返回 500
+        raise HTTPException(status_code=400, detail=str(e))
     return {"success": True, "created": created}
 
 @app.delete("/api/admin/cdks/{code}")
@@ -1925,6 +2311,17 @@ def delete_trial_record_api(record_id: int, _: bool = Depends(verify_admin)):
     else:
         return JSONResponse(status_code=404, content={"success": False, "message": "未找到该条体验记录"})
 
+def _csv_safe(value: str) -> str:
+    """
+    防表格公式注入：以 = + - @ 开头的单元格在 Excel/WPS 中会被当公式执行。
+    这里统一加一个前导单引号，让表格软件按纯文本处理。
+    """
+    text = "" if value is None else str(value)
+    if text[:1] in ("=", "+", "-", "@", "\t", "\r"):
+        return "'" + text
+    return text
+
+
 @app.get("/api/admin/cdks/export")
 def export_cdks_txt(status: Optional[str] = "unused", _: bool = Depends(verify_admin)):
     from fastapi.responses import PlainTextResponse
@@ -1948,14 +2345,18 @@ def export_cdks_txt(status: Optional[str] = "unused", _: bool = Depends(verify_a
             selected.append(f"{c['code']}\t类型: {type_str}\t时长: {dur_str}\t状态: {c['status']}\t绑定: {bound_str}\t备注: {c.get('remark') or '无'}")
         filename = "all_cdks.txt"
 
-    content = "\n".join(selected)
+    content = "\n".join(_csv_safe(line) for line in selected)
     return PlainTextResponse(
         content=content,
-        headers={"Content-Disposition": f"attachment; filename={filename}"}
+        headers={
+            # 文件名加引号，避免部分客户端解析异常；UTF-8 声明防止中文备注乱码
+            "Content-Disposition": f'attachment; filename="{filename}"',
+            "Content-Type": "text/plain; charset=utf-8",
+        }
     )
 
 @app.post("/api/admin/change-password")
-def change_admin_password_api(req: ChangePasswordRequest, _: bool = Depends(verify_admin)):
+def change_admin_password_api(req: ChangePasswordRequest, request: Request, _: bool = Depends(verify_admin)):
     old_pwd = req.old_password.strip()
     new_pwd = req.new_password.strip()
     current_pwd = get_admin_password()
@@ -1967,10 +2368,17 @@ def change_admin_password_api(req: ChangePasswordRequest, _: bool = Depends(veri
         return JSONResponse(status_code=400, content={"success": False, "message": "新密码长度不能少于 6 位"})
 
     set_admin_password(new_pwd)
-    # 口令变更后清空所有旧会话，并给当前请求重新下发一个新会话，避免前端被迫保存明文口令
+    # 口令变更必须同时吊销「进程内缓存」与「SQLite 持久化会话表」。
+    # 过去只清 _admin_sessions，旧 Cookie 会在 _is_valid_admin_session 回查数据库时被重新写回缓存，
+    # 导致被盗会话在改密后依然长期有效——等于永远无法强制下线。
     _admin_sessions.clear()
-    resp = JSONResponse(content={"success": True, "message": "管理员密码修改成功！已自动为您续期登录状态"})
-    create_admin_session(resp)
+    try:
+        revoked = delete_all_admin_sessions()
+        print(f"[*] 管理员改密：已吊销 {revoked} 个历史会话")
+    except Exception as e:
+        print(f"[Warning] 吊销历史管理员会话失败: {e}")
+    resp = JSONResponse(content={"success": True, "message": "管理员密码修改成功！所有旧登录已失效，已自动为您续期当前会话"})
+    create_admin_session(resp, request)
     return resp
 
 @app.get("/api/admin/bot-config")
@@ -1987,6 +2395,39 @@ def get_bot_config_api(_: bool = Depends(verify_admin)):
         }
     }
 
+def _validate_public_url(url: str, label: str) -> Optional[str]:
+    """
+    校验管理员填写的对外 URL：必须带 http(s) 协议头，且不得指向内网 / 环回 / 云元数据地址。
+    返回 None 表示通过，否则返回错误说明。
+    """
+    if not url:
+        return f"{label}不能为空"
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return f"{label}格式不正确，必须以 http:// 或 https:// 开头"
+    try:
+        parsed = urlsplit(url)
+        host = (parsed.hostname or "").strip().lower()
+    except Exception:
+        return f"{label}格式不正确"
+    if not host:
+        return f"{label}格式不正确"
+    if host in ("localhost", "metadata", "metadata.google.internal"):
+        return f"{label}不允许指向内网/元数据地址"
+    try:
+        addrs = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
+    except Exception:
+        # 解析失败交给后续真实连接报错，避免误伤暂时不可解析的合法域名
+        return None
+    for info in addrs:
+        try:
+            ip = ipaddress.ip_address(info[4][0])
+        except ValueError:
+            continue
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved or ip.is_multicast:
+            return f"{label}不允许指向内网地址（{ip}）"
+    return None
+
+
 @app.post("/api/admin/bot-config")
 def update_bot_config_api(req: BotConfigRequest, _: bool = Depends(verify_admin)):
     url = req.url.strip()
@@ -1994,12 +2435,13 @@ def update_bot_config_api(req: BotConfigRequest, _: bool = Depends(verify_admin)
     password = req.password.strip()
     tutorial_url = req.tutorial_url.strip() if req.tutorial_url else None
 
-    if not url:
-        raise HTTPException(status_code=400, detail="机器人网站地址 (URL) 不能为空")
-    if not url.startswith("http://") and not url.startswith("https://"):
-        raise HTTPException(status_code=400, detail="网站地址格式不正确，必须以 http:// 或 https:// 开头")
-    if tutorial_url and not (tutorial_url.startswith("http://") or tutorial_url.startswith("https://")):
-        raise HTTPException(status_code=400, detail="使用教程跳转网址格式不正确，必须以 http:// 或 https:// 开头")
+    err = _validate_public_url(url, "机器人网站地址 (URL)")
+    if err:
+        raise HTTPException(status_code=400, detail=err)
+    if tutorial_url:
+        err_tut = _validate_public_url(tutorial_url, "使用教程跳转网址")
+        if err_tut:
+            raise HTTPException(status_code=400, detail=err_tut)
     if not user:
         raise HTTPException(status_code=400, detail="管理员登录账号不能为空")
 
@@ -2012,16 +2454,29 @@ def update_bot_config_api(req: BotConfigRequest, _: bool = Depends(verify_admin)
         "config": {
             "url": saved_cfg["bot_panel_url"],
             "user": saved_cfg["bot_panel_user"],
-            "password": saved_cfg["bot_panel_pass"],
+            # 与 GET 一致：绝不把面板密码明文回传（前端提交掩码即表示不修改）
+            "password": MASKED_SECRET if saved_cfg["bot_panel_pass"] else "",
             "tutorial_url": saved_cfg.get("bot_tutorial_url", "http://103.71.69.156:23452/")
         }
     }
 
 @app.post("/api/admin/bot-config/test")
 def test_bot_config_api(req: Optional[TestBotConfigRequest] = None, _: bool = Depends(verify_admin)):
-    url = req.url if req else None
-    user = req.user if req else None
-    password = req.password if req else None
+    url = (req.url or "").strip() if req and req.url else None
+    user = (req.user or "").strip() if req and req.user else None
+    password = (req.password or "").strip() if req and req.password else None
+
+    # SSRF 防护：该接口会让服务端主动请求管理员提供的任意 URL（含 169.254.169.254 与内网），必须做地址校验
+    if url:
+        reason = _validate_public_url(url, "机器人网站地址 (URL)")
+        if reason:
+            return JSONResponse(status_code=400, content={"success": False, "message": reason, "data": {}})
+
+    # 允许「不改密码」场景提交空值或掩码：此时回落到数据库中的真实配置，否则测试必然鉴权失败
+    if not password or password == MASKED_SECRET:
+        password = None
+    if not user:
+        user = None
 
     ok, msg, data = music_bot_client.test_connection(url, user, password)
     if ok:
@@ -2121,17 +2576,28 @@ def sync_single_bot_instance_permission(bot_id: str, _: bool = Depends(verify_ad
 
 # --- DNS 自动化绑定配置 API ---
 
+# 需要对前端掩码的 DNS 字段：密钥之外，AK / ZoneId / SecretId 一并保护
+_DNS_SENSITIVE_FIELDS = (
+    "dns_cf_token", "dns_cf_zone_id",
+    "dns_aliyun_ak", "dns_aliyun_sk",
+    "dns_tencent_id", "dns_tencent_key",
+)
+
+
+def _mask_dns_config(cfg: Dict[str, Any]) -> Dict[str, Any]:
+    safe_cfg = dict(cfg)
+    for key in _DNS_SENSITIVE_FIELDS:
+        if safe_cfg.get(key):
+            safe_cfg[key] = MASKED_SECRET
+    return safe_cfg
+
+
 @app.get("/api/admin/dns-config")
 def get_dns_config_admin_api(_: bool = Depends(verify_admin)):
-    cfg = get_dns_config()
-    # 敏感密钥只回传掩码，避免明文进入页面 DOM 与浏览器历史
-    safe_cfg = dict(cfg)
-    for _key in ("dns_cf_token", "dns_aliyun_sk", "dns_tencent_key"):
-        if safe_cfg.get(_key):
-            safe_cfg[_key] = MASKED_SECRET
+    # 敏感字段只回传掩码，避免明文进入页面 DOM 与浏览器历史
     return {
         "success": True,
-        "config": safe_cfg
+        "config": _mask_dns_config(get_dns_config())
     }
 
 @app.post("/api/admin/dns-config")
@@ -2141,12 +2607,20 @@ def update_dns_config_admin_api(req: DnsConfigRequest, _: bool = Depends(verify_
     return {
         "success": True,
         "message": "DNS 自动化绑定配置已成功保存！",
-        "config": saved
+        # 与 GET 保持一致：POST 也绝不能把 Token / SecretKey 明文回传
+        "config": _mask_dns_config(saved)
     }
 
 @app.post("/api/admin/dns-config/test")
 def test_dns_config_admin_api(req: TestDnsConfigRequest, _: bool = Depends(verify_admin)):
     data = req.model_dump() if hasattr(req, "model_dump") else req.dict()
+    # 前端加载配置后密钥框是空的（仅在已配置时显示占位提示），直接拿去测试必然鉴权失败。
+    # 这里把空值 / 掩码回落到数据库中的真实值，让「留空表示不修改」在测试场景同样成立。
+    stored = get_dns_config()
+    for key in _DNS_SENSITIVE_FIELDS:
+        val = str(data.get(key) or "").strip()
+        if not val or val == MASKED_SECRET:
+            data[key] = stored.get(key, "")
     ok, msg = dns_service.test_connection(data)
     if ok:
         return {"success": True, "message": msg}

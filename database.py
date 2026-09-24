@@ -33,6 +33,27 @@ def get_connection():
 # 敏感配置回显掩码：前端看到该值即代表“已配置但未修改”，提交时后端跳过更新
 MASKED_SECRET = "******"
 
+# 一律不允许明文回传前端的敏感字段（GET / POST 出参统一走 mask_secrets）
+SECRET_FIELD_NAMES = (
+    "bot_panel_pass",
+    "dns_cf_token",
+    "dns_aliyun_sk",
+    "dns_tencent_key",
+    "web_password",
+    "admin_token",
+    "query_password",
+    "query_apikey",
+)
+
+
+def mask_secrets(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """返回脱敏副本：所有敏感字段只要非空就替换为掩码，杜绝密钥进入响应体/DOM/浏览器历史。"""
+    safe = dict(payload)
+    for key in SECRET_FIELD_NAMES:
+        if key in safe and safe[key]:
+            safe[key] = MASKED_SECRET
+    return safe
+
 # SQLite 单条语句的绑定变量上限为 999，批量 IN 查询按 500 分批，避免 "too many SQL variables"
 _SQL_VAR_CHUNK = 500
 
@@ -103,6 +124,7 @@ def init_db():
                 status TEXT NOT NULL DEFAULT 'running', -- 'running', 'stopped', 'expired', 'error'
                 subdomain TEXT,                        -- 绑定的专属二级域名 (如 play.yourdomain.com)
                 domain_record_id TEXT,                 -- DNS 服务商记录 ID (用于自动销毁/删除)
+                domain_provider TEXT,                  -- 创建该解析时使用的 DNS 服务商（切服务商后仍能正确删除旧记录）
                 created_at TEXT NOT NULL
             )
         ''')
@@ -207,6 +229,8 @@ def init_db():
             cursor.execute("ALTER TABLE instances ADD COLUMN subdomain TEXT")
         if "domain_record_id" not in cols:
             cursor.execute("ALTER TABLE instances ADD COLUMN domain_record_id TEXT")
+        if "domain_provider" not in cols:
+            cursor.execute("ALTER TABLE instances ADD COLUMN domain_provider TEXT")
 
         cursor.execute("PRAGMA table_info(cdks)")
         cdk_cols = [col["name"] for col in cursor.fetchall()]
@@ -328,6 +352,26 @@ def prune_admin_sessions() -> int:
         conn.commit()
         return cursor.rowcount
 
+def delete_all_admin_sessions() -> int:
+    """吊销全部管理员会话（修改密码时调用），确保旧 Cookie / 被盗 token 立即失效。"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM admin_sessions")
+        conn.commit()
+        return cursor.rowcount
+
+def touch_admin_session(token: str, expires_at: float) -> None:
+    """把滑动续期后的过期时间写回持久化表，避免重启后会话有效期回退。"""
+    if not token:
+        return
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE admin_sessions SET expires_at = ? WHERE token = ?",
+            (expires_at, token)
+        )
+        conn.commit()
+
 def get_bot_config() -> Dict[str, str]:
     from config import BOT_PANEL_URL, BOT_PANEL_USER, BOT_PANEL_PASS, BOT_TUTORIAL_URL
     url = get_setting("bot_panel_url", BOT_PANEL_URL) or BOT_PANEL_URL
@@ -350,7 +394,7 @@ def set_bot_config(url: str, user: str, password: str, tutorial_url: Optional[st
     if cleaned_pass == MASKED_SECRET or not cleaned_pass:
         cleaned_pass = get_setting("bot_panel_pass", BOT_PANEL_PASS) or BOT_PANEL_PASS
     if tutorial_url is not None:
-        cleaned_tut = tutorial_url.strip() or BOT_TUTORIAL_URL
+        cleaned_tut = tutorial_url.strip() or (get_setting("bot_tutorial_url", BOT_TUTORIAL_URL) or BOT_TUTORIAL_URL)
     else:
         cleaned_tut = get_setting("bot_tutorial_url", BOT_TUTORIAL_URL) or BOT_TUTORIAL_URL
     # 单连接单事务批量写入，避免中途失败留下半套配置
@@ -433,6 +477,21 @@ def get_dns_config() -> Dict[str, Any]:
         "dns_tencent_key": get_setting("dns_tencent_key", "") or ""
     }
 
+def get_dns_config_for_provider(provider: Optional[str]) -> Dict[str, Any]:
+    """
+    取「指定服务商」的 DNS 配置。
+
+    实例创建时若用的是 Cloudflare，之后管理员把默认服务商切到阿里云，
+    销毁实例时若仍按当前默认配置去删记录，会调用错误的 API 并残留 SRV 解析。
+    这里把库中该服务商的凭据原样取出，保证删除动作命中正确的服务商。
+    """
+    cfg = get_dns_config()
+    target = (provider or "").strip().lower()
+    if target and target in ("cloudflare", "aliyun", "tencent"):
+        cfg["dns_provider"] = target
+    return cfg
+
+
 def set_dns_config(data: Dict[str, Any]) -> Dict[str, Any]:
     # 单连接单事务批量写入，避免中途失败留下半套配置
     items = []
@@ -444,9 +503,13 @@ def set_dns_config(data: Dict[str, Any]) -> Dict[str, Any]:
         items.append(("dns_root_domain", str(data["dns_root_domain"]).strip().lower().rstrip(".")))
     if "dns_target_host" in data:
         items.append(("dns_target_host", str(data["dns_target_host"]).strip()))
-    # 掩码 "******" 表示前端未修改该密钥，保持数据库中原值不变
+    # 掩码 "******" 表示前端未修改该字段，保持数据库中原值不变。
+    # 除密钥本身外，AK / ZoneId / SecretId 也纳入保护：
+    # 前端加载配置后这些输入框会留空（只在已配置时显示占位提示），若不放行空值就会把已存凭据清空。
     _secret_keys = {
-        "dns_cf_token", "dns_aliyun_sk", "dns_tencent_key",
+        "dns_cf_token", "dns_cf_zone_id",
+        "dns_aliyun_ak", "dns_aliyun_sk",
+        "dns_tencent_id", "dns_tencent_key",
     }
     for _key in ("dns_cf_token", "dns_cf_zone_id", "dns_aliyun_ak", "dns_aliyun_sk", "dns_tencent_id", "dns_tencent_key"):
         if _key not in data:
@@ -559,7 +622,14 @@ def delete_cdk(code: str) -> bool:
     clean = (code or "").strip()
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM cdks WHERE code = ?", (clean,))
+        # 改为「吊销」而非物理删除：
+        # 1) 保留审计痕迹，避免卡密在统计中凭空消失；
+        # 2) 阻止 restore_*_cdk 自愈逻辑把已删除的卡密重新复活；
+        # 3) 前台再次输入该 CDK 时会明确收到「已被系统禁用」而不是「无效」。
+        cursor.execute(
+            "UPDATE cdks SET status = 'disabled' WHERE code = ? AND status != 'disabled'",
+            (clean,)
+        )
         conn.commit()
         return cursor.rowcount > 0
 
@@ -827,6 +897,86 @@ def record_trial_server(
         row = cursor.fetchone()
         return dict(row) if row else {}
 
+def reserve_trial_client_ip(client_ip: str, cdk_code: str, cdk_type: str = "teamspeak") -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """
+    以「客户端 IP」为维度的体验卡原子预占。
+
+    has_ip_used_teamspeak_trial 是「先查后写」，同 IP 并发两发可同时通过；
+    这里复用 trial_server_records.server_key 的 UNIQUE 约束做原子占位，
+    server_key 形如 "ip:203.0.113.10"，与服务器地址维度互不干扰。
+    """
+    ip = (client_ip or "").strip()
+    if not ip or ip in ("127.0.0.1", "::1", "localhost", "testclient"):
+        # 本地/未知来源不做 IP 维度限制，避免开发与反向代理场景误伤
+        return True, None
+
+    server_key = f"ip:{ip}"
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    stale_before = (datetime.now() - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute(
+            "DELETE FROM trial_server_records "
+            "WHERE server_key LIKE 'ip:%' AND target_id LIKE 'pending:%' AND used_at < ?",
+            (stale_before,)
+        )
+        cursor.execute("SELECT * FROM trial_server_records WHERE server_key = ?", (server_key,))
+        existing = cursor.fetchone()
+        if existing:
+            conn.rollback()
+            return False, dict(existing)
+        try:
+            cursor.execute("""
+                INSERT INTO trial_server_records (
+                    server_key, server_address, server_port, resolved_ip, resolved_key,
+                    raw_input, cdk_code, cdk_type, target_id, client_ip, used_at
+                ) VALUES (?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                server_key, ip, ip, f"{ip}:1", ip, cdk_code, cdk_type,
+                f"pending:{secrets.token_hex(12)}", ip, now
+            ))
+            conn.commit()
+        except sqlite3.IntegrityError:
+            conn.rollback()
+            return False, None
+        cursor.execute("SELECT * FROM trial_server_records WHERE server_key = ?", (server_key,))
+        row = cursor.fetchone()
+        return True, (dict(row) if row else None)
+
+
+def release_trial_client_ip(client_ip: str, cdk_code: str) -> bool:
+    """释放 IP 维度的体验预占（仅释放 pending 占位，已落地的正式记录不动）。"""
+    ip = (client_ip or "").strip()
+    if not ip:
+        return False
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "DELETE FROM trial_server_records "
+            "WHERE server_key = ? AND cdk_code = ? AND target_id LIKE 'pending:%'",
+            (f"ip:{ip}", cdk_code)
+        )
+        conn.commit()
+        return cursor.rowcount >= 1
+
+
+def confirm_trial_client_ip(client_ip: str, cdk_code: str, target_id: Optional[str] = None) -> bool:
+    """体验开通成功后，把 IP 维度的 pending 占位转为正式记录。"""
+    ip = (client_ip or "").strip()
+    if not ip:
+        return False
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE trial_server_records SET target_id = ? "
+            "WHERE server_key = ? AND cdk_code = ? AND target_id LIKE 'pending:%'",
+            (str(target_id) if target_id else None, f"ip:{ip}", cdk_code)
+        )
+        conn.commit()
+        return cursor.rowcount >= 1
+
+
 def has_ip_used_teamspeak_trial(client_ip: str, days: int = 7) -> Tuple[bool, Optional[Dict[str, Any]]]:
     """
     检查指定客户端 IP 近期是否已兑换过 TeamSpeak 体验服务器（7天内限1次），防止批量刷取服务器。
@@ -940,7 +1090,9 @@ def restore_bot_cdk(cdk_code: str, bot_id: str, duration_months: int = 1, remark
             (code, status, cdk_type, duration_months, is_trial, bot_id, remark, created_at, used_at)
             VALUES (?, 'used', 'music_bot', ?, 0, ?, ?, ?, ?)
             ON CONFLICT(code) DO UPDATE SET
-                status = 'used', bot_id = excluded.bot_id, used_at = excluded.used_at
+                status = CASE WHEN cdks.status = 'disabled' THEN 'disabled' ELSE 'used' END,
+                bot_id = excluded.bot_id,
+                used_at = excluded.used_at
         """, (clean_code, duration_months, bot_id, remark, now_str, now_str))
         conn.commit()
     return get_cdk(clean_code)
@@ -958,7 +1110,9 @@ def restore_instance_cdk(cdk_code: str, instance_id: int, duration_months: int =
             (code, status, cdk_type, duration_months, is_trial, instance_id, remark, created_at, used_at)
             VALUES (?, 'used', 'teamspeak', ?, 0, ?, ?, ?, ?)
             ON CONFLICT(code) DO UPDATE SET
-                status = 'used', instance_id = excluded.instance_id, used_at = excluded.used_at
+                status = CASE WHEN cdks.status = 'disabled' THEN 'disabled' ELSE 'used' END,
+                instance_id = excluded.instance_id,
+                used_at = excluded.used_at
         """, (clean_code, duration_months, instance_id, remark, now_str, now_str))
         conn.commit()
     return get_cdk(clean_code)
@@ -1030,13 +1184,113 @@ def create_instance(
         conn.commit()
     return get_instance_by_id(instance_id)
 
-def update_instance_domain(instance_id: int, subdomain: Optional[str], domain_record_id: Optional[str]):
+def reserve_instance_slot(
+    instance_id: int,
+    name: str,
+    container_name: str,
+    dir_path: str,
+    voice_port: int,
+    file_port: int,
+    query_port: int,
+    tsdns_port: int,
+    cdk_code: Optional[str] = None,
+    duration_months: int = 0,
+    expire_at: Optional[str] = None,
+    subdomain: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """
+    在分配锁内先落库预占实例编号与四类端口（status='provisioning'）。
+    端口/容器名上的 UNIQUE 索引即是并发防线：抢到的请求继续部署，抢不到的返回 None 由调用方换号重试。
+    这样可彻底避免两个并发兑换拿到同一 instance_id、以及失败方回滚时误删另一方容器与数据目录。
+    """
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO instances (
+                    id, name, container_name, dir_path,
+                    voice_port, file_port, query_port, tsdns_port,
+                    admin_token, query_password, query_apikey,
+                    cdk_code, duration_months, expire_at, status, created_at,
+                    subdomain, domain_record_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, '', '', '', ?, ?, ?, 'provisioning', ?, ?, NULL)
+            ''', (
+                instance_id, name, container_name, dir_path,
+                voice_port, file_port, query_port, tsdns_port,
+                cdk_code, duration_months, expire_at or "permanent", now,
+                subdomain
+            ))
+            conn.commit()
+    except sqlite3.IntegrityError:
+        return None
+    except Exception:
+        return None
+    return get_instance_by_id(instance_id)
+
+
+def finalize_instance(
+    instance_id: int,
+    admin_token: str = "",
+    query_password: str = "",
+    query_apikey: str = "",
+    status: str = "running",
+    subdomain: Optional[str] = None,
+    domain_record_id: Optional[str] = None,
+    domain_provider: Optional[str] = None
+) -> Optional[Dict[str, Any]]:
+    """部署成功后把预占的实例补齐凭据并置为可用状态。"""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
-            "UPDATE instances SET subdomain = ?, domain_record_id = ? WHERE id = ?",
-            (subdomain, domain_record_id, instance_id)
+            "UPDATE instances SET admin_token = ?, query_password = ?, query_apikey = ?, "
+            "status = ?, subdomain = ?, domain_record_id = ?, domain_provider = ? WHERE id = ?",
+            (admin_token, query_password, query_apikey, status, subdomain, domain_record_id,
+             domain_provider, instance_id)
         )
+        conn.commit()
+    return get_instance_by_id(instance_id)
+
+
+def update_instance_credentials_if_empty(
+    instance_id: int,
+    admin_token: str = "",
+    query_password: str = "",
+    query_apikey: str = ""
+) -> Optional[Dict[str, Any]]:
+    """凭据自愈：仅在库中字段为空时写入，避免整组覆盖把已提取到的其它凭据清空。"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE instances SET "
+            "admin_token = CASE WHEN COALESCE(admin_token,'') = '' THEN ? ELSE admin_token END, "
+            "query_password = CASE WHEN COALESCE(query_password,'') = '' THEN ? ELSE query_password END, "
+            "query_apikey = CASE WHEN COALESCE(query_apikey,'') = '' THEN ? ELSE query_apikey END "
+            "WHERE id = ?",
+            (admin_token or "", query_password or "", query_apikey or "", instance_id)
+        )
+        conn.commit()
+    return get_instance_by_id(instance_id)
+
+
+def update_instance_domain(
+    instance_id: int,
+    subdomain: Optional[str],
+    domain_record_id: Optional[str],
+    domain_provider: Optional[str] = None
+):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        if domain_provider is None:
+            cursor.execute(
+                "UPDATE instances SET subdomain = ?, domain_record_id = ? WHERE id = ?",
+                (subdomain, domain_record_id, instance_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE instances SET subdomain = ?, domain_record_id = ?, domain_provider = ? WHERE id = ?",
+                (subdomain, domain_record_id, domain_provider, instance_id)
+            )
         conn.commit()
 
 def get_instance_by_id(instance_id: int) -> Optional[Dict[str, Any]]:

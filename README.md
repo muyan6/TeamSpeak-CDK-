@@ -22,7 +22,7 @@
 3. **双端界面与批量导出**：
    - **用户端**（`http://IP:12345/`）：自适应识别 TS 服务器卡密与音乐机器人卡密，智能引导开通。
    - **管理员后台**（`http://IP:12345/admin`）：
-     - 默认管理密码：`admin123456`
+     - 管理密码：由 `.env` 中的 `ADMIN_PASSWORD` 指定（不再内置弱默认值；未配置时启动日志会打印一次性随机口令）
      - TS 服务器集群与音乐机器人实例双列表实时监控与控制
      - 批量生成、TXT 导出（未使用/全部）、一键复制
 
@@ -105,21 +105,32 @@ docker compose up -d
 SERVER_HOST=0.0.0.0
 SERVER_PORT=12345
 
-# 管理后台密码
-ADMIN_PASSWORD=admin123456
+# 管理后台密码（必填；不填会生成一次性随机口令并打印到启动日志，重启即失效）
+ADMIN_PASSWORD=please-change-me
 
 # 数据与 compose 根目录（Linux 默认为 /data/teamspeak）
 TS_DATA_DIR=/data/teamspeak
 
-# TS 服务器对外公网 IP 或域名（留空则根据用户访问地址自动提取）
+# TS 服务器对外公网 IP 或域名（强烈建议显式配置，留空会退化为使用请求 Host 头）
 PUBLIC_SERVER_IP=123.45.67.89
 
-# 官方基础占用端口（避让起始点）
-BASE_VOICE_PORT=9987
-BASE_FILE_PORT=30033
-BASE_QUERY_PORT=10011
-BASE_TSDNS_PORT=41144
+# 是否信任反向代理下发的 X-Forwarded-For / X-Forwarded-Host
+# 默认 0（不信任）。只有部署在自建可信反代之后才设为 1，
+# 否则客户端可伪造请求头绕过体验卡 IP 防刷并影响对外地址判定。
+TRUST_PROXY_HEADERS=0
+
+# 端口分段基础（ts1 -> 60001 / 20001 / 30001 / 40001）
+BASE_VOICE_PORT=60000
+BASE_FILE_PORT=20000
+BASE_QUERY_PORT=30000
+BASE_TSDNS_PORT=40000
+
+# 自动防火墙预放行端口段宽度（运行期会随实际最大实例号自动扩展）
+FIREWALL_PORT_SPAN=200
 ```
+
+> **安全提示**：管理后台默认口令已取消内置弱值；首次部署请务必在 `.env` 中设置强口令，
+> 登录后也可在后台【修改密码】随时更换（改密会立即吊销所有历史登录会话）。
 
 ---
 

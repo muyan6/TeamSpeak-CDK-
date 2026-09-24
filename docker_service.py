@@ -48,7 +48,7 @@ def generate_compose_yaml_content(instance_id: int, ports: Dict[str, int]) -> st
   teamspeak{instance_id}:
     image: {TS_DOCKER_IMAGE}
     container_name: ts-teamspeak-{instance_id}
-    restart: always
+    restart: unless-stopped
     environment:
       - TS3SERVER_LICENSE=accept
     ports:
@@ -60,6 +60,22 @@ def generate_compose_yaml_content(instance_id: int, ports: Dict[str, int]) -> st
       - ./data:/var/ts3server
 """
     return content
+
+def merge_docker_output(stdout: str, stderr: str) -> str:
+    """
+    合并 docker logs 的 stdout / stderr。
+    TS3 的首启凭据（token / password / apikey）都写在 stdout，但容器会把部分日志写入 stderr，
+    直接字符串拼接会打乱行序，破坏「提示行 + 下一行 token=」这类跨行正则。
+    这里按块分别保留，确保 stdout 内容保持连续顺序，正则仍可稳定命中。
+    """
+    out = (stdout or "").rstrip("\n")
+    err = (stderr or "").rstrip("\n")
+    if not err:
+        return out
+    if not out:
+        return err
+    return f"{out}\n{err}"
+
 
 def extract_credentials_from_logs(logs_text: str) -> Dict[str, str]:
     """
@@ -190,7 +206,7 @@ def deploy_teamspeak_instance(instance_id: int, ports: Dict[str, int]) -> Tuple[
                 text=True,
                 timeout=10
             )
-            logs = log_res.stdout + "\n" + log_res.stderr
+            logs = merge_docker_output(log_res.stdout, log_res.stderr)
             c = extract_credentials_from_logs(logs)
             if c["admin_token"] and (c["query_password"] or c["query_apikey"]):
                 creds = c
@@ -325,7 +341,7 @@ def fetch_container_logs(instance_id: int, tail_lines: int = 150) -> str:
             text=True,
             timeout=10
         )
-        return res.stdout + (("\n[STDERR]\n" + res.stderr) if res.stderr else "")
+        return merge_docker_output(res.stdout, res.stderr)
     except Exception as e:
         return f"获取日志出错: {str(e)}"
 
@@ -339,7 +355,7 @@ def extract_credentials_from_container(instance_id: int) -> Dict[str, str]:
             text=True,
             timeout=10
         )
-        logs = log_res.stdout + "\n" + log_res.stderr
+        logs = merge_docker_output(log_res.stdout, log_res.stderr)
         return extract_credentials_from_logs(logs)
     except Exception:
         return {"admin_token": "", "query_user": "serveradmin", "query_password": "", "query_apikey": ""}
