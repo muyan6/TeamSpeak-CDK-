@@ -163,6 +163,11 @@ async def lifespan(app: FastAPI):
     checker_task = asyncio.create_task(system_expiry_checker())
     yield
     checker_task.cancel()
+    # 关闭音乐机器人 HTTP 连接池，避免进程退出时连接泄漏
+    try:
+        await asyncio.to_thread(music_bot_client.close)
+    except Exception:
+        pass
 
 app = FastAPI(
     title="TeamSpeak Automated Hosting Platform",

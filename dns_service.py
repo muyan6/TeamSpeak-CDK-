@@ -16,21 +16,52 @@ def clean_subdomain_prefix(prefix: str) -> str:
     """清理并规范化二级域名前缀"""
     return (prefix or "").strip().lower()
 
-def validate_subdomain_format(prefix: str) -> Tuple[bool, str]:
-    """校验二级域名前缀格式"""
+def validate_subdomain_format(prefix: str, root_domain: Optional[str] = None) -> Tuple[bool, str]:
+    """
+    校验二级域名前缀格式。
+    额外校验：剥离用户误填的 _ts3._udp. 前缀；拼接主域名后单标签与整体域名的长度上限（RFC 1035）。
+    """
     p = clean_subdomain_prefix(prefix)
+    # 容错：用户可能粘贴了完整的 SRV 记录名
+    for _bad_prefix in ("_ts3._udp.", "_ts3._tcp.", "_ts3."):
+        if p.startswith(_bad_prefix):
+            p = p[len(_bad_prefix):]
+            break
     if not p:
         return False, "二级域名前缀不能为空"
     if len(p) < 2 or len(p) > 32:
         return False, "二级域名前缀长度必须在 2 到 32 个字符之间"
     if not re.match(r"^[a-z0-9]([a-z0-9\-]*[a-z0-9])?$", p):
         return False, "二级域名前缀只能包含小写字母、数字或中划线(-)，且不能以中划线开头或结尾"
-    
+
+    # 拼接主域名后不得超出 DNS 单标签 63 与完整域名 253 的上限
+    if len(p) > 63:
+        return False, "二级域名前缀过长（单标签不能超过 63 个字符）"
+    root = (root_domain or "").strip().lower().rstrip(".")
+    if root:
+        full_domain = f"{p}.{root}"
+        if len(root) > 253:
+            return False, "主域名过长（不能超过 253 个字符）"
+        if len(full_domain) > 253:
+            return False, f"拼接后的完整域名过长（{len(full_domain)} > 253），请缩短前缀或主域名"
+
     reserved = {"www", "admin", "api", "mail", "email", "pop3", "smtp", "imap", "node", "node1", "node2",
-                "ts", "ts3", "ftp", "ssh", "ns1", "ns2", "dns", "dev", "test", "status", "panel"}
+                "ts", "ts3", "ftp", "ssh", "ns1", "ns2", "dns", "dev", "test", "status", "panel",
+                "mx", "ns", "cdn", "cloudflare", "dnspod", "aliyun", "autodiscover", "localhost"}
     if p in reserved:
         return False, f"前缀 [{p}] 为系统保留名称，不可使用"
     return True, ""
+
+
+def _safe_err(e: Exception) -> str:
+    """
+    统一脱敏异常信息：绝不回显可能携带 AccessKeyId / Signature / Token 的完整 URL。
+    """
+    if isinstance(e, urllib.error.HTTPError):
+        return f"HTTP {e.code}"
+    if isinstance(e, urllib.error.URLError):
+        return f"网络错误 ({type(e.reason).__name__ if e.reason else 'URLError'})"
+    return type(e).__name__
 
 
 # --- 1. Cloudflare Provider ---
@@ -69,7 +100,7 @@ class CloudflareDnsProvider:
                 err_msg = str(e.reason)
             return False, f"Cloudflare HTTP 错误 ({e.code}): {err_msg}"
         except Exception as e:
-            return False, f"Cloudflare 连接异常: {str(e)}"
+            return False, f"Cloudflare 连接异常: {_safe_err(e)}"
 
     @classmethod
     def create_srv_record(
@@ -137,7 +168,7 @@ class CloudflareDnsProvider:
                 err_msg = str(e.reason)
             return False, None, full_subdomain, f"Cloudflare 创建错误 ({e.code}): {err_msg}"
         except Exception as e:
-            return False, None, full_subdomain, f"Cloudflare 创建异常: {str(e)}"
+            return False, None, full_subdomain, f"Cloudflare 创建异常: {_safe_err(e)}"
 
     @classmethod
     def delete_record(cls, token: str, zone_id: str, record_id: str) -> Tuple[bool, Optional[str]]:
@@ -166,7 +197,7 @@ class CloudflareDnsProvider:
                 return True, None  # 已经不存在，视为成功
             return False, f"Cloudflare 删除错误 ({e.code}): {e.reason}"
         except Exception as e:
-            return False, f"Cloudflare 删除异常: {str(e)}"
+            return False, f"Cloudflare 删除异常: {_safe_err(e)}"
 
 
 # --- 2. 阿里云 DNS (Alibaba Cloud DNS API) ---
@@ -221,7 +252,7 @@ class AliyunDnsProvider:
             except Exception:
                 return False, f"阿里云 HTTP 错误 ({e.code}): {e.reason}"
         except Exception as e:
-            return False, f"阿里云 DNS 连接异常: {str(e)}"
+            return False, f"阿里云 DNS 连接异常: {_safe_err(e)}"
 
     @classmethod
     def create_srv_record(
@@ -261,7 +292,7 @@ class AliyunDnsProvider:
                 return True, str(record_id), full_subdomain, None
             return False, None, full_subdomain, f"阿里云创建失败: {res.get('Message', '未返回 RecordId')}"
         except Exception as e:
-            return False, None, full_subdomain, f"阿里云创建异常: {str(e)}"
+            return False, None, full_subdomain, f"阿里云创建异常: {_safe_err(e)}"
 
     @classmethod
     def delete_record(cls, access_key_id: str, access_key_secret: str, record_id: str) -> Tuple[bool, Optional[str]]:
@@ -270,8 +301,18 @@ class AliyunDnsProvider:
         try:
             cls._request("DeleteDomainRecord", access_key_id, access_key_secret, {"RecordId": record_id.strip()})
             return True, None
+        except urllib.error.HTTPError as e:
+            # 记录已不存在（404 或阿里云 InvalidRecordId）视为删除成功，避免残留记录无法回收
+            body = ""
+            try:
+                body = e.read().decode("utf-8", errors="ignore")
+            except Exception:
+                pass
+            if e.code == 404 or "InvalidRecordId" in body or "RecordNotExist" in body:
+                return True, None
+            return False, f"阿里云删除错误: {_safe_err(e)}"
         except Exception as e:
-            return False, f"阿里云删除异常: {str(e)}"
+            return False, f"阿里云删除异常: {_safe_err(e)}"
 
 
 # --- 3. 腾讯云 DNSPod (Tencent Cloud DNSPod API 3.0) ---
@@ -343,7 +384,7 @@ class TencentDnsProvider:
             domain_info = resp_data.get("DomainInfo", {})
             return True, f"腾讯云 DNSPod 鉴权成功！主域名: {domain_info.get('Name', root_domain)}"
         except Exception as e:
-            return False, f"腾讯云 DNS 连接异常: {str(e)}"
+            return False, f"腾讯云 DNS 连接异常: {_safe_err(e)}"
 
     @classmethod
     def create_srv_record(
@@ -387,7 +428,7 @@ class TencentDnsProvider:
                 return True, str(record_id), full_subdomain, None
             return False, None, full_subdomain, "腾讯云未返回有效 RecordId"
         except Exception as e:
-            return False, None, full_subdomain, f"腾讯云创建异常: {str(e)}"
+            return False, None, full_subdomain, f"腾讯云创建异常: {_safe_err(e)}"
 
     @classmethod
     def delete_record(cls, secret_id: str, secret_key: str, root_domain: str, record_id: str) -> Tuple[bool, Optional[str]]:
@@ -405,10 +446,14 @@ class TencentDnsProvider:
             )
             resp_data = res.get("Response", {})
             if "Error" in resp_data:
-                return False, f"腾讯云删除失败: {resp_data['Error'].get('Message')}"
+                err = resp_data["Error"]
+                # 记录已不存在时视为删除成功，避免残留记录无法回收
+                if err.get("Code") in ("ResourceNotFound", "InvalidParameter.RecordNotExist", "ResourceNotFound.RecordNotExist"):
+                    return True, None
+                return False, f"腾讯云删除失败: {err.get('Message')}"
             return True, None
         except Exception as e:
-            return False, f"腾讯云删除异常: {str(e)}"
+            return False, f"腾讯云删除异常: {_safe_err(e)}"
 
 
 # --- 统一调度管理器 (Unified DNS Service Manager) ---

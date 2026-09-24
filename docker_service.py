@@ -73,31 +73,42 @@ def extract_credentials_from_logs(logs_text: str) -> Dict[str, str]:
     }
     
     # 1. 提取客户端管理员 Token (Privilege Key)
-    token_match = re.search(r'token=([a-zA-Z0-9+/=_-]+)', logs_text)
+    # 锚定 "privilege key created" / "Admin Token created" 提示行，允许其后的 token= 在下一行，
+    # 但限制跨行距离，避免旧实现里 DOTALL 贪婪匹配吞入后续无关内容。
+    token_match = re.search(
+        r'(?:privilege\s+key\s+created|admin\s+token\s+created)[^\n]*\n\s*\n?\s*token\s*=\s*"?([A-Za-z0-9+/=_\-]+)"?',
+        logs_text, re.IGNORECASE
+    )
+    if not token_match:
+        # 兜底：提示行与 token= 同一行，或日志中仅出现孤立的 token=
+        token_match = re.search(
+            r'(?:privilege\s+key\s+created|admin\s+token\s+created)[^\n]*?token\s*=\s*"?([A-Za-z0-9+/=_\-]+)"?',
+            logs_text, re.IGNORECASE
+        )
+    if not token_match:
+        token_match = re.search(r'^\s*token\s*=\s*"?([A-Za-z0-9+/=_\-]+)"?\s*$', logs_text, re.IGNORECASE | re.MULTILINE)
     if token_match:
         creds["admin_token"] = token_match.group(1).strip()
-    else:
-        token_match2 = re.search(r'privilege key created.*?token=([^\s\r\n]+)', logs_text, re.IGNORECASE | re.DOTALL)
-        if token_match2:
-            creds["admin_token"] = token_match2.group(1).strip()
 
-    # 2. 提取 ServerQuery 密码 (password= "xxx" 或 password=xxx)
-    pwd_match = re.search(r'password=\s*"([^"]+)"', logs_text)
+    # 2. 提取 ServerQuery 密码：优先锚定 loginname= "serveradmin" 所在行的 password=
+    pwd_match = re.search(
+        r'loginname\s*=\s*"?serveradmin"?[^\n]*?password\s*=\s*"([^"]+)"',
+        logs_text, re.IGNORECASE
+    )
+    if not pwd_match:
+        pwd_match = re.search(
+            r'loginname\s*=\s*"?serveradmin"?[^\n]*?password\s*=\s*([^\s,]+)',
+            logs_text, re.IGNORECASE
+        )
     if pwd_match:
-        creds["query_password"] = pwd_match.group(1).strip()
-    else:
-        pwd_match2 = re.search(r'password=\s*([^\s,]+)', logs_text)
-        if pwd_match2:
-            creds["query_password"] = pwd_match2.group(1).strip().strip('"')
+        creds["query_password"] = pwd_match.group(1).strip().strip('"')
 
-    # 3. 提取 ServerQuery apikey (apikey= "xxx" 或 apikey=xxx)
-    api_match = re.search(r'apikey=\s*"([^"]+)"', logs_text)
+    # 3. 提取 ServerQuery apikey
+    api_match = re.search(r'apikey\s*=\s*"([^"]+)"', logs_text, re.IGNORECASE)
+    if not api_match:
+        api_match = re.search(r'apikey\s*=\s*([^\s,]+)', logs_text, re.IGNORECASE)
     if api_match:
-        creds["query_apikey"] = api_match.group(1).strip()
-    else:
-        api_match2 = re.search(r'apikey=\s*([^\s,]+)', logs_text)
-        if api_match2:
-            creds["query_apikey"] = api_match2.group(1).strip().strip('"')
+        creds["query_apikey"] = api_match.group(1).strip().strip('"')
 
     return creds
 

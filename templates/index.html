@@ -1073,6 +1073,14 @@
         }
       }
 
+      // 端口范围校验：避免 0 被静默丢弃或超出 1-65535 后由后端报错
+      const rawPort = document.getElementById('botServerPortInput').value.trim();
+      const parsedPort = rawPort === '' ? 9987 : Number.parseInt(rawPort, 10);
+      if (!Number.isInteger(parsedPort) || parsedPort < 1 || parsedPort > 65535) {
+        alert('服务器端口必须为 1 - 65535 之间的整数');
+        return;
+      }
+
       const botSubmitBtn = document.getElementById('botSubmitBtn');
       const botSpinner = document.getElementById('botLoadingSpinner');
       const botBtnText = document.getElementById('botBtnText');
@@ -1082,7 +1090,7 @@
         cdk: currentPendingBotCdk,
         name: document.getElementById('botNameInput').value.trim(),
         serverAddress: document.getElementById('botServerAddrInput').value.trim(),
-        serverPort: parseInt(document.getElementById('botServerPortInput').value) || 9987,
+        serverPort: parsedPort,
         nickname: document.getElementById('botNickInput').value.trim(),
         defaultChannel: document.getElementById('botDefaultChannelInput').value.trim() || null,
         serverPassword: document.getElementById('botServerPassInput').value.trim() || null,
