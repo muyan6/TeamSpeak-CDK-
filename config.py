@@ -1,6 +1,4 @@
 import os
-import secrets
-import sys
 from pathlib import Path
 
 try:
@@ -14,19 +12,11 @@ SERVER_HOST = os.getenv("SERVER_HOST", "0.0.0.0")
 SERVER_PORT = int(os.getenv("SERVER_PORT", "12345"))
 
 # 管理员口令。
-# 安全策略：优先读取环境变量 ADMIN_PASSWORD；未配置时生成一次性随机口令并在控制台打印，
-# 避免像过去那样把 admin123456 这种弱默认口令随代码一起分发。首次登录后请立即在后台修改。
-_RAW_ADMIN_PASSWORD = (os.getenv("ADMIN_PASSWORD") or "").strip()
-if _RAW_ADMIN_PASSWORD:
-    ADMIN_PASSWORD = _RAW_ADMIN_PASSWORD
-else:
-    ADMIN_PASSWORD = secrets.token_urlsafe(12)
-    print(
-        "[!] 未配置 ADMIN_PASSWORD 环境变量，本次已生成随机管理员口令: "
-        f"{ADMIN_PASSWORD}\n"
-        "[!] 该口令仅在本次进程生命周期内有效（会写入数据库 system_settings），请立即在后台修改密码。",
-        file=sys.stderr,
-    )
+# 安全策略：不再内置 admin123456 这类随代码分发的弱口令。
+# - 配置了 ADMIN_PASSWORD：仅在数据库中尚无口令记录时作为初值写入；
+# - 未配置：由 database.get_admin_password() 首次调用时生成随机口令，
+#   持久化到 system_settings 并打印到启动日志（打印的就是真实生效值，重启后保持稳定）。
+ADMIN_PASSWORD = (os.getenv("ADMIN_PASSWORD") or "").strip()
 
 # TS3 服务器公网IP/域名（用于展示给用户连接，如未设置则默认当前主机IP/域名）
 PUBLIC_SERVER_IP = os.getenv("PUBLIC_SERVER_IP", "")

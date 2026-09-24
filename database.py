@@ -3,6 +3,7 @@ import sqlite3
 import secrets
 import string
 import socket
+import sys
 import ipaddress
 from urllib.parse import urlsplit
 from contextlib import contextmanager
@@ -300,12 +301,33 @@ def set_setting(key: str, value: str):
         conn.commit()
 
 def get_admin_password() -> str:
+    """
+    读取管理员口令，首次调用时完成初始化并持久化。
+
+    优先级：数据库中已保存的口令 > 环境变量 ADMIN_PASSWORD > 新生成的随机口令。
+    随机口令只在「首次生成」那一刻打印一次，且立即写入 system_settings，
+    因此打印出来的就是真实生效值，后续重启不会变化（不会出现「日志口令与库中口令不一致」）。
+    """
     from config import ADMIN_PASSWORD
+
     pwd = get_setting("admin_password")
-    if pwd is None:
-        pwd = ADMIN_PASSWORD
-        set_setting("admin_password", pwd)
-    return pwd
+    if pwd:
+        return pwd
+
+    if ADMIN_PASSWORD:
+        set_setting("admin_password", ADMIN_PASSWORD)
+        return ADMIN_PASSWORD
+
+    generated = secrets.token_urlsafe(12)
+    set_setting("admin_password", generated)
+    print(
+        "[!] 未配置 ADMIN_PASSWORD 环境变量，已生成随机管理员口令并持久化："
+        f"{generated}\n"
+        "[!] 该口令已写入数据库 system_settings，重启后保持不变；"
+        "请立即登录后台【修改密码】更换为自定义强口令。",
+        file=sys.stderr,
+    )
+    return generated
 
 def set_admin_password(new_password: str):
     set_setting("admin_password", new_password.strip())
