@@ -6,6 +6,7 @@ import ipaddress
 import urllib.request
 import json
 import secrets
+import functools
 from pathlib import Path
 from typing import Optional, Literal, Dict, Any, Tuple, List
 from fastapi import FastAPI, Request, HTTPException, Depends, Header
@@ -75,7 +76,13 @@ from database import (
     get_dns_config,
     set_dns_config,
     is_subdomain_available,
-    update_instance_domain
+    update_instance_domain,
+    save_admin_session,
+    delete_admin_session,
+    is_admin_session_valid,
+    prune_admin_sessions,
+    has_ip_used_teamspeak_trial,
+    update_bot_instance_web_user_id
 )
 from port_manager import allocate_ports_for_instance
 import docker_service
@@ -326,16 +333,14 @@ def resolve_srv_record(domain: str) -> Tuple[Optional[str], Optional[int]]:
         pass
     return None, None
 
-def get_ip_geo_info(ip_str: str) -> Dict[str, Any]:
-    """
-    查询 IP 的地理归属与是否为境外节点
-    """
+@functools.lru_cache(maxsize=512)
+def _cached_ip_geo(ip_str: str) -> Tuple[bool, str, str]:
     try:
         ip = ipaddress.ip_address(ip_str)
         if ip.is_private or ip.is_loopback:
-            return {"is_overseas": False, "country": "内网/局域网", "location": "本地内网"}
+            return False, "内网/局域网", "本地内网"
     except Exception:
-        return {"is_overseas": False, "country": "未知", "location": "未知"}
+        return False, "未知", "未知"
 
     try:
         req = urllib.request.Request(
@@ -350,17 +355,35 @@ def get_ip_geo_info(ip_str: str) -> Dict[str, Any]:
                 city = data.get("city", "")
                 is_overseas = (code != "CN")
                 loc = f"{country} {city}".strip() if country else "未知"
-                return {"is_overseas": is_overseas, "country": country or "未知", "location": loc}
+                return is_overseas, country or "未知", loc
     except Exception:
         pass
 
-    return {"is_overseas": False, "country": "国内/未知", "location": "默认线路"}
+    return False, "国内/未知", "默认线路"
+
+def get_ip_geo_info(ip_str: str) -> Dict[str, Any]:
+    """
+    查询 IP 的地理归属与是否为境外节点（带 LRU 缓存，避免频繁请求命中公共 API 速率限制）
+    """
+    is_overseas, country, location = _cached_ip_geo(ip_str)
+    return {"is_overseas": is_overseas, "country": country, "location": location}
+
+def get_real_client_ip(request: Request) -> str:
+    """提取客户端真实 IP，优先 X-Forwarded-For，降级至 request.client.host"""
+    xff = request.headers.get("x-forwarded-for")
+    if xff:
+        client_ip = xff.split(",")[0].strip()
+        if client_ip:
+            return client_ip
+    if request.client and request.client.host:
+        return request.client.host
+    return "127.0.0.1"
 
 # --- 权限校验依赖 ---
 
 ADMIN_SESSION_COOKIE = "ts_admin_session"
 _ADMIN_SESSION_TTL_SECONDS = 12 * 3600
-# 进程内会话表：token -> 过期时间戳（单实例部署足够；重启后需重新登录）
+# 进程内会话一级缓存：token -> 过期时间戳（与 SQLite admin_sessions 表保持持久化同步）
 _admin_sessions: Dict[str, float] = {}
 
 
@@ -369,13 +392,22 @@ def _prune_admin_sessions() -> None:
     for token, expires_at in list(_admin_sessions.items()):
         if expires_at <= now_ts:
             _admin_sessions.pop(token, None)
+    try:
+        prune_admin_sessions()
+    except Exception:
+        pass
 
 
 def create_admin_session(response: JSONResponse) -> str:
-    """创建服务端会话并通过 HttpOnly Cookie 下发，避免管理员口令长期驻留前端存储。"""
+    """创建服务端会话并通过 HttpOnly Cookie 下发，并持久化到数据库以支持重启保持登录。"""
     _prune_admin_sessions()
     token = secrets.token_urlsafe(32)
-    _admin_sessions[token] = datetime.now().timestamp() + _ADMIN_SESSION_TTL_SECONDS
+    expires_at = datetime.now().timestamp() + _ADMIN_SESSION_TTL_SECONDS
+    _admin_sessions[token] = expires_at
+    try:
+        save_admin_session(token, expires_at)
+    except Exception:
+        pass
     response.set_cookie(
         ADMIN_SESSION_COOKIE,
         token,
@@ -391,6 +423,10 @@ def destroy_admin_session(request: Request, response: JSONResponse) -> None:
     token = request.cookies.get(ADMIN_SESSION_COOKIE)
     if token:
         _admin_sessions.pop(token, None)
+        try:
+            delete_admin_session(token)
+        except Exception:
+            pass
     response.delete_cookie(ADMIN_SESSION_COOKIE, path="/")
 
 
@@ -398,9 +434,18 @@ def _is_valid_admin_session(request: Request) -> bool:
     token = request.cookies.get(ADMIN_SESSION_COOKIE)
     if not token:
         return False
-    _prune_admin_sessions()
+    # 1. 优先检查进程内缓存
     expires_at = _admin_sessions.get(token)
-    return bool(expires_at and expires_at > datetime.now().timestamp())
+    if expires_at and expires_at > datetime.now().timestamp():
+        return True
+    # 2. 进程内未命中（如服务重启），查询 SQLite 持久化会话表
+    try:
+        if is_admin_session_valid(token):
+            _admin_sessions[token] = datetime.now().timestamp() + _ADMIN_SESSION_TTL_SECONDS
+            return True
+    except Exception:
+        pass
+    return False
 
 
 def verify_admin(
@@ -884,6 +929,19 @@ def redeem_cdk(req: RedeemRequest, request: Request):
         return claim_error_response(code, "teamspeak")
     cdk_info = claimed_cdk
 
+    is_trial = bool(cdk_info.get("is_trial", 0))
+    real_client_ip = get_real_client_ip(request)
+
+    # 体验卡开通防白嫖校验：针对动态分配端口的 TS 实例，限制同一客户端 IP 7天内只能体验开通一次
+    if is_trial:
+        has_used, trial_rec = has_ip_used_teamspeak_trial(real_client_ip)
+        if has_used:
+            release_cdk_claim(code)
+            return JSONResponse(status_code=400, content={
+                "success": False,
+                "message": f"您的 IP ({real_client_ip}) 近期已兑换过 TeamSpeak 体验服务器（CDK: {trial_rec.get('cdk_code', '')}），7 天内限体验 1 次！"
+            })
+
     # 未使用：开始分配端口与开通
     try:
         instance_id, ports = allocate_ports_for_instance()
@@ -1003,7 +1061,8 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                 cdk_code=code,
                 cdk_type="teamspeak",
                 target_id=str(instance_id),
-                raw_input=f"{bound_subdomain or client_host}:{ports['voice']}"
+                raw_input=f"{bound_subdomain or client_host}:{ports['voice']}",
+                client_ip=real_client_ip
             )
         except Exception as e:
             if domain_record_id:
@@ -2030,13 +2089,18 @@ def sync_single_bot_instance_permission(bot_id: str, _: bool = Depends(verify_ad
         web_username = bot.get("web_username")
         if web_username:
             ok_u, u_res = music_bot_client.get_users()
-            if ok_u and isinstance(u_res, dict) and "users" in u_res:
-                for u in u_res["users"]:
+            if ok_u:
+                raw_users = u_res.get("users", []) if isinstance(u_res, dict) else (u_res if isinstance(u_res, list) else [])
+                for u in raw_users:
                     if isinstance(u, dict) and u.get("username") == web_username:
                         web_user_id = str(u.get("id"))
                         break
         if not web_user_id:
             raise HTTPException(status_code=400, detail="该机器人实例未关联 Web 点歌用户或找不到用户 ID")
+        try:
+            update_bot_instance_web_user_id(bot_id, web_user_id)
+        except Exception:
+            pass
     
     perm_cfg = get_bot_permission_config()
     target_bots = "all" if perm_cfg.get("bot_scope") == "all" else [str(bot_id)]

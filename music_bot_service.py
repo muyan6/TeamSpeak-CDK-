@@ -369,8 +369,9 @@ class MusicBotClient:
 
         if not user_id:
             ok_list, list_res = self.get_users()
-            if ok_list and isinstance(list_res, dict) and "users" in list_res:
-                for u in list_res["users"]:
+            if ok_list:
+                raw_users = list_res.get("users", []) if isinstance(list_res, dict) else (list_res if isinstance(list_res, list) else [])
+                for u in raw_users:
                     if isinstance(u, dict) and u.get("username") == username.strip():
                         user_id = u.get("id")
                         res = u

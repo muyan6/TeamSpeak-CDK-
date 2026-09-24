@@ -129,7 +129,17 @@ def deploy_teamspeak_instance(instance_id: int, ports: Dict[str, int]) -> Tuple[
     try:
         os.makedirs(instance_dir, exist_ok=True)
         # 创建 ./data 目录用于挂载卷
-        os.makedirs(os.path.join(instance_dir, "data"), exist_ok=True)
+        mount_data_dir = os.path.join(instance_dir, "data")
+        os.makedirs(mount_data_dir, exist_ok=True)
+        # Linux 下官方 teamspeak 容器以 UID:GID 9987:9987 (teamspeak) 运行，
+        # 若宿主机挂载目录权限为 0755 root:root 将导致 SQLite 无法创建数据库并报错 (Permission denied)。
+        # 为实例目录及挂载目录设置 0777 权限，确保容器内非 root 用户具备读写权限。
+        if hasattr(os, "chmod"):
+            try:
+                os.chmod(instance_dir, 0o777)
+                os.chmod(mount_data_dir, 0o777)
+            except Exception:
+                pass
     except Exception as e:
         return False, {}, f"创建目录失败: {str(e)}"
 

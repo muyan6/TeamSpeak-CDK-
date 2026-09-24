@@ -15,6 +15,8 @@ def is_socket_port_free(port: int, proto: str = "tcp") -> bool:
     try:
         if proto.lower() == "udp":
             with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+                if os.name == "nt" and hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+                    s.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
                 s.bind(("0.0.0.0", port))
                 return True
         else:
@@ -57,7 +59,8 @@ def allocate_ports_for_instance(desired_id: int = None) -> Tuple[int, Dict[str, 
         used_ports_data = get_all_used_ports()
         used_all = set(used_ports_data["all"])
         
-        # 官方基础端口直接加入保留占用集合，确保绝对不分配
+        # 官方基础默认端口 (9987, 30033, 10011, 41144) 及配置基础端口直接加入保留占用集合，确保绝对不分配
+        used_all.update({9987, 30033, 10011, 41144})
         used_all.add(BASE_VOICE_PORT)
         used_all.add(BASE_FILE_PORT)
         used_all.add(BASE_QUERY_PORT)

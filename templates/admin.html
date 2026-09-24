@@ -866,11 +866,11 @@
 
               <div>
                 <label class="info-label" style="display: block; margin-bottom: 0.4rem; font-weight: 600;">
-                  <i class="fa-solid fa-network-wired" style="color: #facc15;"></i> 物理节点主机/A记录 (可选)
+                  <i class="fa-solid fa-network-wired" style="color: #facc15;"></i> 物理节点主机/A记录 (推荐)
                 </label>
-                <input type="text" id="cfgDnsTargetHost" class="form-control" style="width: 100%; padding: 0.65rem 0.9rem;" placeholder="如 node1.yourdomain.com 或 服务器IP">
+                <input type="text" id="cfgDnsTargetHost" class="form-control" style="width: 100%; padding: 0.65rem 0.9rem;" placeholder="如 node1.yourdomain.com (须为有效A记录域名，严禁填纯IP)">
                 <div style="font-size: 0.76rem; color: var(--text-muted); margin-top: 0.35rem;">
-                  SRV 指向的目标 A 记录；留空自动使用当前服务器公网 IP
+                  SRV 规范 (RFC 2782) 要求目标主机必须是有效域名（如 ts.yourdomain.com），严禁填写纯 IP
                 </div>
               </div>
             </div>
@@ -2326,7 +2326,7 @@
     }
 
     function downloadTextFile(filename, text) {
-      const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+      const blob = new Blob(['\uFEFF' + text], { type: 'text/plain;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const link = document.createElement('a');
       link.href = url;

@@ -27,6 +27,7 @@ class TestTeamSpeakManager(unittest.TestCase):
             conn.execute("DELETE FROM instances")
             conn.execute("DELETE FROM bot_instances")
             conn.execute("DELETE FROM trial_server_records")
+            conn.execute("DELETE FROM admin_sessions")
             conn.commit()
         if os.path.exists(test_data_dir):
             shutil.rmtree(test_data_dir, ignore_errors=True)
@@ -1225,6 +1226,93 @@ class TestTeamSpeakManager(unittest.TestCase):
             bot_scope="current",
             permission_notice="月卡用户仅有控制功能，年卡用户独享音乐后台"
         )
+
+    def test_new_fixes_verification(self):
+        import app as ts_app
+        import time
+
+        # 1. 管理员会话持久化与重启恢复测试
+        token = "test-session-token-123"
+        expires_at = time.time() + 3600
+        database.save_admin_session(token, expires_at)
+        self.assertTrue(database.is_admin_session_valid(token))
+
+        # 模拟服务重启：清空内存中的 _admin_sessions
+        ts_app._admin_sessions.clear()
+        mock_req = MagicMock()
+        mock_req.cookies = {ts_app.ADMIN_SESSION_COOKIE: token}
+        self.assertTrue(ts_app._is_valid_admin_session(mock_req))
+        # 验证已成功从数据库回填至内存缓存
+        self.assertIn(token, ts_app._admin_sessions)
+
+        # 测试过期会话自动剔除
+        expired_token = "test-expired-token-456"
+        database.save_admin_session(expired_token, time.time() - 10)
+        self.assertFalse(database.is_admin_session_valid(expired_token))
+        database.delete_admin_session(token)
+        self.assertFalse(database.is_admin_session_valid(token))
+
+        # 2. 机器人 Web 用户 ID 更新持久化测试
+        bot_cdks = database.create_cdks(count=1, remark="web_user_id测试", cdk_type="music_bot")
+        bot = database.create_bot_instance(
+            bot_id="bot-web-id-test",
+            name="WebID测试机",
+            server_address="127.0.0.1",
+            server_port=9987,
+            nickname="TestBot",
+            cdk_code=bot_cdks[0],
+            duration_months=1,
+            web_username="test_user"
+        )
+        self.assertIsNone(bot.get("web_user_id"))
+        database.update_bot_instance_web_user_id("bot-web-id-test", "uid-999")
+        bot_updated = database.get_bot_instance_by_id("bot-web-id-test")
+        self.assertEqual(bot_updated.get("web_user_id"), "uid-999")
+        database.delete_bot_instance("bot-web-id-test")
+        database.delete_cdk(bot_cdks[0])
+
+        # 3. TeamSpeak 体验卡 IP 指纹与防白嫖检测测试
+        has_used, _ = database.has_ip_used_teamspeak_trial("203.0.113.10")
+        self.assertFalse(has_used)
+
+        database.record_trial_server(
+            addr="node1.ts.com",
+            port=60001,
+            cdk_code="TS-TRIAL-001",
+            cdk_type="teamspeak",
+            target_id="1",
+            client_ip="203.0.113.10"
+        )
+        has_used, rec = database.has_ip_used_teamspeak_trial("203.0.113.10")
+        self.assertTrue(has_used)
+        self.assertEqual(rec["cdk_code"], "TS-TRIAL-001")
+        # 异地 IP 不受影响
+        has_used_other, _ = database.has_ip_used_teamspeak_trial("203.0.113.11")
+        self.assertFalse(has_used_other)
+
+        # 4. 端口管理 Socket 检测与官方端口保留
+        free_port = port_manager.is_socket_port_free(58999, proto="tcp")
+        self.assertIsInstance(free_port, bool)
+        free_udp = port_manager.is_socket_port_free(58999, proto="udp")
+        self.assertIsInstance(free_udp, bool)
+
+        # 5. 音乐机器人用户列表规范化解析测试 (兼容 list 与 dict 格式)
+        with patch.object(music_bot_client, "_request", return_value=(True, {"user": {"username": "u1"}})), \
+             patch.object(music_bot_client, "get_users", return_value=(True, [{"id": "resolved-id-1", "username": "u1"}])):
+            ok_u, res_u = music_bot_client.create_user("u1", "pass123")
+            self.assertTrue(ok_u)
+            self.assertEqual(res_u["id"], "resolved-id-1")
+
+        with patch.object(music_bot_client, "_request", return_value=(True, {"user": {"username": "u2"}})), \
+             patch.object(music_bot_client, "get_users", return_value=(True, {"users": [{"id": "resolved-id-2", "username": "u2"}]})):
+            ok_u2, res_u2 = music_bot_client.create_user("u2", "pass123")
+            self.assertTrue(ok_u2)
+            self.assertEqual(res_u2["id"], "resolved-id-2")
+
+        # 6. GeoIP 本地与缓存测试
+        geo_local = ts_app.get_ip_geo_info("127.0.0.1")
+        self.assertFalse(geo_local["is_overseas"])
+        self.assertEqual(geo_local["location"], "本地内网")
 
 if __name__ == "__main__":
     unittest.main()

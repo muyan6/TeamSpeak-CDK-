@@ -140,12 +140,14 @@ def init_db():
                 cdk_code TEXT NOT NULL,             -- 关联的体验卡 CDK
                 cdk_type TEXT NOT NULL,             -- 'music_bot' 或 'teamspeak'
                 target_id TEXT,                     -- 绑定的 bot_id 或 instance_id
+                client_ip TEXT,                     -- 客户端真实 IP (防白嫖指纹)
                 used_at TEXT NOT NULL               -- 记录时间
             )
         ''')
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_trial_server_key ON trial_server_records(server_key)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_trial_resolved_key ON trial_server_records(resolved_key)")
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_trial_server_addr ON trial_server_records(server_address)")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_trial_client_ip ON trial_server_records(client_ip)")
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_instances_voice_port ON instances(voice_port)")
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_instances_container_name ON instances(container_name)")
         # 端口唯一索引：在数据库层兜底，防止并发开通时实例号/端口被重复分配
@@ -177,6 +179,16 @@ def init_db():
                 value TEXT NOT NULL
             )
         ''')
+
+        # 创建管理员持久化会话表（避免服务重启导致管理员登录态意外丢失）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS admin_sessions (
+                token TEXT PRIMARY KEY,
+                expires_at REAL NOT NULL,
+                created_at TEXT NOT NULL
+            )
+        ''')
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_admin_sessions_expire ON admin_sessions(expires_at)")
         
         # 兼容旧表升级：检查并添加列
         cursor.execute("PRAGMA table_info(instances)")
@@ -215,6 +227,12 @@ def init_db():
             cursor.execute("ALTER TABLE bot_instances ADD COLUMN web_password TEXT")
         if "web_user_id" not in bot_cols:
             cursor.execute("ALTER TABLE bot_instances ADD COLUMN web_user_id TEXT")
+
+        cursor.execute("PRAGMA table_info(trial_server_records)")
+        trial_cols = [col["name"] for col in cursor.fetchall()]
+        if "client_ip" not in trial_cols:
+            cursor.execute("ALTER TABLE trial_server_records ADD COLUMN client_ip TEXT")
+        cursor.execute("CREATE INDEX IF NOT EXISTS idx_trial_client_ip ON trial_server_records(client_ip)")
 
         # 进程在外部部署期间异常退出时，释放超过 10 分钟的临时占用。
         stale_claim_before = (datetime.now() - timedelta(minutes=10)).strftime("%Y-%m-%d %H:%M:%S")
@@ -267,6 +285,48 @@ def get_admin_password() -> str:
 
 def set_admin_password(new_password: str):
     set_setting("admin_password", new_password.strip())
+
+# --- 管理员会话持久化 ---
+
+def save_admin_session(token: str, expires_at: float):
+    now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "INSERT OR REPLACE INTO admin_sessions (token, expires_at, created_at) VALUES (?, ?, ?)",
+            (token, expires_at, now_str)
+        )
+        conn.commit()
+
+def delete_admin_session(token: str):
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM admin_sessions WHERE token = ?", (token,))
+        conn.commit()
+
+def is_admin_session_valid(token: str) -> bool:
+    if not token:
+        return False
+    now_ts = datetime.now().timestamp()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT expires_at FROM admin_sessions WHERE token = ?", (token,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+        if row["expires_at"] <= now_ts:
+            cursor.execute("DELETE FROM admin_sessions WHERE token = ?", (token,))
+            conn.commit()
+            return False
+        return True
+
+def prune_admin_sessions() -> int:
+    now_ts = datetime.now().timestamp()
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM admin_sessions WHERE expires_at <= ?", (now_ts,))
+        conn.commit()
+        return cursor.rowcount
 
 def get_bot_config() -> Dict[str, str]:
     from config import BOT_PANEL_URL, BOT_PANEL_USER, BOT_PANEL_PASS, BOT_TUTORIAL_URL
@@ -733,7 +793,8 @@ def record_trial_server(
     cdk_code: str,
     cdk_type: str = "music_bot",
     target_id: Optional[str] = None,
-    raw_input: Optional[str] = None
+    raw_input: Optional[str] = None,
+    client_ip: Optional[str] = None
 ) -> Dict[str, Any]:
     """
     持久化记录已使用体验卡的目标服务器标识与详细指纹
@@ -745,15 +806,17 @@ def record_trial_server(
         cursor.execute("""
             INSERT INTO trial_server_records (
                 server_key, server_address, server_port, resolved_ip, resolved_key,
-                raw_input, cdk_code, cdk_type, target_id, used_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                raw_input, cdk_code, cdk_type, target_id, client_ip, used_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(server_key) DO UPDATE SET
                 cdk_code = excluded.cdk_code,
                 used_at = excluded.used_at,
-                target_id = excluded.target_id
+                target_id = excluded.target_id,
+                client_ip = COALESCE(excluded.client_ip, trial_server_records.client_ip)
         """, (
             server_key, clean_addr, target_port, resolved_ip, resolved_key,
-            raw_input or f"{addr}:{port}", cdk_code, cdk_type, str(target_id) if target_id else None, now
+            raw_input or f"{addr}:{port}", cdk_code, cdk_type, str(target_id) if target_id else None,
+            client_ip.strip() if client_ip else None, now
         ))
         conn.commit()
         # 回读：以 server_key 为准（ON CONFLICT 走 UPDATE 分支时 lastrowid 不可靠）
@@ -763,6 +826,27 @@ def record_trial_server(
         )
         row = cursor.fetchone()
         return dict(row) if row else {}
+
+def has_ip_used_teamspeak_trial(client_ip: str, days: int = 7) -> Tuple[bool, Optional[Dict[str, Any]]]:
+    """
+    检查指定客户端 IP 近期是否已兑换过 TeamSpeak 体验服务器（7天内限1次），防止批量刷取服务器。
+    """
+    if not client_ip or client_ip in ("127.0.0.1", "::1", "localhost", "testclient"):
+        return False, None
+    since = (datetime.now() - timedelta(days=days)).strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM trial_server_records 
+            WHERE cdk_type = 'teamspeak' 
+              AND client_ip = ? 
+              AND used_at >= ?
+            ORDER BY used_at DESC LIMIT 1
+        """, (client_ip.strip(), since))
+        row = cursor.fetchone()
+        if row:
+            return True, dict(row)
+        return False, None
 
 def get_all_trial_records() -> List[Dict[str, Any]]:
     with get_connection() as conn:
@@ -1140,6 +1224,13 @@ def update_bot_instance_expiry(bot_id: str, expire_at: str):
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("UPDATE bot_instances SET expire_at = ? WHERE bot_id = ?", (expire_at, bot_id))
+        conn.commit()
+
+def update_bot_instance_web_user_id(bot_id: str, web_user_id: str):
+    """更新机器人实例绑定的远程 Web 用户 ID，便于后续同步无需全量扫描"""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("UPDATE bot_instances SET web_user_id = ? WHERE bot_id = ?", (str(web_user_id), bot_id))
         conn.commit()
 
 def get_expired_active_bots() -> List[Dict[str, Any]]:

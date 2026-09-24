@@ -23,24 +23,25 @@ echo "[*] 激活虚拟环境并安装依赖..."
 source venv/bin/activate
 pip install -r requirements.txt
 
-# 创建配置指定的数据目录
+# 创建配置指定的数据目录并赋予权限，确保 UID 9987 的容器进程可正常读写 SQLite
 DATA_DIR="${TS_DATA_DIR:-/data/teamspeak}"
 mkdir -p "$DATA_DIR"
+chmod -R 777 "$DATA_DIR" 2>/dev/null || true
 
 # 自动放行 Linux 本地防火墙端口（如果已开启 firewalld / ufw）
 if command -v firewall-cmd &>/dev/null && systemctl is-active --quiet firewalld; then
     echo "[*] 检测到 firewalld，正在放行端口段..."
     firewall-cmd --permanent --add-port=12345/tcp &>/dev/null || true
-    firewall-cmd --permanent --add-port=60000-60100/udp &>/dev/null || true
-    firewall-cmd --permanent --add-port=20000-20100/tcp &>/dev/null || true
-    firewall-cmd --permanent --add-port=30000-30100/tcp &>/dev/null || true
+    firewall-cmd --permanent --add-port=60000-60200/udp &>/dev/null || true
+    firewall-cmd --permanent --add-port=20000-20200/tcp &>/dev/null || true
+    firewall-cmd --permanent --add-port=30000-30200/tcp &>/dev/null || true
     firewall-cmd --reload &>/dev/null || true
 elif command -v ufw &>/dev/null && ufw status | grep -q "Status: active"; then
     echo "[*] 检测到 ufw，正在放行端口段..."
     ufw allow 12345/tcp &>/dev/null || true
-    ufw allow 60000:60100/udp &>/dev/null || true
-    ufw allow 20000:20100/tcp &>/dev/null || true
-    ufw allow 30000:30100/tcp &>/dev/null || true
+    ufw allow 60000:60200/udp &>/dev/null || true
+    ufw allow 20000:20200/tcp &>/dev/null || true
+    ufw allow 30000:30200/tcp &>/dev/null || true
 fi
 
 echo "[*] 正在启动管理服务，监听端口 12345..."
