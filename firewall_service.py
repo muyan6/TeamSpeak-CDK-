@@ -3,12 +3,19 @@ import subprocess
 from typing import List, Tuple
 from config import SERVER_PORT, BASE_VOICE_PORT, BASE_FILE_PORT, BASE_QUERY_PORT, BASE_TSDNS_PORT
 
+
 def run_cmd(cmd: List[str]) -> Tuple[bool, str]:
     try:
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=5)
-        return res.returncode == 0, res.stdout + res.stderr
+        return res.returncode == 0, (res.stdout or "") + (res.stderr or "")
     except Exception as e:
         return False, str(e)
+
+
+def _normalize_port_arg(port: str) -> str:
+    """ufw / iptables 的端口范围必须使用冒号分隔（60000:60200），连字符会被判为 Bad port。"""
+    return port.replace("-", ":") if "-" in port else port
+
 
 def auto_open_firewall_ports():
     """
@@ -30,10 +37,19 @@ def auto_open_firewall_ports():
         ok, out = run_cmd(["firewall-cmd", "--state"])
         if ok and "running" in out:
             print("[*] 检测到 firewalld 正在运行，正在自动放行端口段...")
+            failed = 0
             for port, proto in port_rules:
-                run_cmd(["firewall-cmd", "--permanent", f"--add-port={port}/{proto}"])
-            run_cmd(["firewall-cmd", "--reload"])
-            print("[+] firewalld 防火墙规则已自动放行并重新加载成功！")
+                ok_add, out_add = run_cmd(["firewall-cmd", "--permanent", f"--add-port={port}/{proto}"])
+                if not ok_add:
+                    failed += 1
+                    print(f"[!] firewalld 放行 {port}/{proto} 失败: {out_add.strip()}")
+            ok_reload, out_reload = run_cmd(["firewall-cmd", "--reload"])
+            if not ok_reload:
+                print(f"[!] firewalld 重新加载失败: {out_reload.strip()}")
+            if failed:
+                print(f"[!] firewalld 规则已尝试添加，其中 {failed} 条失败，请手动检查防火墙配置")
+            else:
+                print("[+] firewalld 防火墙规则已自动放行并重新加载成功！")
             return
 
     # 2. 检测 ufw (Ubuntu / Debian)
@@ -41,46 +57,80 @@ def auto_open_firewall_ports():
         ok, out = run_cmd(["ufw", "status"])
         if ok and "active" in out:
             print("[*] 检测到 ufw 正在运行，正在自动放行端口段...")
+            failed = 0
             for port, proto in port_rules:
-                run_cmd(["ufw", "allow", f"{port}/{proto}"])
-            print("[+] ufw 防火墙规则已自动放行成功！")
+                ufw_port = _normalize_port_arg(port)
+                ok_allow, out_allow = run_cmd(["ufw", "allow", f"{ufw_port}/{proto}"])
+                if not ok_allow:
+                    failed += 1
+                    print(f"[!] ufw 放行 {ufw_port}/{proto} 失败: {out_allow.strip()}")
+            if failed:
+                print(f"[!] ufw 规则已尝试添加，其中 {failed} 条失败，请手动检查防火墙配置")
+            else:
+                print("[+] ufw 防火墙规则已自动放行成功！")
             return
 
     # 3. 检测 iptables
     if shutil.which("iptables"):
-        try:
-            for port, proto in port_rules:
-                if "-" in port:
-                    start_p, end_p = port.split("-")
-                    run_cmd(["iptables", "-I", "INPUT", "-p", proto, "--dport", f"{start_p}:{end_p}", "-j", "ACCEPT"])
-                else:
-                    run_cmd(["iptables", "-I", "INPUT", "-p", proto, "--dport", port, "-j", "ACCEPT"])
-            print("[+] iptables 规则已自动添加放行规则！")
-        except Exception as e:
-            print(f"[!] iptables 放行提示: {e}")
-            return
+        added = 0
+        failed = 0
+        for port, proto in port_rules:
+            dport = _normalize_port_arg(port)
+            # 先 -C 判断规则是否已存在，避免每次启动重复插入导致规则无限累积
+            ok_check, _ = run_cmd(["iptables", "-C", "INPUT", "-p", proto, "--dport", dport, "-j", "ACCEPT"])
+            if ok_check:
+                continue
+            ok_add, out_add = run_cmd(["iptables", "-I", "INPUT", "-p", proto, "--dport", dport, "-j", "ACCEPT"])
+            if ok_add:
+                added += 1
+            else:
+                failed += 1
+                print(f"[!] iptables 放行 {dport}/{proto} 失败: {out_add.strip()}")
+        if failed:
+            print(f"[!] iptables 共新增 {added} 条规则，{failed} 条失败（iptables 规则不会自动持久化，重启后需重新执行）")
+        else:
+            print(f"[+] iptables 规则已自动添加放行规则（新增 {added} 条，已存在规则自动跳过）！")
+        return
 
     print("[*] 服务器本地防火墙未开启或已处于放行状态。")
+
 
 def open_single_instance_ports(voice_port: int, file_port: int, query_port: int, tsdns_port: int):
     """
     针对单个实例创建时进行即时端口放行补充
     """
+    rules = [
+        (voice_port, "udp"),
+        (file_port, "tcp"),
+        (query_port, "tcp"),
+        (tsdns_port, "tcp"),
+    ]
+
     if shutil.which("firewall-cmd"):
         ok, out = run_cmd(["firewall-cmd", "--state"])
         if ok and "running" in out:
-            run_cmd(["firewall-cmd", "--permanent", f"--add-port={voice_port}/udp"])
-            run_cmd(["firewall-cmd", "--permanent", f"--add-port={file_port}/tcp"])
-            run_cmd(["firewall-cmd", "--permanent", f"--add-port={query_port}/tcp"])
-            run_cmd(["firewall-cmd", "--permanent", f"--add-port={tsdns_port}/tcp"])
+            for _p, _proto in rules:
+                ok_add, out_add = run_cmd(["firewall-cmd", "--permanent", f"--add-port={_p}/{_proto}"])
+                if not ok_add:
+                    print(f"[!] firewalld 放行 {_p}/{_proto} 失败: {out_add.strip()}")
             run_cmd(["firewall-cmd", "--reload"])
             return
 
     if shutil.which("ufw"):
         ok, out = run_cmd(["ufw", "status"])
         if ok and "active" in out:
-            run_cmd(["ufw", "allow", f"{voice_port}/udp"])
-            run_cmd(["ufw", "allow", f"{file_port}/tcp"])
-            run_cmd(["ufw", "allow", f"{query_port}/tcp"])
-            run_cmd(["ufw", "allow", f"{tsdns_port}/tcp"])
+            for _p, _proto in rules:
+                ok_allow, out_allow = run_cmd(["ufw", "allow", f"{_p}/{_proto}"])
+                if not ok_allow:
+                    print(f"[!] ufw 放行 {_p}/{_proto} 失败: {out_allow.strip()}")
             return
+
+    if shutil.which("iptables"):
+        for _p, _proto in rules:
+            ok_check, _ = run_cmd(["iptables", "-C", "INPUT", "-p", _proto, "--dport", str(_p), "-j", "ACCEPT"])
+            if ok_check:
+                continue
+            ok_add, out_add = run_cmd(["iptables", "-I", "INPUT", "-p", _proto, "--dport", str(_p), "-j", "ACCEPT"])
+            if not ok_add:
+                print(f"[!] iptables 放行 {_p}/{_proto} 失败: {out_add.strip()}")
+        return

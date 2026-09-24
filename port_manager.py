@@ -66,7 +66,23 @@ def allocate_ports_for_instance(desired_id: int = None) -> Tuple[int, Dict[str, 
         # 从 1 开始寻找最小可用连续编号，保证 ts1 -> ts2 -> ts3 严格规律递增与端口严格对应
         candidate_id = desired_id if (desired_id and desired_id > 0) else 1
 
+        # 端口上限校验：任一分段端口超过 65535 即不可再分配，避免死循环与非法端口
+        max_id = min(
+            65535 - BASE_VOICE_PORT,
+            65535 - BASE_FILE_PORT,
+            65535 - BASE_QUERY_PORT,
+            65535 - BASE_TSDNS_PORT,
+        )
+        if candidate_id > max_id:
+            raise RuntimeError(
+                f"端口资源已耗尽（实例编号上限 {max_id}），无法继续分配新的 TeamSpeak 实例"
+            )
+
         while True:
+            if candidate_id > max_id:
+                raise RuntimeError(
+                    f"端口资源已耗尽（实例编号上限 {max_id}），无法继续分配新的 TeamSpeak 实例"
+                )
             # 检查数据库是否已有该 ID 的实例
             if get_instance_by_id(candidate_id) is not None:
                 candidate_id += 1

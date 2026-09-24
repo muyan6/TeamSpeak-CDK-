@@ -30,6 +30,41 @@ def get_connection():
     finally:
         conn.close()
 
+# 敏感配置回显掩码：前端看到该值即代表“已配置但未修改”，提交时后端跳过更新
+MASKED_SECRET = "******"
+
+# SQLite 单条语句的绑定变量上限为 999，批量 IN 查询按 500 分批，避免 "too many SQL variables"
+_SQL_VAR_CHUNK = 500
+
+def _chunked(items, size: int = _SQL_VAR_CHUNK):
+    for i in range(0, len(items), size):
+        yield items[i:i + size]
+
+def _set_settings(cursor, items) -> None:
+    """在同一个连接/事务内批量写入系统配置，保证配置整体生效或整体回滚。"""
+    for key, value in items:
+        cursor.execute(
+            "INSERT INTO system_settings (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            (key, str(value))
+        )
+
+def _calc_new_expire(current_exp_str: Optional[str], add_months: int, now: Optional[datetime] = None) -> str:
+    """统一的续期到期时间计算：永久卡保持 permanent，未过期的在原到期时间上顺延，已过期的从当前时间起算。"""
+    if add_months == 0:
+        return "permanent"
+    now = now or datetime.now()
+    if current_exp_str == "permanent":
+        return "permanent"
+    if current_exp_str:
+        try:
+            curr_exp = datetime.strptime(current_exp_str, "%Y-%m-%d %H:%M:%S")
+            base_time = curr_exp if curr_exp > now else now
+            return (base_time + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
+        except Exception:
+            pass
+    return (now + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
+
 def init_db():
     with get_connection() as conn:
         cursor = conn.cursor()
@@ -113,6 +148,27 @@ def init_db():
         cursor.execute("CREATE INDEX IF NOT EXISTS idx_trial_server_addr ON trial_server_records(server_address)")
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_instances_voice_port ON instances(voice_port)")
         cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_instances_container_name ON instances(container_name)")
+        # 端口唯一索引：在数据库层兜底，防止并发开通时实例号/端口被重复分配
+        for _col in ("file_port", "query_port", "tsdns_port"):
+            try:
+                cursor.execute(f"CREATE UNIQUE INDEX IF NOT EXISTS idx_instances_{_col} ON instances({_col})")
+            except Exception as _idx_err:
+                print(f"[Warning] 创建 {_col} 唯一索引失败（可能存在历史重复端口数据）: {_idx_err}")
+        # 查询/回收常用索引
+        for _idx_sql in (
+            "CREATE INDEX IF NOT EXISTS idx_cdks_status_type ON cdks(status, cdk_type)",
+            "CREATE INDEX IF NOT EXISTS idx_cdks_trial_duration ON cdks(is_trial, duration_months)",
+            "CREATE INDEX IF NOT EXISTS idx_cdks_created_at ON cdks(created_at)",
+            "CREATE INDEX IF NOT EXISTS idx_instances_cdk_code ON instances(cdk_code)",
+            "CREATE INDEX IF NOT EXISTS idx_instances_status_expire ON instances(status, expire_at)",
+            "CREATE INDEX IF NOT EXISTS idx_instances_subdomain ON instances(subdomain)",
+            "CREATE INDEX IF NOT EXISTS idx_bots_cdk_code ON bot_instances(cdk_code)",
+            "CREATE INDEX IF NOT EXISTS idx_bots_status_expire ON bot_instances(status, expire_at)",
+        ):
+            try:
+                cursor.execute(_idx_sql)
+            except Exception as _idx_err:
+                print(f"[Warning] 创建索引失败: {_idx_err}")
 
         # 创建系统配置表
         cursor.execute('''
@@ -170,6 +226,19 @@ def init_db():
 
         conn.commit()
 
+def release_stale_cdk_claims(minutes: int = 10) -> int:
+    """释放因进程崩溃/部署中断而长期停留在 processing 状态的 CDK 占用（由后台任务定期调用）。"""
+    stale_before = (datetime.now() - timedelta(minutes=minutes)).strftime("%Y-%m-%d %H:%M:%S")
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            "UPDATE cdks SET status = 'unused', used_at = NULL "
+            "WHERE status = 'processing' AND used_at < ?",
+            (stale_before,)
+        )
+        conn.commit()
+        return cursor.rowcount
+
 # --- 系统配置与密码管理 ---
 
 def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
@@ -217,14 +286,23 @@ def set_bot_config(url: str, user: str, password: str, tutorial_url: Optional[st
     cleaned_url = url.strip().rstrip("/")
     cleaned_user = user.strip()
     cleaned_pass = password.strip()
-    set_setting("bot_panel_url", cleaned_url)
-    set_setting("bot_panel_user", cleaned_user)
-    set_setting("bot_panel_pass", cleaned_pass)
+    # 掩码或空值表示管理员未修改密码，保持数据库中已存的原值不变
+    if cleaned_pass == MASKED_SECRET or not cleaned_pass:
+        cleaned_pass = get_setting("bot_panel_pass", BOT_PANEL_PASS) or BOT_PANEL_PASS
     if tutorial_url is not None:
         cleaned_tut = tutorial_url.strip() or BOT_TUTORIAL_URL
-        set_setting("bot_tutorial_url", cleaned_tut)
     else:
         cleaned_tut = get_setting("bot_tutorial_url", BOT_TUTORIAL_URL) or BOT_TUTORIAL_URL
+    # 单连接单事务批量写入，避免中途失败留下半套配置
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        _set_settings(cursor, [
+            ("bot_panel_url", cleaned_url),
+            ("bot_panel_user", cleaned_user),
+            ("bot_panel_pass", cleaned_pass),
+            ("bot_tutorial_url", cleaned_tut),
+        ])
+        conn.commit()
     return {
         "bot_panel_url": cleaned_url,
         "bot_panel_user": cleaned_user,
@@ -296,26 +374,33 @@ def get_dns_config() -> Dict[str, Any]:
     }
 
 def set_dns_config(data: Dict[str, Any]) -> Dict[str, Any]:
+    # 单连接单事务批量写入，避免中途失败留下半套配置
+    items = []
     if "dns_enabled" in data:
-        set_setting("dns_enabled", "1" if data["dns_enabled"] else "0")
+        items.append(("dns_enabled", "1" if data["dns_enabled"] else "0"))
     if "dns_provider" in data:
-        set_setting("dns_provider", str(data["dns_provider"]).strip().lower())
+        items.append(("dns_provider", str(data["dns_provider"]).strip().lower()))
     if "dns_root_domain" in data:
-        set_setting("dns_root_domain", str(data["dns_root_domain"]).strip().lower().rstrip("."))
+        items.append(("dns_root_domain", str(data["dns_root_domain"]).strip().lower().rstrip(".")))
     if "dns_target_host" in data:
-        set_setting("dns_target_host", str(data["dns_target_host"]).strip())
-    if "dns_cf_token" in data:
-        set_setting("dns_cf_token", str(data["dns_cf_token"]).strip())
-    if "dns_cf_zone_id" in data:
-        set_setting("dns_cf_zone_id", str(data["dns_cf_zone_id"]).strip())
-    if "dns_aliyun_ak" in data:
-        set_setting("dns_aliyun_ak", str(data["dns_aliyun_ak"]).strip())
-    if "dns_aliyun_sk" in data:
-        set_setting("dns_aliyun_sk", str(data["dns_aliyun_sk"]).strip())
-    if "dns_tencent_id" in data:
-        set_setting("dns_tencent_id", str(data["dns_tencent_id"]).strip())
-    if "dns_tencent_key" in data:
-        set_setting("dns_tencent_key", str(data["dns_tencent_key"]).strip())
+        items.append(("dns_target_host", str(data["dns_target_host"]).strip()))
+    # 掩码 "******" 表示前端未修改该密钥，保持数据库中原值不变
+    _secret_keys = {
+        "dns_cf_token", "dns_aliyun_sk", "dns_tencent_key",
+    }
+    for _key in ("dns_cf_token", "dns_cf_zone_id", "dns_aliyun_ak", "dns_aliyun_sk", "dns_tencent_id", "dns_tencent_key"):
+        if _key not in data:
+            continue
+        _val = str(data[_key]).strip()
+        # 密钥字段：掩码或空值表示“保持原值不变”，跳过写入避免误清空已有密钥
+        if _key in _secret_keys and (_val == MASKED_SECRET or not _val):
+            continue
+        items.append((_key, _val))
+    if items:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            _set_settings(cursor, items)
+            conn.commit()
     return get_dns_config()
 
 def is_subdomain_available(subdomain_prefix: str) -> Tuple[bool, str, str]:
@@ -331,9 +416,12 @@ def is_subdomain_available(subdomain_prefix: str) -> Tuple[bool, str, str]:
 
     with get_connection() as conn:
         cursor = conn.cursor()
+        # LIKE 通配符转义，避免用户输入中的 _ / % 越界匹配到其他域名
+        like_prefix = p.lower().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         cursor.execute(
-            "SELECT id, name, status FROM instances WHERE LOWER(subdomain) = ? OR LOWER(subdomain) LIKE ?",
-            (full_subdomain.lower(), f"{p}.%")
+            "SELECT id, name, status FROM instances "
+            "WHERE LOWER(subdomain) = ? OR LOWER(subdomain) LIKE ? ESCAPE '\\'",
+            (full_subdomain.lower(), f"{like_prefix}.%")
         )
         row = cursor.fetchone()
         if row:
@@ -403,21 +491,31 @@ def get_all_cdks() -> List[Dict[str, Any]]:
         return [dict(row) for row in cursor.fetchall()]
 
 def delete_cdk(code: str) -> bool:
+    """
+    删除 CDK。
+    注意：刻意保留 instances/bot_instances 上的 cdk_code 引用，以便 CDK 被误删后
+    仍能通过绑定关系自愈恢复（restore_*_cdk 依赖该引用），因此这里不做级联清空。
+    """
+    clean = (code or "").strip()
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("DELETE FROM cdks WHERE code = ?", (code,))
+        cursor.execute("DELETE FROM cdks WHERE code = ?", (clean,))
         conn.commit()
         return cursor.rowcount > 0
 
 def delete_cdks(codes: List[str]) -> int:
     if not codes:
         return 0
+    cleaned = [c.strip() for c in codes if c and c.strip()]
+    total = 0
     with get_connection() as conn:
         cursor = conn.cursor()
-        placeholders = ",".join("?" for _ in codes)
-        cursor.execute(f"DELETE FROM cdks WHERE code IN ({placeholders})", [c.strip() for c in codes])
+        for chunk in _chunked(cleaned):
+            placeholders = ",".join("?" for _ in chunk)
+            cursor.execute(f"DELETE FROM cdks WHERE code IN ({placeholders})", chunk)
+            total += cursor.rowcount
         conn.commit()
-        return cursor.rowcount
+    return total
 
 def delete_cdks_by_filter(
     cdk_type: Optional[str] = None,
@@ -542,7 +640,8 @@ def has_server_used_trial(addr: str, port: Optional[int] = 9987) -> Tuple[bool, 
         cursor = conn.cursor()
         # 1. 检查 server_key 匹配（排除超时的临时预占）
         cursor.execute(
-            "SELECT * FROM trial_server_records WHERE server_key = ? AND (target_id NOT LIKE 'pending:%' OR used_at >= ?)",
+            "SELECT * FROM trial_server_records WHERE server_key = ? "
+            "AND (target_id IS NULL OR target_id NOT LIKE 'pending:%' OR used_at >= ?)",
             (server_key, stale_pending_before)
         )
         row = cursor.fetchone()
@@ -553,7 +652,8 @@ def has_server_used_trial(addr: str, port: Optional[int] = 9987) -> Tuple[bool, 
         if resolved_key:
             cursor.execute("""
                 SELECT * FROM trial_server_records 
-                WHERE (server_key = ? OR resolved_key = ?) AND (target_id NOT LIKE 'pending:%' OR used_at >= ?)
+                WHERE (server_key = ? OR resolved_key = ?)
+                  AND (target_id IS NULL OR target_id NOT LIKE 'pending:%' OR used_at >= ?)
             """, (resolved_key, resolved_key, stale_pending_before))
             row = cursor.fetchone()
             if row:
@@ -656,8 +756,11 @@ def record_trial_server(
             raw_input or f"{addr}:{port}", cdk_code, cdk_type, str(target_id) if target_id else None, now
         ))
         conn.commit()
-        record_id = cursor.lastrowid
-        cursor.execute("SELECT * FROM trial_server_records WHERE id = ? OR server_key = ?", (record_id, server_key))
+        # 回读：以 server_key 为准（ON CONFLICT 走 UPDATE 分支时 lastrowid 不可靠）
+        cursor.execute(
+            "SELECT * FROM trial_server_records WHERE server_key = ? ORDER BY id DESC LIMIT 1",
+            (server_key,)
+        )
         row = cursor.fetchone()
         return dict(row) if row else {}
 
@@ -717,6 +820,7 @@ def bind_cdk_bot(code: str, bot_id: str):
         return cursor.rowcount == 1
 
 def unbind_cdk_instance(code: str, instance_id: int) -> bool:
+    """解绑并回收 CDK（体验卡防重复由 trial_server_records 服务器指纹库负责拦截）。"""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -728,6 +832,7 @@ def unbind_cdk_instance(code: str, instance_id: int) -> bool:
         return cursor.rowcount == 1
 
 def unbind_cdk_bot(code: str, bot_id: str) -> bool:
+    """解绑并回收 CDK（体验卡防重复由 trial_server_records 服务器指纹库负责拦截）。"""
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(
@@ -747,9 +852,11 @@ def restore_bot_cdk(cdk_code: str, bot_id: str, duration_months: int = 1, remark
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO cdks 
+            INSERT INTO cdks 
             (code, status, cdk_type, duration_months, is_trial, bot_id, remark, created_at, used_at)
             VALUES (?, 'used', 'music_bot', ?, 0, ?, ?, ?, ?)
+            ON CONFLICT(code) DO UPDATE SET
+                status = 'used', bot_id = excluded.bot_id, used_at = excluded.used_at
         """, (clean_code, duration_months, bot_id, remark, now_str, now_str))
         conn.commit()
     return get_cdk(clean_code)
@@ -763,9 +870,11 @@ def restore_instance_cdk(cdk_code: str, instance_id: int, duration_months: int =
     with get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
-            INSERT OR REPLACE INTO cdks 
+            INSERT INTO cdks 
             (code, status, cdk_type, duration_months, is_trial, instance_id, remark, created_at, used_at)
             VALUES (?, 'used', 'teamspeak', ?, 0, ?, ?, ?, ?)
+            ON CONFLICT(code) DO UPDATE SET
+                status = 'used', instance_id = excluded.instance_id, used_at = excluded.used_at
         """, (clean_code, duration_months, instance_id, remark, now_str, now_str))
         conn.commit()
     return get_cdk(clean_code)
@@ -888,9 +997,10 @@ def update_instance_status(instance_id: int, status: str):
         conn.commit()
 
 def update_instance_expiry(instance_id: int, expire_at: str):
+    """仅回滚到期时间，不改动运行状态（避免把 stopped/expired 实例强行复活）。"""
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("UPDATE instances SET expire_at = ?, status = 'running' WHERE id = ?", (expire_at, instance_id))
+        cursor.execute("UPDATE instances SET expire_at = ? WHERE id = ?", (expire_at, instance_id))
         conn.commit()
 
 def get_expired_active_instances() -> List[Dict[str, Any]]:
@@ -910,57 +1020,60 @@ def get_expired_active_instances() -> List[Dict[str, Any]]:
 
 def renew_instance(instance_id: int, add_months: int) -> Optional[Dict[str, Any]]:
     """
-    为已有 TeamSpeak 实例续期
+    为已有 TeamSpeak 实例续期。
+    使用 BEGIN IMMEDIATE 在同一事务内读取并写回，避免并发续费互相覆盖丢失更新。
     """
-    inst = get_instance_by_id(instance_id)
-    if not inst:
-        return None
-
-    if add_months == 0:
-        new_expire = "permanent"
-    else:
-        now = datetime.now()
-        current_exp_str = inst.get("expire_at")
-        if current_exp_str == "permanent":
-            new_expire = "permanent"
-        elif current_exp_str:
-            try:
-                curr_exp = datetime.strptime(current_exp_str, "%Y-%m-%d %H:%M:%S")
-                # 如果当前还没过期，在原到期时间上累加；如果已过期，从现在开始计算
-                base_time = curr_exp if curr_exp > now else now
-                new_expire = (base_time + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                new_expire = (now + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            new_expire = (now + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
-
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE instances 
-            SET expire_at = ?, status = 'running' 
-            WHERE id = ?
-        """, (new_expire, instance_id))
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("SELECT * FROM instances WHERE id = ?", (instance_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.rollback()
+            return None
+        inst = dict(row)
+
+        new_expire = _calc_new_expire(inst.get("expire_at"), add_months)
+        # 已停止/过期的实例不因续期被强行复活为 running
+        if inst.get("status") in ("stopped", "expired", "error"):
+            cursor.execute("UPDATE instances SET expire_at = ? WHERE id = ?", (new_expire, instance_id))
+        else:
+            cursor.execute("UPDATE instances SET expire_at = ?, status = 'running' WHERE id = ?", (new_expire, instance_id))
         conn.commit()
 
     return get_instance_by_id(instance_id)
 
 def delete_instance(instance_id: int) -> bool:
+    """删除实例并清理关联引用：解绑 CDK、清理体验卡指纹记录，避免悬空引用。"""
     with get_connection() as conn:
         cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
         cursor.execute("DELETE FROM instances WHERE id = ?", (instance_id,))
+        deleted = cursor.rowcount > 0
+        if deleted:
+            cursor.execute(
+                "UPDATE cdks SET instance_id = NULL WHERE instance_id = ?",
+                (instance_id,)
+            )
+            cursor.execute(
+                "DELETE FROM trial_server_records WHERE target_id = ? AND cdk_type = 'teamspeak'",
+                (str(instance_id),)
+            )
         conn.commit()
-        return cursor.rowcount > 0
+        return deleted
 
 def delete_instances(instance_ids: List[int]) -> int:
     if not instance_ids:
         return 0
+    total = 0
     with get_connection() as conn:
         cursor = conn.cursor()
-        placeholders = ",".join("?" for _ in instance_ids)
-        cursor.execute(f"DELETE FROM instances WHERE id IN ({placeholders})", instance_ids)
+        for chunk in _chunked(list(instance_ids)):
+            placeholders = ",".join("?" for _ in chunk)
+            cursor.execute(f"DELETE FROM instances WHERE id IN ({placeholders})", chunk)
+            total += cursor.rowcount
         conn.commit()
-        return cursor.rowcount
+    return total
 
 # --- 音乐机器人实例管理 ---
 
@@ -1023,9 +1136,10 @@ def update_bot_instance_status(bot_id: str, status: str):
         conn.commit()
 
 def update_bot_instance_expiry(bot_id: str, expire_at: str):
+    """仅回滚到期时间，不改动运行状态（避免把 stopped/expired 机器人强行复活）。"""
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("UPDATE bot_instances SET expire_at = ?, status = 'active' WHERE bot_id = ?", (expire_at, bot_id))
+        cursor.execute("UPDATE bot_instances SET expire_at = ? WHERE bot_id = ?", (expire_at, bot_id))
         conn.commit()
 
 def get_expired_active_bots() -> List[Dict[str, Any]]:
@@ -1045,54 +1159,57 @@ def get_expired_active_bots() -> List[Dict[str, Any]]:
 
 def renew_bot_instance(bot_id: str, add_months: int) -> Optional[Dict[str, Any]]:
     """
-    为已有机器人实例续期
+    为已有机器人实例续期。
+    使用 BEGIN IMMEDIATE 在同一事务内读取并写回，避免并发续费互相覆盖丢失更新。
     """
-    bot = get_bot_instance_by_id(bot_id)
-    if not bot:
-        return None
-
-    if add_months == 0:
-        new_expire = "permanent"
-    else:
-        now = datetime.now()
-        current_exp_str = bot.get("expire_at")
-        if current_exp_str == "permanent":
-            new_expire = "permanent"
-        elif current_exp_str:
-            try:
-                curr_exp = datetime.strptime(current_exp_str, "%Y-%m-%d %H:%M:%S")
-                # 如果当前还没过期，在原到期时间上累加；如果已过期，从现在开始计算
-                base_time = curr_exp if curr_exp > now else now
-                new_expire = (base_time + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
-            except Exception:
-                new_expire = (now + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
-        else:
-            new_expire = (now + timedelta(days=30 * add_months)).strftime("%Y-%m-%d %H:%M:%S")
-
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("""
-            UPDATE bot_instances 
-            SET expire_at = ?, status = 'active' 
-            WHERE bot_id = ?
-        """, (new_expire, bot_id))
+        cursor.execute("BEGIN IMMEDIATE")
+        cursor.execute("SELECT * FROM bot_instances WHERE bot_id = ?", (bot_id,))
+        row = cursor.fetchone()
+        if not row:
+            conn.rollback()
+            return None
+        bot = dict(row)
+
+        new_expire = _calc_new_expire(bot.get("expire_at"), add_months)
+        # 已停止/过期的机器人不因续期被强行复活
+        if bot.get("status") in ("stopped", "expired", "error"):
+            cursor.execute("UPDATE bot_instances SET expire_at = ? WHERE bot_id = ?", (new_expire, bot_id))
+        else:
+            cursor.execute("UPDATE bot_instances SET expire_at = ?, status = 'active' WHERE bot_id = ?", (new_expire, bot_id))
         conn.commit()
 
     return get_bot_instance_by_id(bot_id)
 
 def delete_bot_instance(bot_id: str) -> bool:
+    """删除机器人实例并清理关联引用：解绑 CDK、清理体验卡指纹记录，避免悬空引用。"""
     with get_connection() as conn:
         cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
         cursor.execute("DELETE FROM bot_instances WHERE bot_id = ?", (bot_id,))
+        deleted = cursor.rowcount > 0
+        if deleted:
+            cursor.execute(
+                "UPDATE cdks SET bot_id = NULL WHERE bot_id = ?",
+                (bot_id,)
+            )
+            cursor.execute(
+                "DELETE FROM trial_server_records WHERE target_id = ? AND cdk_type = 'music_bot'",
+                (str(bot_id),)
+            )
         conn.commit()
-        return cursor.rowcount > 0
+        return deleted
 
 def delete_bot_instances(bot_ids: List[str]) -> int:
     if not bot_ids:
         return 0
+    total = 0
     with get_connection() as conn:
         cursor = conn.cursor()
-        placeholders = ",".join("?" for _ in bot_ids)
-        cursor.execute(f"DELETE FROM bot_instances WHERE bot_id IN ({placeholders})", bot_ids)
+        for chunk in _chunked(list(bot_ids)):
+            placeholders = ",".join("?" for _ in chunk)
+            cursor.execute(f"DELETE FROM bot_instances WHERE bot_id IN ({placeholders})", chunk)
+            total += cursor.rowcount
         conn.commit()
-        return cursor.rowcount
+    return total

@@ -731,6 +731,7 @@
     let currentPendingBotCdk = '';
     let systemDnsConfig = { dns_enabled: false, root_domain: '' };
     let checkSubdomainTimer = null;
+    let subdomainCheckSeq = 0;
 
     // === 主题切换引擎 ===
     function updateThemeUI(theme) {
@@ -875,6 +876,7 @@
         badge.innerText = '正在查重...';
       }
 
+      const seq = ++subdomainCheckSeq;
       checkSubdomainTimer = setTimeout(async () => {
         try {
           const resp = await fetch('/api/check-subdomain', {
@@ -883,6 +885,8 @@
             body: JSON.stringify({ subdomain: val })
           });
           const data = await resp.json();
+          // 异步竞态保护：仅渲染最后一次输入的响应，避免旧响应覆盖新状态
+          if (seq !== subdomainCheckSeq) return;
           if (data.available) {
             if (badge) {
               badge.className = 'badge badge-success';
@@ -891,7 +895,8 @@
             if (feedback) {
               feedback.style.display = 'block';
               feedback.style.color = '#34d399';
-              feedback.innerHTML = `<i class="fa-solid fa-circle-check"></i> 专属域名：<strong style="color:#38bdf8;">${data.full_domain}</strong>（免输端口直连）`;
+              // 转义后端返回的域名字符串，避免存储型 XSS
+              feedback.innerHTML = `<i class="fa-solid fa-circle-check"></i> 专属域名：<strong style="color:#38bdf8;">${escapeHtml(data.full_domain)}</strong>（免输端口直连）`;
             }
           } else {
             if (badge) {
@@ -901,10 +906,11 @@
             if (feedback) {
               feedback.style.display = 'block';
               feedback.style.color = '#f87171';
-              feedback.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> ${data.message}`;
+              feedback.innerHTML = `<i class="fa-solid fa-circle-xmark"></i> ${escapeHtml(data.message)}`;
             }
           }
         } catch (e) {
+          if (seq !== subdomainCheckSeq) return;
           if (badge) badge.style.display = 'none';
         }
       }, 300);
@@ -1055,6 +1061,10 @@
       if (webUser || webPass) {
         if (webUser.length < 3 || webUser.length > 32) {
           alert('后台登录用户名长度必须为 3-32 个字符');
+          return;
+        }
+        if (!/^[a-zA-Z0-9_\-\.@]+$/.test(webUser)) {
+          alert('用户名仅支持字母、数字、下划线、短横线、点与 @ 符号');
           return;
         }
         if (webPass.length < 8) {

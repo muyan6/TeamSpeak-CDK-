@@ -56,6 +56,7 @@ from database import (
     set_admin_password,
     get_bot_config,
     set_bot_config,
+    MASKED_SECRET,
     get_bot_permission_config,
     set_bot_permission_config,
     has_server_used_trial,
@@ -65,6 +66,7 @@ from database import (
     delete_trial_record_for_target,
     claim_cdk,
     release_cdk_claim,
+    release_stale_cdk_claims,
     unbind_cdk_instance,
     unbind_cdk_bot,
     reserve_trial_server,
@@ -95,10 +97,18 @@ from contextlib import asynccontextmanager
 
 async def system_expiry_checker():
     """
-    后台守护任务：定期扫描所有已到期的音乐机器人和 TeamSpeak 服务器实例，自动停机下线并标记状态为 expired
+    后台守护任务：定期扫描所有已到期的音乐机器人和 TeamSpeak 服务器实例，自动停机下线并标记状态为 expired；
+    同时回收因进程崩溃/部署中断而长期停留在 processing 的 CDK 占用。
     """
     while True:
         try:
+            # 0. 回收超时的 CDK processing 占用（10 分钟未完成即视为异常中断）
+            try:
+                released = await asyncio.to_thread(release_stale_cdk_claims, 10)
+                if released:
+                    print(f"[*] 已自动回收 {released} 个超时未完成的 CDK 占用（processing → unused）")
+            except Exception as claim_err:
+                print(f"[Warning] 回收超时 CDK 占用失败: {claim_err}")
             # 1. 扫描已到期的音乐机器人
             expired_bots = get_expired_active_bots()
             for b in expired_bots:
@@ -109,7 +119,8 @@ async def system_expiry_checker():
                         print(f"[Warning] 机器人 [{b['bot_id']}] 停机响应: {stop_res}，依然标记状态为 expired")
                 except Exception as b_err:
                     print(f"[Warning] 停止机器人 [{b['bot_id']}] 发生异常: {b_err}")
-                finally:
+                else:
+                    # 仅在停止流程未抛异常时才标记过期，避免容器仍在运行但库里已过期导致资源被白占
                     update_bot_instance_status(b["bot_id"], "expired")
 
             # 2. 扫描已到期的 TeamSpeak 语音服务器
@@ -122,7 +133,8 @@ async def system_expiry_checker():
                         print(f"[Warning] TeamSpeak 容器 [{inst['id']}] 停止未成功，依然标记状态为 expired")
                 except Exception as inst_err:
                     print(f"[Warning] 停止 TeamSpeak 容器 [{inst['id']}] 发生异常: {inst_err}")
-                finally:
+                else:
+                    # 仅在停止流程未抛异常时才标记过期，避免容器仍在运行但库里已过期导致资源被白占
                     update_instance_status(inst["id"], "expired")
         except Exception as err:
             print(f"[Error in system_expiry_checker]: {err}")
@@ -137,9 +149,9 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"[Warning] 无法创建数据根目录: {config.DATA_BASE_DIR}, 错误: {e}")
 
-    # 自动放行服务器本地防火墙端口
+    # 自动放行服务器本地防火墙端口（同步命令，放入线程池避免阻塞事件循环）
     try:
-        auto_open_firewall_ports()
+        await asyncio.to_thread(auto_open_firewall_ports)
     except Exception as e:
         print(f"[Warning] 自动配置本地防火墙异常: {e}")
 
@@ -264,10 +276,14 @@ class ChangePasswordRequest(BaseModel):
     old_password: str = Field(min_length=1, max_length=255)
     new_password: str = Field(min_length=6, max_length=255)
 
+class AdminLoginRequest(BaseModel):
+    password: str = Field(min_length=1, max_length=255)
+
 class BotConfigRequest(BaseModel):
     url: str = Field(min_length=1, max_length=500)
     user: str = Field(min_length=1, max_length=255)
-    password: str = Field(min_length=1, max_length=255)
+    # 允许为空/掩码：表示沿用数据库中原密码，既不回传明文也不覆盖旧值
+    password: str = Field(default="", max_length=255)
     tutorial_url: Optional[str] = Field(default=None, max_length=500)
 
 class TestBotConfigRequest(BaseModel):
@@ -337,19 +353,91 @@ def get_ip_geo_info(ip_str: str) -> Dict[str, Any]:
 
 # --- 权限校验依赖 ---
 
-def verify_admin(x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password")):
+ADMIN_SESSION_COOKIE = "ts_admin_session"
+_ADMIN_SESSION_TTL_SECONDS = 12 * 3600
+# 进程内会话表：token -> 过期时间戳（单实例部署足够；重启后需重新登录）
+_admin_sessions: Dict[str, float] = {}
+
+
+def _prune_admin_sessions() -> None:
+    now_ts = datetime.now().timestamp()
+    for token, expires_at in list(_admin_sessions.items()):
+        if expires_at <= now_ts:
+            _admin_sessions.pop(token, None)
+
+
+def create_admin_session(response: JSONResponse) -> str:
+    """创建服务端会话并通过 HttpOnly Cookie 下发，避免管理员口令长期驻留前端存储。"""
+    _prune_admin_sessions()
+    token = secrets.token_urlsafe(32)
+    _admin_sessions[token] = datetime.now().timestamp() + _ADMIN_SESSION_TTL_SECONDS
+    response.set_cookie(
+        ADMIN_SESSION_COOKIE,
+        token,
+        max_age=_ADMIN_SESSION_TTL_SECONDS,
+        httponly=True,
+        samesite="lax",
+        path="/",
+    )
+    return token
+
+
+def destroy_admin_session(request: Request, response: JSONResponse) -> None:
+    token = request.cookies.get(ADMIN_SESSION_COOKIE)
+    if token:
+        _admin_sessions.pop(token, None)
+    response.delete_cookie(ADMIN_SESSION_COOKIE, path="/")
+
+
+def _is_valid_admin_session(request: Request) -> bool:
+    token = request.cookies.get(ADMIN_SESSION_COOKIE)
+    if not token:
+        return False
+    _prune_admin_sessions()
+    expires_at = _admin_sessions.get(token)
+    return bool(expires_at and expires_at > datetime.now().timestamp())
+
+
+def verify_admin(
+    request: Request,
+    x_admin_password: Optional[str] = Header(None, alias="X-Admin-Password"),
+):
+    """
+    管理员鉴权：优先使用服务端会话 Cookie；同时保留 X-Admin-Password 头以兼容旧版客户端/脚本。
+    """
+    if _is_valid_admin_session(request):
+        return True
     current_pwd = get_admin_password()
-    if not x_admin_password or not secrets.compare_digest(str(x_admin_password), str(current_pwd)):
-        raise HTTPException(status_code=401, detail="管理员密码错误或未提供")
-    return True
+    if x_admin_password and secrets.compare_digest(str(x_admin_password), str(current_pwd)):
+        return True
+    raise HTTPException(status_code=401, detail="管理员密码错误或未提供，请重新登录")
+
+_HOST_HEADER_RE = re.compile(r"^[A-Za-z0-9._\-]+$")
+
+def _safe_host_candidate(value: str) -> Optional[str]:
+    """仅接受纯主机名/IP 形式（字母数字、点、下划线、短横线），拒绝带端口/路径/空格的伪造 Host。"""
+    host = (value or "").strip().split(",")[0].strip()
+    if not host or len(host) > 253:
+        return None
+    if host.startswith("[") and host.endswith("]"):
+        host = host[1:-1]
+    if not _HOST_HEADER_RE.match(host):
+        return None
+    return host
 
 def get_public_host(request: Request) -> str:
-    """只返回规范化主机名，避免直接信任 Host 头造成错误连接地址。"""
-    candidate = (
-        (config.PUBLIC_SERVER_IP or "").strip()
-        or request.headers.get("x-forwarded-host", "").strip()
-        or request.headers.get("host", "127.0.0.1").strip()
-    )
+    """
+    只返回规范化主机名，避免直接信任 Host 头造成错误连接地址。
+    优先级：PUBLIC_SERVER_IP > X-Forwarded-Host > Host，且每一层都要通过格式白名单校验，
+    防止攻击者伪造 Host 使返回值（并写入 DNS SRV 记录）指向任意主机。
+    """
+    candidate = (config.PUBLIC_SERVER_IP or "").strip()
+    if not candidate:
+        candidate = (
+            _safe_host_candidate(request.headers.get("x-forwarded-host", ""))
+            or _safe_host_candidate(request.headers.get("host", ""))
+            or "127.0.0.1"
+        )
     try:
         _, clean_addr, _, _, _ = normalize_server_target(candidate, 9987)
         return f"[{clean_addr}]" if ":" in clean_addr else clean_addr
@@ -392,6 +480,36 @@ def admin_page(request: Request):
         return templates.TemplateResponse(request=request, name="admin.html", context=ctx)
     except TypeError:
         return templates.TemplateResponse("admin.html", ctx)
+
+# --- 管理员会话 API ---
+
+@app.post("/api/admin/login")
+def admin_login_api(req: AdminLoginRequest, request: Request):
+    """管理员登录：校验口令后下发 HttpOnly 会话 Cookie，前端不再长期保存明文口令。"""
+    current_pwd = get_admin_password()
+    provided = (req.password or "").strip()
+    if not provided or not secrets.compare_digest(provided, str(current_pwd)):
+        return JSONResponse(status_code=401, content={"success": False, "message": "管理员密码错误"})
+    resp = JSONResponse(content={"success": True, "message": "登录成功"})
+    create_admin_session(resp)
+    return resp
+
+@app.post("/api/admin/logout")
+def admin_logout_api(request: Request):
+    resp = JSONResponse(content={"success": True, "message": "已安全退出后台"})
+    destroy_admin_session(request, resp)
+    return resp
+
+@app.get("/api/admin/session")
+def admin_session_api(request: Request):
+    """探测当前会话是否有效，供前端决定是否显示登录页。"""
+    if _is_valid_admin_session(request):
+        return {"success": True, "authenticated": True}
+    current_pwd = get_admin_password()
+    header_pwd = request.headers.get("x-admin-password")
+    if header_pwd and secrets.compare_digest(str(header_pwd), str(current_pwd)):
+        return {"success": True, "authenticated": True}
+    return JSONResponse(status_code=401, content={"success": False, "authenticated": False})
 
 # --- 用户端 API ---
 
@@ -783,12 +901,13 @@ def redeem_cdk(req: RedeemRequest, request: Request):
         return JSONResponse(status_code=500, content={"success": False, "message": f"服务器创建失败: {msg}"})
 
     live_status = docker_service.get_container_status(instance_id)
-    if live_status not in ("running", "unknown"):
+    # 仅 running 视为成功：docker 不可用/查询异常返回 error，不能当作开通成功入库
+    if live_status != "running":
         docker_service.destroy_instance_container(instance_id, delete_files=True)
         release_cdk_claim(code)
         return JSONResponse(status_code=500, content={
             "success": False,
-            "message": f"服务器容器未处于运行状态（当前状态: {live_status}）"
+            "message": f"服务器容器未处于运行状态（当前状态: {live_status}），已自动回滚，请检查服务器 Docker 服务后重试"
         })
 
     admin_token = creds.get("admin_token", "")
@@ -852,9 +971,19 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                     print(f"[Warning] 回滚时删除 DNS 记录失败: {err_del}")
             except Exception as d_err:
                 print(f"[Warning] 回滚时删除 DNS 记录异常: {d_err}")
-        delete_instance(instance_id)
-        docker_service.destroy_instance_container(instance_id, delete_files=True)
-        release_cdk_claim(code)
+        # 回滚顺序：先销毁容器与目录，再删库，最后释放 CDK 占用；每步独立兜底，避免半成品残留
+        try:
+            docker_service.destroy_instance_container(instance_id, delete_files=True)
+        except Exception as d_err:
+            print(f"[Warning] 回滚销毁容器失败 instance_id={instance_id}: {d_err}")
+        try:
+            delete_instance(instance_id)
+        except Exception as db_err:
+            print(f"[Warning] 回滚删除实例记录失败 instance_id={instance_id}: {db_err}")
+        try:
+            release_cdk_claim(code)
+        except Exception as c_err:
+            print(f"[Warning] 回滚释放 CDK 占用失败 code={code}: {c_err}")
         return JSONResponse(status_code=500, content={"success": False, "message": f"服务器记录失败: {str(e)}"})
     instance["public_host"] = bound_subdomain or client_host
     instance["has_domain"] = bool(bound_subdomain)
@@ -1767,14 +1896,18 @@ def change_admin_password_api(req: ChangePasswordRequest, _: bool = Depends(veri
     new_pwd = req.new_password.strip()
     current_pwd = get_admin_password()
 
-    if old_pwd != current_pwd:
+    if not secrets.compare_digest(old_pwd, str(current_pwd)):
         return JSONResponse(status_code=400, content={"success": False, "message": "原密码不正确，请重新输入"})
 
     if len(new_pwd) < 6:
         return JSONResponse(status_code=400, content={"success": False, "message": "新密码长度不能少于 6 位"})
 
     set_admin_password(new_pwd)
-    return {"success": True, "message": "管理员密码修改成功！请使用新密码重新登录"}
+    # 口令变更后清空所有旧会话，并给当前请求重新下发一个新会话，避免前端被迫保存明文口令
+    _admin_sessions.clear()
+    resp = JSONResponse(content={"success": True, "message": "管理员密码修改成功！已自动为您续期登录状态"})
+    create_admin_session(resp)
+    return resp
 
 @app.get("/api/admin/bot-config")
 def get_bot_config_api(_: bool = Depends(verify_admin)):
@@ -1784,7 +1917,8 @@ def get_bot_config_api(_: bool = Depends(verify_admin)):
         "config": {
             "url": cfg["bot_panel_url"],
             "user": cfg["bot_panel_user"],
-            "password": cfg["bot_panel_pass"],
+            # 不回传明文密码：已配置则返回掩码，前端提交掩码表示“不修改”
+            "password": MASKED_SECRET if cfg["bot_panel_pass"] else "",
             "tutorial_url": cfg.get("bot_tutorial_url", "http://103.71.69.156:23452/")
         }
     }
@@ -1804,8 +1938,6 @@ def update_bot_config_api(req: BotConfigRequest, _: bool = Depends(verify_admin)
         raise HTTPException(status_code=400, detail="使用教程跳转网址格式不正确，必须以 http:// 或 https:// 开头")
     if not user:
         raise HTTPException(status_code=400, detail="管理员登录账号不能为空")
-    if not password:
-        raise HTTPException(status_code=400, detail="管理员登录密码不能为空")
 
     saved_cfg = set_bot_config(url, user, password, tutorial_url=tutorial_url)
     music_bot_client.update_config(saved_cfg["bot_panel_url"], saved_cfg["bot_panel_user"], saved_cfg["bot_panel_pass"])
@@ -1923,9 +2055,14 @@ def sync_single_bot_instance_permission(bot_id: str, _: bool = Depends(verify_ad
 @app.get("/api/admin/dns-config")
 def get_dns_config_admin_api(_: bool = Depends(verify_admin)):
     cfg = get_dns_config()
+    # 敏感密钥只回传掩码，避免明文进入页面 DOM 与浏览器历史
+    safe_cfg = dict(cfg)
+    for _key in ("dns_cf_token", "dns_aliyun_sk", "dns_tencent_key"):
+        if safe_cfg.get(_key):
+            safe_cfg[_key] = MASKED_SECRET
     return {
         "success": True,
-        "config": cfg
+        "config": safe_cfg
     }
 
 @app.post("/api/admin/dns-config")

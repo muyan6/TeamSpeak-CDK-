@@ -7,26 +7,35 @@ from pathlib import Path
 from typing import Dict, Any, Optional, Tuple
 from config import DATA_BASE_DIR, TS_DOCKER_IMAGE
 
+_COMPOSE_CMD_CACHE: Optional[list] = None
+
 def get_compose_cmd() -> list:
     """
     检查系统支持的 docker compose 命令（优先使用 docker compose，其次 docker-compose）
+    结果缓存，避免每次启停都重新探测子进程（最长 20s）。
     """
+    global _COMPOSE_CMD_CACHE
+    if _COMPOSE_CMD_CACHE is not None:
+        return list(_COMPOSE_CMD_CACHE)
     try:
         res = subprocess.run(["docker", "compose", "version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
         if res.returncode == 0:
-            return ["docker", "compose"]
+            _COMPOSE_CMD_CACHE = ["docker", "compose"]
+            return list(_COMPOSE_CMD_CACHE)
     except Exception:
         pass
 
     try:
         res = subprocess.run(["docker-compose", "version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=10)
         if res.returncode == 0:
-            return ["docker-compose"]
+            _COMPOSE_CMD_CACHE = ["docker-compose"]
+            return list(_COMPOSE_CMD_CACHE)
     except Exception:
         pass
 
     # 默认返回 docker compose
-    return ["docker", "compose"]
+    _COMPOSE_CMD_CACHE = ["docker", "compose"]
+    return list(_COMPOSE_CMD_CACHE)
 
 def get_instance_dir(instance_id: int) -> str:
     return os.path.join(DATA_BASE_DIR, f"ts{instance_id}")
@@ -135,11 +144,14 @@ def deploy_teamspeak_instance(instance_id: int, ports: Dict[str, int]) -> Tuple[
             timeout=60
         )
         if res.returncode != 0:
+            # compose up 可能已在后台拉起容器，失败时按容器名兜底清理，避免孤儿容器长期占用端口
+            _force_remove_container(instance_id)
             return False, {}, f"Docker 启动命令失败: {res.stderr or res.stdout}"
     except Exception as e:
+        _force_remove_container(instance_id)
         return False, {}, f"执行 Docker 命令异常: {str(e)}"
 
-    # 异步轮询捕获 Token 与密码（最多等待 15 秒）
+    # 轮询捕获 Token 与密码：TS3 首次生成 privilege key 常需 20-40 秒，最多等待约 90 秒
     container_name = f"ts-teamspeak-{instance_id}"
     creds = {
         "admin_token": "",
@@ -147,11 +159,11 @@ def deploy_teamspeak_instance(instance_id: int, ports: Dict[str, int]) -> Tuple[
         "query_password": "",
         "query_apikey": ""
     }
-    for _ in range(8):
+    for _ in range(45):
         time.sleep(2)
         try:
             log_res = subprocess.run(
-                ["docker", "logs", container_name],
+                ["docker", "logs", "--tail", "300", container_name],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -159,9 +171,11 @@ def deploy_teamspeak_instance(instance_id: int, ports: Dict[str, int]) -> Tuple[
             )
             logs = log_res.stdout + "\n" + log_res.stderr
             c = extract_credentials_from_logs(logs)
-            if c["admin_token"] or c["query_password"]:
+            if c["admin_token"] and (c["query_password"] or c["query_apikey"]):
                 creds = c
                 break
+            if c["admin_token"] or c["query_password"]:
+                creds = c
         except Exception:
             pass
 
@@ -171,11 +185,26 @@ def deploy_teamspeak_instance(instance_id: int, ports: Dict[str, int]) -> Tuple[
 
     if creds["admin_token"] or creds["query_password"] or creds["query_apikey"]:
         return True, creds, "部署成功，首次启动凭据已提取"
-    return True, creds, "部署成功，但首次启动凭据尚未从日志提取"
+    # 容器已确认 running，仅凭据尚未落盘：返回成功但提示稍后重新查询 CDK 自动补齐（app.py 有凭据自愈逻辑）
+    return True, creds, "容器已启动，但首次启动凭据尚未生成，请稍后重新输入 CDK 查询以自动补齐凭据"
+
+def _force_remove_container(instance_id: int) -> None:
+    """按容器名强制删除残留容器（忽略失败），用于 compose up 失败后的兜底清理。"""
+    container_name = f"ts-teamspeak-{instance_id}"
+    try:
+        subprocess.run(
+            ["docker", "rm", "-f", container_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            timeout=20
+        )
+    except Exception:
+        pass
 
 def get_container_status(instance_id: int) -> str:
     """
-    获取容器当前运行状态: running, exited, stopped, not_found
+    获取容器当前运行状态: running, exited, stopped, not_found, error
+    docker 不可用/命令异常时返回 error，调用方不应视为成功。
     """
     container_name = f"ts-teamspeak-{instance_id}"
     try:
@@ -188,9 +217,11 @@ def get_container_status(instance_id: int) -> str:
         )
         if res.returncode == 0:
             return res.stdout.strip()
+        if "No such" in (res.stderr or ""):
+            return "not_found"
+        return "error"
     except Exception:
-        pass
-    return "unknown"
+        return "error"
 
 def start_instance_container(instance_id: int) -> bool:
     instance_dir = get_instance_dir(instance_id)

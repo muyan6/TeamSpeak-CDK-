@@ -273,7 +273,7 @@
       <form onsubmit="handleLoginSubmit(event)">
         <div style="margin-bottom: 1.25rem;">
           <label class="info-label" style="margin-bottom: 0.4rem; display: block;">管理员密码 (ADMIN_PASSWORD)</label>
-          <input type="password" id="adminPwdInput" class="form-control" style="width: 100%; padding: 0.75rem 1rem;" placeholder="默认: admin123456" required autofocus>
+          <input type="password" id="adminPwdInput" class="form-control" style="width: 100%; padding: 0.75rem 1rem;" placeholder="请输入管理员密码" required autofocus>
         </div>
         <button type="submit" class="btn-primary" style="width: 100%; justify-content: center; padding: 0.75rem;">
           <i class="fa-solid fa-right-to-bracket"></i> 进入管理后台
@@ -1134,7 +1134,9 @@
   </div>
 
   <script>
-    let adminToken = localStorage.getItem('ts_admin_pwd') || '';
+    // 管理员口令不再长期保存在浏览器 localStorage：登录后由服务端下发 HttpOnly 会话 Cookie 鉴权。
+    // adminToken 仅作兼容占位（始终为空），所有请求凭 Cookie 自动携带会话。
+    let adminToken = '';
     let currentLogInstanceId = null;
 
     function escapeHtml(value) {
@@ -1148,7 +1150,10 @@
     }
 
     function jsString(value) {
-      return JSON.stringify(String(value ?? '')).replace(/"/g, '&quot;');
+      // JSON 序列化后先转义 & 再转义 "，避免值中自带 &quot; 时在 HTML 解码后从 onclick 内联 JS 字符串逃逸
+      return JSON.stringify(String(value ?? ''))
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;');
     }
 
     // Toast 浮动提示
@@ -1251,11 +1256,8 @@
       const currentTheme = document.documentElement.getAttribute('data-theme') || 'dark';
       updateAdminThemeUI(currentTheme);
 
-      if (adminToken) {
-        checkAuth();
-      } else {
-        showLogin();
-      }
+      // 统一先探测服务端会话（HttpOnly Cookie），有效则直接进入后台，否则显示登录页
+      checkAuth();
     });
 
     function showLogin() {
@@ -1273,13 +1275,40 @@
     async function performLogin() {
       const pwd = document.getElementById('adminPwdInput').value.trim();
       if (!pwd) return;
-      adminToken = pwd;
-      localStorage.setItem('ts_admin_pwd', pwd);
-      checkAuth();
+      const errBox = document.getElementById('loginError');
+      if (errBox) errBox.style.display = 'none';
+      try {
+        const res = await fetch('/api/admin/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ password: pwd })
+        });
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          if (errBox) {
+            errBox.style.display = 'block';
+            errBox.innerText = data.message || '管理员密码错误，请重新输入';
+          }
+          return;
+        }
+        // 登录成功：服务端已下发 HttpOnly 会话 Cookie，前端不保留任何明文口令
+        document.getElementById('adminPwdInput').value = '';
+        adminToken = '';
+        localStorage.removeItem('ts_admin_pwd');
+        checkAuth();
+      } catch (err) {
+        if (errBox) {
+          errBox.style.display = 'block';
+          errBox.innerText = '登录请求异常，请检查网络后重试';
+        }
+      }
     }
 
-    function logout() {
+    async function logout() {
       if (!confirm('确定要退出管理后台吗？')) return;
+      try {
+        await fetch('/api/admin/logout', { method: 'POST' });
+      } catch (e) {}
       adminToken = '';
       localStorage.removeItem('ts_admin_pwd');
       showLogin();
@@ -1317,15 +1346,16 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify({ old_password: oldPwd, new_password: newPwd })
         });
         const data = await res.json();
         if (data.success) {
           showToast(data.message, 'success');
-          adminToken = newPwd;
-          localStorage.setItem('ts_admin_pwd', newPwd);
+          // 服务端已在改密响应中续期会话 Cookie，前端不再保存任何明文口令
+          adminToken = '';
+          localStorage.removeItem('ts_admin_pwd');
           closePwdModal();
         } else {
           showToast(data.message || '修改失败', 'error');
@@ -1337,15 +1367,18 @@
 
     async function checkAuth() {
       try {
-        const res = await fetch('/api/admin/system-status', {
-          headers: { 'X-Admin-Password': adminToken }
-        });
+        // 通过服务端会话接口探测登录态（HttpOnly Cookie 自动携带），不再回传明文口令
+        const res = await fetch('/api/admin/session');
         if (res.status === 401 || res.status === 403) {
           showLogin();
-          document.getElementById('loginError').style.display = 'block';
-          document.getElementById('loginError').innerText = '密码错误，请重新输入';
           return;
         }
+        const sess = await res.json();
+        if (!sess.authenticated) {
+          showLogin();
+          return;
+        }
+        document.getElementById('loginError').style.display = 'none';
         document.getElementById('loginSection').style.display = 'none';
         document.getElementById('dashboardSection').style.display = 'block';
         document.getElementById('headerChangePwdBtn').style.display = 'inline-flex';
@@ -1419,8 +1452,12 @@
     async function loadStats() {
       try {
         const res = await fetch('/api/admin/system-status', {
-          headers: { 'X-Admin-Password': adminToken }
+          headers: { 'X-Admin-Password': '' }
         });
+        if (res.status === 401 || res.status === 403) {
+          showLogin();
+          return;
+        }
         const data = await res.json();
         if (data.success) {
           document.getElementById('statTotalInstances').innerText = data.total_instances;
@@ -1431,7 +1468,9 @@
             updateBotPanelUrls(data.bot_panel_url);
           }
         }
-      } catch (e) {}
+      } catch (e) {
+        console.warn('加载系统概览失败:', e);
+      }
     }
 
     async function loadInstances() {
@@ -1439,11 +1478,13 @@
       tbody.innerHTML = '<tr><td colspan="12" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
       clearSelectedInstances();
       try {
-        const res = await fetch('/api/admin/instances', {
-          headers: { 'X-Admin-Password': adminToken }
-        });
+        const res = await fetch('/api/admin/instances');
+        if (res.status === 401 || res.status === 403) {
+          showLogin();
+          return;
+        }
         const data = await res.json();
-        if (!data.success || data.instances.length === 0) {
+        if (!data.success || !Array.isArray(data.instances) || data.instances.length === 0) {
           tbody.innerHTML = '<tr><td colspan="12" style="text-align: center; color: var(--text-muted); padding: 2rem;">暂无 TeamSpeak 实例</td></tr>';
           return;
         }
@@ -1540,7 +1581,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify({ subdomain_prefix: cleanPrefix })
         });
@@ -1562,7 +1603,7 @@
         const res = await fetch(`/api/admin/instances/${instanceId}/unbind-domain`, {
           method: 'POST',
           headers: {
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           }
         });
         const data = await res.json();
@@ -1583,7 +1624,7 @@
       clearSelectedBots();
       try {
         const res = await fetch('/api/admin/bots', {
-          headers: { 'X-Admin-Password': adminToken }
+          headers: { 'X-Admin-Password': '' }
         });
         const data = await res.json();
         if (data.bot_panel_url) {
@@ -1654,7 +1695,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify({ action })
         });
@@ -1713,7 +1754,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify(payload)
         });
@@ -1743,7 +1784,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           }
         });
         const data = await res.json();
@@ -1962,7 +2003,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify({ filter })
         });
@@ -2037,7 +2078,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify({ codes: selected })
         });
@@ -2114,7 +2155,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify({ ids: selected, action })
         });
@@ -2191,7 +2232,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify({ bot_ids: selected, action })
         });
@@ -2214,7 +2255,7 @@
       tbody.innerHTML = '<tr><td colspan="8" style="text-align: center; padding: 2rem;">加载中...</td></tr>';
       try {
         const res = await fetch('/api/admin/cdks', {
-          headers: { 'X-Admin-Password': adminToken }
+          headers: { 'X-Admin-Password': '' }
         });
         const data = await res.json();
         if (!data.success) {
@@ -2257,7 +2298,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify({ count, remark, cdk_type, duration_months, is_trial })
         });
@@ -2389,7 +2430,7 @@
       const countEl = document.getElementById('countTrialRecords');
       try {
         const res = await fetch('/api/admin/trial-records', {
-          headers: { 'X-Admin-Password': adminToken }
+          headers: { 'X-Admin-Password': '' }
         });
         const data = await res.json();
         if (data.success) {
@@ -2452,7 +2493,7 @@
       try {
         const res = await fetch(`/api/admin/trial-records/${recordId}`, {
           method: 'DELETE',
-          headers: { 'X-Admin-Password': adminToken }
+          headers: { 'X-Admin-Password': '' }
         });
         const data = await res.json();
         if (data.success) {
@@ -2479,7 +2520,7 @@
       try {
         const res = await fetch(`/api/admin/cdks/${code}`, {
           method: 'DELETE',
-          headers: { 'X-Admin-Password': adminToken }
+          headers: { 'X-Admin-Password': '' }
         });
         const data = await res.json();
         if (data.success) {
@@ -2498,7 +2539,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify({ action })
         });
@@ -2523,7 +2564,7 @@
 
       try {
         const res = await fetch(`/api/admin/instances/${id}/logs`, {
-          headers: { 'X-Admin-Password': adminToken }
+          headers: { 'X-Admin-Password': '' }
         });
         const data = await res.json();
         document.getElementById('logsContent').innerText = data.logs || '（暂无日志输出）';
@@ -2565,14 +2606,16 @@
       loadBotPermissions();
       try {
         const res = await fetch('/api/admin/bot-config', {
-          headers: { 'X-Admin-Password': adminToken }
+          headers: { 'X-Admin-Password': '' }
         });
         const data = await res.json();
         if (data.success && data.config) {
           document.getElementById('cfgBotUrl').value = data.config.url || '';
           document.getElementById('cfgBotTutorialUrl').value = data.config.tutorial_url || 'http://103.71.69.156:23452/';
           document.getElementById('cfgBotUser').value = data.config.user || '';
-          document.getElementById('cfgBotPass').value = data.config.password || '';
+          // 密码框留空：后端只回传掩码，留空表示“保持原密码不变”
+          document.getElementById('cfgBotPass').value = '';
+          document.getElementById('cfgBotPass').placeholder = data.config.password ? '已配置（留空表示不修改）' : '请输入后台登录密码';
           if (data.config.url) {
             updateBotPanelUrls(data.config.url);
           }
@@ -2589,8 +2632,8 @@
       const user = document.getElementById('cfgBotUser').value.trim();
       const password = document.getElementById('cfgBotPass').value.trim();
 
-      if (!url || !user || !password) {
-        showToast('请完整填写网站地址、账号和密码', 'error');
+      if (!url || !user) {
+        showToast('请完整填写网站地址与账号', 'error');
         return;
       }
 
@@ -2603,7 +2646,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify({ url, user, password, tutorial_url })
         });
@@ -2648,7 +2691,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify({ url, user, password })
         });
@@ -2693,7 +2736,7 @@
     async function loadBotPermissions() {
       try {
         const res = await fetch('/api/admin/bot-permissions', {
-          headers: { 'X-Admin-Password': adminToken }
+          headers: { 'X-Admin-Password': '' }
         });
         const data = await res.json();
         if (data.success && data.config) {
@@ -2758,7 +2801,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify({
             role,
@@ -2798,7 +2841,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           }
         });
         const respData = await res.json();
@@ -2901,7 +2944,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           }
         });
         const data = await res.json();
@@ -2933,7 +2976,7 @@
       if (resultBox) resultBox.style.display = 'none';
       try {
         const res = await fetch('/api/admin/dns-config', {
-          headers: { 'X-Admin-Password': adminToken }
+          headers: { 'X-Admin-Password': '' }
         });
         const data = await res.json();
         if (data.success && data.config) {
@@ -2942,12 +2985,21 @@
           document.getElementById('cfgDnsProvider').value = c.dns_provider || 'disabled';
           document.getElementById('cfgDnsRootDomain').value = c.dns_root_domain || '';
           document.getElementById('cfgDnsTargetHost').value = c.dns_target_host || '';
-          document.getElementById('cfgDnsCfToken').value = c.dns_cf_token || '';
           document.getElementById('cfgDnsCfZoneId').value = c.dns_cf_zone_id || '';
           document.getElementById('cfgDnsAliyunAk').value = c.dns_aliyun_ak || '';
-          document.getElementById('cfgDnsAliyunSk').value = c.dns_aliyun_sk || '';
           document.getElementById('cfgDnsTencentId').value = c.dns_tencent_id || '';
-          document.getElementById('cfgDnsTencentKey').value = c.dns_tencent_key || '';
+          // 密钥类字段留空：后端只回传掩码，留空表示“保持原密钥不变”
+          const secretFields = [
+            ['cfgDnsCfToken', c.dns_cf_token],
+            ['cfgDnsAliyunSk', c.dns_aliyun_sk],
+            ['cfgDnsTencentKey', c.dns_tencent_key],
+          ];
+          secretFields.forEach(([id, val]) => {
+            const el = document.getElementById(id);
+            if (!el) return;
+            el.value = '';
+            el.placeholder = val ? '已配置（留空表示不修改）' : el.placeholder;
+          });
           onDnsProviderChange();
         }
       } catch (e) {
@@ -2984,7 +3036,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify(payload)
         });
@@ -3035,7 +3087,7 @@
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            'X-Admin-Password': adminToken
+            'X-Admin-Password': ''
           },
           body: JSON.stringify(payload)
         });
