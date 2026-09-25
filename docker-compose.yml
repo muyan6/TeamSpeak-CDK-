@@ -8,8 +8,8 @@ services:
     environment:
       - SERVER_HOST=0.0.0.0
       - SERVER_PORT=12345
-      # 必填：不再内置 admin123456 这类弱默认口令，未设置时容器会生成随机口令并打印到日志
-      - ADMIN_PASSWORD=${ADMIN_PASSWORD:?请在 .env 中设置 ADMIN_PASSWORD}
+      # 管理员口令：不再内置弱口令；未设置时服务首次启动会自动生成随机口令持久化并打印到启动日志
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - TS_DATA_DIR=/data/teamspeak
       - DB_PATH=/app/db/teamspeak_manager.db
       # 显式指定对外连接地址，避免依赖 Host 头

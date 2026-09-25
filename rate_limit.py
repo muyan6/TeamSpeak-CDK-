@@ -29,7 +29,7 @@ def _prune_dead_buckets(now_ts: float, window: float) -> None:
         return
     for key in list(_BUCKETS.keys()):
         queue = _BUCKETS.get(key)
-        if not queue or not queue or (now_ts - queue[-1]) > window:
+        if not queue or (now_ts - queue[-1]) > window:
             _BUCKETS.pop(key, None)
         if len(_BUCKETS) <= _MAX_BUCKETS // 2:
             break

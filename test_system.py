@@ -1347,7 +1347,137 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertFalse(geo_local["is_overseas"])
         self.assertEqual(geo_local["location"], "本地内网")
 
+    def test_comprehensive_bugfixes(self):
+        import sqlite3
+        import dns_service
+
+        # 1. unbind_cdk_instance 在 delete_instance 之后仍能正常恢复 CDK 为 unused
+        cdks = database.create_cdks(count=1, remark="解绑测试", cdk_type="teamspeak")
+        cdk_code = cdks[0]
+        inst = database.create_instance(
+            instance_id=101,
+            name="解绑测试实例",
+            container_name="ts-test-101",
+            dir_path="/data/teamspeak/ts101",
+            voice_port=59111,
+            file_port=59112,
+            query_port=59113,
+            tsdns_port=59114,
+            admin_token="token123",
+            cdk_code=cdk_code,
+            duration_months=1,
+            subdomain="test.example.com"
+        )
+        inst_id = inst["id"]
+        database.update_instance_domain(inst_id, subdomain="test.example.com", domain_record_id="rec-1", domain_provider="cloudflare")
+        self.assertEqual(database.get_instance_by_id(inst_id)["domain_provider"], "cloudflare")
+        database.bind_cdk_instance(cdk_code, inst_id)
+        cdk_info = database.get_cdk(cdk_code)
+        self.assertEqual(cdk_info["status"], "used")
+        self.assertEqual(cdk_info["instance_id"], inst_id)
+
+        # 模拟外部删除实例后回滚解绑
+        database.delete_instance(inst_id)
+        # 此时 instance 已被删除，cdks.instance_id 已被置为 NULL，但 status 仍是 used
+        cdk_after_delete = database.get_cdk(cdk_code)
+        self.assertIsNone(cdk_after_delete["instance_id"])
+        self.assertEqual(cdk_after_delete["status"], "used")
+
+        # 调用 unbind_cdk_instance，修复后应能匹配并重置为 unused
+        unbind_ok = database.unbind_cdk_instance(cdk_code, inst_id)
+        self.assertTrue(unbind_ok)
+        cdk_restored = database.get_cdk(cdk_code)
+        self.assertEqual(cdk_restored["status"], "unused")
+        self.assertIsNone(cdk_restored["instance_id"])
+
+        # 2. unbind_cdk_bot 在 delete_bot_instance 之后同样能正常恢复
+        bot_cdks = database.create_cdks(count=1, remark="Bot解绑测试", cdk_type="music_bot")
+        bot_cdk_code = bot_cdks[0]
+        bot_id = "bot-unbind-test-999"
+        database.create_bot_instance(
+            bot_id=bot_id,
+            name="Bot解绑测试机",
+            server_address="127.0.0.1",
+            server_port=9987,
+            nickname="TestBotUnbind",
+            cdk_code=bot_cdk_code,
+            duration_months=1
+        )
+        database.bind_cdk_bot(bot_cdk_code, bot_id)
+        self.assertEqual(database.get_cdk(bot_cdk_code)["status"], "used")
+
+        database.delete_bot_instance(bot_id)
+        unbind_bot_ok = database.unbind_cdk_bot(bot_cdk_code, bot_id)
+        self.assertTrue(unbind_bot_ok)
+        self.assertEqual(database.get_cdk(bot_cdk_code)["status"], "unused")
+
+        # 3. update_instance_domain 显式传入 domain_provider=None 能够清空提供商字段
+        inst2 = database.create_instance(
+            instance_id=102,
+            name="域名清空测试",
+            container_name="ts-test-102",
+            dir_path="/data/teamspeak/ts102",
+            voice_port=59121,
+            file_port=59122,
+            query_port=59123,
+            tsdns_port=59124,
+            admin_token="token456",
+            duration_months=1,
+            subdomain="old.example.com"
+        )
+        inst2_id = inst2["id"]
+        database.update_instance_domain(inst2_id, subdomain="old.example.com", domain_record_id="rec-2", domain_provider="aliyun")
+        self.assertEqual(database.get_instance_by_id(inst2_id)["domain_provider"], "aliyun")
+
+        database.update_instance_domain(inst2_id, subdomain=None, domain_record_id=None, domain_provider=None)
+        inst2_updated = database.get_instance_by_id(inst2_id)
+        self.assertIsNone(inst2_updated["subdomain"])
+        self.assertIsNone(inst2_updated["domain_provider"])
+        database.delete_instance(inst2_id)
+
+        # 4. 批量删除 delete_instances / delete_bot_instances 级联清空关联
+        cdk_batch1 = database.create_cdks(count=1, cdk_type="teamspeak")[0]
+        cdk_batch2 = database.create_cdks(count=1, cdk_type="teamspeak")[0]
+        b_inst1 = database.create_instance(103, "B1", "ts-test-103", "/data/teamspeak/ts103", 59131, 59132, 59133, 59134, "t1", cdk_code=cdk_batch1)
+        b_inst2 = database.create_instance(104, "B2", "ts-test-104", "/data/teamspeak/ts104", 59141, 59142, 59143, 59144, "t2", cdk_code=cdk_batch2)
+        database.bind_cdk_instance(cdk_batch1, b_inst1["id"])
+        database.bind_cdk_instance(cdk_batch2, b_inst2["id"])
+        database.record_trial_server("127.0.0.1", 59131, cdk_batch1, "teamspeak", str(b_inst1["id"]), client_ip="198.51.100.42")
+
+        # 批量删除
+        del_count = database.delete_instances([b_inst1["id"], b_inst2["id"]])
+        self.assertEqual(del_count, 2)
+        self.assertIsNone(database.get_instance_by_id(b_inst1["id"]))
+        self.assertIsNone(database.get_instance_by_id(b_inst2["id"]))
+        # 关联 CDK 的 instance_id 均已解除置空
+        self.assertIsNone(database.get_cdk(cdk_batch1)["instance_id"])
+        self.assertIsNone(database.get_cdk(cdk_batch2)["instance_id"])
+        # 试用记录已清空
+        has_trial, _ = database.has_ip_used_teamspeak_trial("198.51.100.42")
+        self.assertFalse(has_trial)
+
+        # 5. docker_service.stop_instance_container 在容器目录不存在时安全返回 True
+        stopped_res = docker_service.stop_instance_container(888888)
+        self.assertTrue(stopped_res)
+
+        # 6. dns_service.validate_subdomain_format 长度校验
+        ok, reason = dns_service.validate_subdomain_format("a" * 33, "example.com")
+        self.assertFalse(ok)
+        self.assertIn("长度必须在 2 到 32", reason)
+
+        ok_long, reason_long = dns_service.validate_subdomain_format("validsub", "b" * 250 + ".com")
+        self.assertFalse(ok_long)
+        self.assertIn("主域名过长", reason_long)
+
+        # 7. 空数据库 / 未初始化表时 get_setting 安全返回默认值
+        temp_mem_db = sqlite3.connect(":memory:")
+        with patch.object(database, "get_connection", return_value=temp_mem_db):
+            val = database.get_setting("non_existent_key", default="fallback_val")
+            self.assertEqual(val, "fallback_val")
+        temp_mem_db.close()
+
 if __name__ == "__main__":
     unittest.main()
+
 
 

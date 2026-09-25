@@ -498,11 +498,6 @@ class DnsService:
         根据当前系统配置，自动向 DNS 服务商创建 SRV 记录
         返回: (success, record_id, full_domain, error_message)
         """
-        # 校验前缀合法性
-        valid, msg = validate_subdomain_format(subdomain_prefix)
-        if not valid:
-            return False, None, None, msg
-
         if dns_cfg is None:
             from database import get_dns_config
             dns_cfg = get_dns_config()
@@ -518,6 +513,11 @@ class DnsService:
 
         if not root_domain:
             return False, None, None, "系统未配置主域名"
+
+        # 校验前缀合法性及拼接后的总域名长度
+        valid, msg = validate_subdomain_format(subdomain_prefix, root_domain)
+        if not valid:
+            return False, None, None, msg
 
         # RFC 2782 国际标准: SRV 目标主机必须为主机域名(FQDN)，不可直接为纯 IP
         import ipaddress

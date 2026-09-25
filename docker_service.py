@@ -262,6 +262,8 @@ def get_container_status(instance_id: int) -> str:
 
 def start_instance_container(instance_id: int) -> bool:
     instance_dir = get_instance_dir(instance_id)
+    if not os.path.exists(instance_dir):
+        return False
     cmd = get_compose_cmd() + ["start"]
     try:
         res = subprocess.run(cmd, cwd=instance_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
@@ -271,6 +273,8 @@ def start_instance_container(instance_id: int) -> bool:
 
 def stop_instance_container(instance_id: int) -> bool:
     instance_dir = get_instance_dir(instance_id)
+    if not os.path.exists(instance_dir):
+        return True
     cmd = get_compose_cmd() + ["stop"]
     try:
         res = subprocess.run(cmd, cwd=instance_dir, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)

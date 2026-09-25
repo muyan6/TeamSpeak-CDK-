@@ -27,8 +27,8 @@ COPY static ./static
 
 EXPOSE 12345
 
-# 健康检查：命中管理员会话探测接口，未登录返回 401 也说明进程存活
+# 健康检查：命中公开状态接口（返回 200 说明服务进程与 HTTP 监听正常）
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD curl -fsS http://127.0.0.1:12345/api/admin/session > /dev/null || exit 1
+    CMD curl -fsS http://127.0.0.1:12345/api/dns-info > /dev/null || exit 1
 
 CMD ["python", "app.py"]

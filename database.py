@@ -285,11 +285,14 @@ def release_stale_cdk_claims(minutes: int = 10) -> int:
 # --- 系统配置与密码管理 ---
 
 def get_setting(key: str, default: Optional[str] = None) -> Optional[str]:
-    with get_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT value FROM system_settings WHERE key = ?", (key,))
-        row = cursor.fetchone()
-        return row["value"] if row else default
+    try:
+        with get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT value FROM system_settings WHERE key = ?", (key,))
+            row = cursor.fetchone()
+            return row["value"] if row else default
+    except sqlite3.OperationalError:
+        return default
 
 def set_setting(key: str, value: str):
     with get_connection() as conn:
@@ -1075,29 +1078,43 @@ def bind_cdk_bot(code: str, bot_id: str):
         conn.commit()
         return cursor.rowcount == 1
 
-def unbind_cdk_instance(code: str, instance_id: int) -> bool:
+def unbind_cdk_instance(code: str, instance_id: Optional[int] = None) -> bool:
     """解绑并回收 CDK（体验卡防重复由 trial_server_records 服务器指纹库负责拦截）。"""
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE cdks SET status = 'unused', instance_id = NULL, used_at = NULL "
-            "WHERE code = ? AND instance_id = ? AND status = 'used'",
-            (code, instance_id)
-        )
+        if instance_id is not None:
+            cursor.execute(
+                "UPDATE cdks SET status = 'unused', instance_id = NULL, used_at = NULL "
+                "WHERE code = ? AND (instance_id = ? OR instance_id IS NULL) AND status IN ('used', 'processing')",
+                (code.strip(), instance_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE cdks SET status = 'unused', instance_id = NULL, used_at = NULL "
+                "WHERE code = ? AND status IN ('used', 'processing')",
+                (code.strip(),)
+            )
         conn.commit()
-        return cursor.rowcount == 1
+        return cursor.rowcount >= 1
 
-def unbind_cdk_bot(code: str, bot_id: str) -> bool:
+def unbind_cdk_bot(code: str, bot_id: Optional[str] = None) -> bool:
     """解绑并回收 CDK（体验卡防重复由 trial_server_records 服务器指纹库负责拦截）。"""
     with get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute(
-            "UPDATE cdks SET status = 'unused', bot_id = NULL, used_at = NULL "
-            "WHERE code = ? AND bot_id = ? AND status = 'used'",
-            (code, bot_id)
-        )
+        if bot_id is not None:
+            cursor.execute(
+                "UPDATE cdks SET status = 'unused', bot_id = NULL, used_at = NULL "
+                "WHERE code = ? AND (bot_id = ? OR bot_id IS NULL) AND status IN ('used', 'processing')",
+                (code.strip(), bot_id)
+            )
+        else:
+            cursor.execute(
+                "UPDATE cdks SET status = 'unused', bot_id = NULL, used_at = NULL "
+                "WHERE code = ? AND status IN ('used', 'processing')",
+                (code.strip(),)
+            )
         conn.commit()
-        return cursor.rowcount == 1
+        return cursor.rowcount >= 1
 
 def restore_bot_cdk(cdk_code: str, bot_id: str, duration_months: int = 1, remark: str = "自愈/手动恢复已绑定CDK") -> Optional[Dict[str, Any]]:
     """
@@ -1295,15 +1312,17 @@ def update_instance_credentials_if_empty(
     return get_instance_by_id(instance_id)
 
 
+_DOMAIN_PROVIDER_UNSET = object()
+
 def update_instance_domain(
     instance_id: int,
     subdomain: Optional[str],
     domain_record_id: Optional[str],
-    domain_provider: Optional[str] = None
+    domain_provider: Any = _DOMAIN_PROVIDER_UNSET
 ):
     with get_connection() as conn:
         cursor = conn.cursor()
-        if domain_provider is None:
+        if domain_provider is _DOMAIN_PROVIDER_UNSET:
             cursor.execute(
                 "UPDATE instances SET subdomain = ?, domain_record_id = ? WHERE id = ?",
                 (subdomain, domain_record_id, instance_id)
@@ -1428,10 +1447,14 @@ def delete_instances(instance_ids: List[int]) -> int:
     total = 0
     with get_connection() as conn:
         cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
         for chunk in _chunked(list(instance_ids)):
             placeholders = ",".join("?" for _ in chunk)
             cursor.execute(f"DELETE FROM instances WHERE id IN ({placeholders})", chunk)
             total += cursor.rowcount
+            cursor.execute(f"UPDATE cdks SET instance_id = NULL WHERE instance_id IN ({placeholders})", chunk)
+            str_chunk = [str(x) for x in chunk]
+            cursor.execute(f"DELETE FROM trial_server_records WHERE target_id IN ({placeholders}) AND cdk_type = 'teamspeak'", str_chunk)
         conn.commit()
     return total
 
@@ -1574,9 +1597,12 @@ def delete_bot_instances(bot_ids: List[str]) -> int:
     total = 0
     with get_connection() as conn:
         cursor = conn.cursor()
+        cursor.execute("BEGIN IMMEDIATE")
         for chunk in _chunked(list(bot_ids)):
             placeholders = ",".join("?" for _ in chunk)
             cursor.execute(f"DELETE FROM bot_instances WHERE bot_id IN ({placeholders})", chunk)
             total += cursor.rowcount
+            cursor.execute(f"UPDATE cdks SET bot_id = NULL WHERE bot_id IN ({placeholders})", chunk)
+            cursor.execute(f"DELETE FROM trial_server_records WHERE target_id IN ({placeholders}) AND cdk_type = 'music_bot'", chunk)
         conn.commit()
     return total

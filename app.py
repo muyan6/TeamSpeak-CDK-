@@ -132,7 +132,9 @@ async def system_expiry_checker():
                 # 关键：必须真正停机成功才标记 expired。
                 # 若停机失败仍写入 expired，该实例会因状态不再是 active 而永远逃出本扫描（查询条件为 status='active'），
                 # 造成「库中已过期、容器仍在运行」的资源白占与免费续用。
-                if stop_ok:
+                stop_str = str(stop_res or "").lower()
+                is_already_stopped_or_gone = ("404" in stop_str or "not found" in stop_str or "not running" in stop_str or "already stopped" in stop_str)
+                if stop_ok or is_already_stopped_or_gone:
                     await asyncio.to_thread(update_bot_instance_status, b["bot_id"], "expired")
                 else:
                     print(f"[Warning] 机器人 [{b['bot_id']}] 停机失败（{stop_res}），保留 active 状态等待下一轮重试")
@@ -1022,9 +1024,11 @@ def redeem_cdk(req: RedeemRequest, request: Request):
                     dns_cfg=dns_cfg
                 )
                 if ok_dns:
-                    update_instance_domain(instance["id"], full_d, rec_id)
+                    curr_provider = (dns_cfg.get("dns_provider") or "").lower() or None
+                    update_instance_domain(instance["id"], full_d, rec_id, domain_provider=curr_provider)
                     instance["subdomain"] = full_d
                     instance["domain_record_id"] = rec_id
+                    instance["domain_provider"] = curr_provider
                     instance["public_host"] = full_d
                     instance["has_domain"] = True
                     instance_view = dict(instance)
@@ -1240,6 +1244,10 @@ def redeem_cdk(req: RedeemRequest, request: Request):
             delete_instance(instance_id)
         except Exception as db_err:
             print(f"[Warning] 回滚删除实例记录失败 instance_id={instance_id}: {db_err}")
+        try:
+            unbind_cdk_instance(code, instance_id)
+        except Exception:
+            pass
         try:
             release_cdk_claim(code)
         except Exception as c_err:
@@ -1471,6 +1479,10 @@ def redeem_bot_instance(req: RedeemBotRequest, request: Request):
         music_bot_client.delete_bot(bot_id)
         if trial_reserved:
             release_trial_reservation(raw_addr, target_port, code)
+        try:
+            unbind_cdk_bot(code, bot_id)
+        except Exception:
+            pass
         release_cdk_claim(code)
         return JSONResponse(status_code=500, content={"success": False, "message": f"音乐机器人本地记录失败: {e}"})
 
@@ -2016,8 +2028,8 @@ def manage_instance(instance_id: int, req: InstanceActionRequest, _: bool = Depe
             })
         if instance.get("domain_record_id"):
             try:
-                # 必须传入实例绑定时的 dns_cfg：切换过服务商后，用「当前」配置去删旧服务商记录会失败并残留 SRV
-                inst_dns_cfg = instance.get("dns_cfg") or get_dns_config()
+                # 必须传入实例绑定时的服务商配置：切换过服务商后，用「当前」配置去删旧服务商记录会失败并残留 SRV
+                inst_dns_cfg = get_dns_config_for_provider(instance.get("domain_provider"))
                 ok_del, err_del = dns_service.delete_ts_srv_record(instance["domain_record_id"], dns_cfg=inst_dns_cfg)
                 if not ok_del:
                     print(f"[Warning] 销毁实例 ts{instance_id} 时删除 DNS 记录失败: {err_del}")
@@ -2065,11 +2077,13 @@ def admin_bind_instance_domain_api(instance_id: int, req: BindInstanceDomainRequ
     old_record_id = inst.get("domain_record_id")
     if old_record_id and old_record_id != rec_id:
         try:
-            dns_service.delete_ts_srv_record(old_record_id, dns_cfg=dns_cfg)
+            old_dns_cfg = get_dns_config_for_provider(inst.get("domain_provider"))
+            dns_service.delete_ts_srv_record(old_record_id, dns_cfg=old_dns_cfg)
         except Exception as e:
             print(f"[Warning] 换绑域名时删除旧 DNS 记录失败（不影响新解析）: {e}")
 
-    update_instance_domain(instance_id, full_d, rec_id)
+    curr_provider = (dns_cfg.get("dns_provider") or "").lower() or None
+    update_instance_domain(instance_id, full_d, rec_id, domain_provider=curr_provider)
     return {
         "success": True,
         "message": f"成功为实例 ts{instance_id} 绑定专属二级域名: {full_d}！",
@@ -2086,12 +2100,12 @@ def admin_unbind_instance_domain_api(instance_id: int, _: bool = Depends(verify_
     old_record_id = inst.get("domain_record_id")
     if old_record_id:
         try:
-            dns_cfg = get_dns_config()
-            dns_service.delete_ts_srv_record(old_record_id, dns_cfg=dns_cfg)
+            inst_dns_cfg = get_dns_config_for_provider(inst.get("domain_provider"))
+            dns_service.delete_ts_srv_record(old_record_id, dns_cfg=inst_dns_cfg)
         except Exception as e:
             print(f"[Warning] 解绑域名时删除 DNS 记录异常: {e}")
 
-    update_instance_domain(instance_id, None, None)
+    update_instance_domain(instance_id, None, None, domain_provider=None)
     return {"success": True, "message": f"实例 ts{instance_id} 已成功解绑二级域名，恢复为 IP 直连"}
 
 # 批量操作并发度：串行 30s×N 会长时间占满线程池，并发执行可把总耗时压到个位数量级

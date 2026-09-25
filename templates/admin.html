@@ -1157,6 +1157,32 @@
         .replace(/"/g, '&quot;');
     }
 
+    // 统一的接口错误解析（兼容 detail、message 及 HTML 响应）
+    async function readApiError(response, fallback = '操作失败，请稍后重试') {
+      let text = '';
+      try {
+        text = await response.text();
+      } catch (e) {
+        return fallback;
+      }
+      if (!text) return fallback;
+      try {
+        const data = JSON.parse(text);
+        if (data && typeof data === 'object') {
+          const detail = data.detail;
+          if (typeof detail === 'string' && detail) return detail;
+          if (Array.isArray(detail) && detail.length) {
+            return detail.map(d => d.msg || JSON.stringify(d)).join('；');
+          }
+          if (typeof data.message === 'string' && data.message) return data.message;
+        }
+      } catch (e) {
+        const plain = text.replace(/<[^>]*>/g, ' ').replace(/\s+/g, ' ').trim();
+        if (plain) return plain.slice(0, 200);
+      }
+      return fallback;
+    }
+
     // Toast 浮动提示
     function showToast(msg, type = 'info') {
       const container = document.getElementById('toastContainer');
@@ -1785,6 +1811,10 @@
           },
           body: JSON.stringify(payload)
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
+        if (!res.ok) {
+          throw new Error(await readApiError(res, '续费失败'));
+        }
         const data = await res.json();
         if (data.success) {
           showToast(data.message || '🎉 续费成功！', 'success');
@@ -1792,10 +1822,10 @@
           loadBots();
           loadStats();
         } else {
-          showToast(data.message || data.detail || '续费失败', 'error');
+          showToast(data.message || '续费失败', 'error');
         }
       } catch (err) {
-        showToast('请求异常，续费失败', 'error');
+        showToast(err.message || '请求异常，续费失败', 'error');
       } finally {
         submitBtn.disabled = false;
         submitBtn.innerHTML = '<i class="fa-solid fa-check"></i> 确认续费';
@@ -1814,16 +1844,20 @@
             'X-Admin-Password': ''
           }
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
+        if (!res.ok) {
+          throw new Error(await readApiError(res, '恢复失败'));
+        }
         const data = await res.json();
         if (data.success) {
           showToast(data.message || '🎉 卡密已成功恢复！', 'success');
           loadBots();
           loadStats();
         } else {
-          showToast(data.message || data.detail || '恢复失败', 'error');
+          showToast(data.message || '恢复失败', 'error');
         }
       } catch (e) {
-        showToast('请求异常，恢复失败', 'error');
+        showToast(e.message || '请求异常，恢复失败', 'error');
       }
     }
 
@@ -2638,6 +2672,7 @@
         const res = await fetch('/api/admin/bot-config', {
           headers: { 'X-Admin-Password': '' }
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
         const data = await res.json();
         if (data.success && data.config) {
           document.getElementById('cfgBotUrl').value = data.config.url || '';
@@ -2680,6 +2715,10 @@
           },
           body: JSON.stringify({ url, user, password, tutorial_url })
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
+        if (!res.ok) {
+          throw new Error(await readApiError(res, '保存失败'));
+        }
         const data = await res.json();
         if (data.success) {
           showToast('🎉 对接配置保存成功并已即时生效！', 'success');
@@ -2689,7 +2728,7 @@
           showToast(data.message || data.detail || '保存失败', 'error');
         }
       } catch (err) {
-        showToast('请求异常，保存失败', 'error');
+        showToast(err.message || '请求异常，保存失败', 'error');
       } finally {
         saveBtn.disabled = false;
         saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> 保存对接配置';
@@ -2726,6 +2765,20 @@
           },
           body: JSON.stringify({ url, user, password })
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
+        if (!res.ok) {
+          const errMsg = await readApiError(res, '无法连接到该机器人平台');
+          resultBox.style.display = 'block';
+          resultBox.style.background = 'var(--badge-danger-bg)';
+          resultBox.style.border = '1px solid var(--badge-danger-border)';
+          resultBox.style.color = 'var(--badge-danger-text)';
+          resultBox.replaceChildren(
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark', style: 'margin-right: 6px;' }),
+            document.createTextNode(' 测试失败：' + errMsg)
+          );
+          showToast('连通性测试失败: ' + errMsg, 'error');
+          return;
+        }
         const data = await res.json();
 
         resultBox.style.display = 'block';
@@ -2734,7 +2787,7 @@
           resultBox.style.border = '1px solid var(--badge-success-border)';
           resultBox.style.color = 'var(--badge-success-text)';
           resultBox.replaceChildren(
-            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-check' }),
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-check', style: 'margin-right: 6px;' }),
             document.createTextNode(' 测试成功：' + String(data.message || ''))
           );
           showToast('对接平台连接与鉴权测试通过！', 'success');
@@ -2743,7 +2796,7 @@
           resultBox.style.border = '1px solid var(--badge-danger-border)';
           resultBox.style.color = 'var(--badge-danger-text)';
           resultBox.replaceChildren(
-            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark' }),
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark', style: 'margin-right: 6px;' }),
             document.createTextNode(' 测试失败：' + String(data.message || data.detail || '无法连接到该机器人平台'))
           );
           showToast('连通性测试失败，请检查配置', 'error');
@@ -2753,7 +2806,10 @@
         resultBox.style.background = 'var(--badge-danger-bg)';
         resultBox.style.border = '1px solid var(--badge-danger-border)';
         resultBox.style.color = 'var(--badge-danger-text)';
-        resultBox.innerHTML = `<i class="fa-solid fa-circle-xmark" style="font-size: 1.1rem; margin-right: 6px;"></i> <strong>请求异常：</strong>网络请求失败，请检查服务器网络与后台日志`;
+        resultBox.replaceChildren(
+          Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark', style: 'margin-right: 6px;' }),
+          document.createTextNode(' 请求异常：网络请求失败，请检查服务器网络与后台日志')
+        );
         showToast('测试请求异常', 'error');
       } finally {
         testBtn.disabled = false;
@@ -2769,6 +2825,7 @@
         const res = await fetch('/api/admin/bot-permissions', {
           headers: { 'X-Admin-Password': '' }
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
         const data = await res.json();
         if (data.success && data.config) {
           renderBotPermissionConfig(data.config);
@@ -2841,6 +2898,10 @@
             permission_notice
           })
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
+        if (!res.ok) {
+          throw new Error(await readApiError(res, '保存失败'));
+        }
         const data = await res.json();
         if (data.success) {
           showToast('🎉 机器人用户权限配置保存成功并已即时生效！', 'success');
@@ -2848,7 +2909,7 @@
           showToast(data.message || '保存失败', 'error');
         }
       } catch (err) {
-        showToast('保存异常: ' + err.message, 'error');
+        showToast('保存异常: ' + (err.message || ''), 'error');
       } finally {
         saveBtn.disabled = false;
         saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> 保存权限配置';
@@ -2875,6 +2936,10 @@
             'X-Admin-Password': ''
           }
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
+        if (!res.ok) {
+          throw new Error(await readApiError(res, '未能连接到远程机器人平台'));
+        }
         const respData = await res.json();
         const data = respData.data || {};
 
@@ -2978,6 +3043,10 @@
             'X-Admin-Password': ''
           }
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
+        if (!res.ok) {
+          throw new Error(await readApiError(res, '下发同步失败'));
+        }
         const data = await res.json();
         if (data.success) {
           showToast(data.message || '权限下发同步成功！', 'success');
@@ -2985,7 +3054,7 @@
           showToast(data.message || data.detail || '下发同步失败', 'error');
         }
       } catch (e) {
-        showToast('下发同步请求异常: ' + e.message, 'error');
+        showToast('下发同步请求异常: ' + (e.message || ''), 'error');
       }
     }
 
@@ -3009,6 +3078,10 @@
         const res = await fetch('/api/admin/dns-config', {
           headers: { 'X-Admin-Password': '' }
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
+        if (!res.ok) {
+          throw new Error(await readApiError(res, '读取 DNS 配置失败'));
+        }
         const data = await res.json();
         if (data.success && data.config) {
           const c = data.config;
@@ -3034,7 +3107,7 @@
           onDnsProviderChange();
         }
       } catch (e) {
-        showToast('读取 DNS 配置失败', 'error');
+        showToast(e.message || '读取 DNS 配置失败', 'error');
       }
     }
 
@@ -3071,6 +3144,10 @@
           },
           body: JSON.stringify(payload)
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
+        if (!res.ok) {
+          throw new Error(await readApiError(res, '保存失败'));
+        }
         const data = await res.json();
         if (data.success) {
           showToast('🎉 DNS 自动化配置保存成功！', 'success');
@@ -3078,7 +3155,7 @@
           showToast(data.message || '保存失败', 'error');
         }
       } catch (err) {
-        showToast('请求异常，保存失败', 'error');
+        showToast(err.message || '请求异常，保存失败', 'error');
       } finally {
         saveBtn.disabled = false;
         saveBtn.innerHTML = '<i class="fa-solid fa-floppy-disk"></i> 保存 DNS 配置';
@@ -3122,6 +3199,20 @@
           },
           body: JSON.stringify(payload)
         });
+        if (res.status === 401 || res.status === 403) { showLogin(); return; }
+        if (!res.ok) {
+          const errMsg = await readApiError(res, '鉴权未通过');
+          resultBox.style.display = 'block';
+          resultBox.style.background = 'rgba(239, 68, 68, 0.15)';
+          resultBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
+          resultBox.style.color = '#f87171';
+          resultBox.replaceChildren(
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark', style: 'margin-right: 6px;' }),
+            document.createTextNode(' 连通性测试失败：' + errMsg)
+          );
+          showToast('DNS 连通性测试失败: ' + errMsg, 'error');
+          return;
+        }
         const data = await res.json();
 
         resultBox.style.display = 'block';
@@ -3130,7 +3221,7 @@
           resultBox.style.border = '1px solid rgba(16, 185, 129, 0.4)';
           resultBox.style.color = '#34d399';
           resultBox.replaceChildren(
-            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-check' }),
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-check', style: 'margin-right: 6px;' }),
             document.createTextNode(' 连通性测试通过：' + String(data.message || ''))
           );
           showToast('DNS API 接口连通测试通过！', 'success');
@@ -3139,7 +3230,7 @@
           resultBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
           resultBox.style.color = '#f87171';
           resultBox.replaceChildren(
-            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark' }),
+            Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark', style: 'margin-right: 6px;' }),
             document.createTextNode(' 连通性测试失败：' + String(data.message || data.detail || '鉴权未通过'))
           );
           showToast('DNS 连通性测试失败，请检查密钥与域名', 'error');
@@ -3149,7 +3240,10 @@
         resultBox.style.background = 'rgba(239, 68, 68, 0.15)';
         resultBox.style.border = '1px solid rgba(239, 68, 68, 0.4)';
         resultBox.style.color = '#f87171';
-        resultBox.innerHTML = `<i class="fa-solid fa-circle-xmark" style="font-size: 1.1rem; margin-right: 6px;"></i> <strong>测试请求异常：</strong>无法连接到 DNS 服务商接口，请检查网络`;
+        resultBox.replaceChildren(
+          Object.assign(document.createElement('i'), { className: 'fa-solid fa-circle-xmark', style: 'margin-right: 6px;' }),
+          document.createTextNode(' 测试请求异常：无法连接到 DNS 服务商接口，请检查网络')
+        );
         showToast('测试请求异常', 'error');
       } finally {
         testBtn.disabled = false;
