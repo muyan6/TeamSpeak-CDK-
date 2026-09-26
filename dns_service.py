@@ -229,7 +229,7 @@ class AliyunDnsProvider:
             **extra_params
         }
         params["Signature"] = cls._sign(params, access_key_secret.strip(), "GET")
-        url = f"{cls.ENDPOINT}?{urllib.parse.urlencode(params)}"
+        url = f"{cls.ENDPOINT}?{urllib.parse.urlencode(params, quote_via=urllib.parse.quote)}"
         req = urllib.request.Request(url, headers={"User-Agent": "TS3-CDK-Manager/1.0"})
         with urllib.request.urlopen(req, timeout=10) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -433,13 +433,17 @@ class TencentDnsProvider:
         if not record_id:
             return True, None
         try:
+            try:
+                numeric_record_id = int(str(record_id).strip())
+            except (ValueError, TypeError):
+                return False, f"腾讯云 RecordId 非法: {record_id}"
             res = cls._request_tc3(
                 secret_id,
                 secret_key,
                 "DeleteRecord",
                 {
                     "Domain": root_domain.strip(),
-                    "RecordId": int(record_id.strip())
+                    "RecordId": numeric_record_id
                 }
             )
             resp_data = res.get("Response", {})
@@ -510,6 +514,17 @@ class DnsService:
         root_domain = (dns_cfg.get("dns_root_domain") or "").strip()
         configured_target = (dns_cfg.get("dns_target_host") or "").strip()
         final_target = configured_target or target_host
+
+        # 去除意外附带的端口号（SRV 规范中 Target 仅为域名，端口独立存放于 Port 字段）
+        if ":" in final_target:
+            if final_target.startswith("[") and "]" in final_target:
+                parts = final_target.split("]:")
+                if len(parts) == 2 and parts[1].isdigit():
+                    final_target = parts[0] + "]"
+            elif final_target.count(":") == 1:
+                host_part, port_part = final_target.split(":", 1)
+                if port_part.isdigit():
+                    final_target = host_part
 
         if not root_domain:
             return False, None, None, "系统未配置主域名"

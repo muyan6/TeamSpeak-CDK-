@@ -1953,6 +1953,8 @@
           statusBadge = '<span class="badge badge-success"><i class="fa-solid fa-circle-check"></i> 未使用</span>';
         } else if (isUsed) {
           statusBadge = '<span class="badge badge-warning"><i class="fa-solid fa-clock-rotate-left"></i> 已激活使用</span>';
+        } else if (c.status === 'processing') {
+          statusBadge = '<span class="badge badge-info" style="background: rgba(59, 130, 246, 0.15); color: #60a5fa; border: 1px solid rgba(59, 130, 246, 0.3);"><i class="fa-solid fa-spinner fa-spin"></i> 处理中</span>';
         } else {
           statusBadge = '<span class="badge badge-danger"><i class="fa-solid fa-ban"></i> 已禁用</span>';
         }
@@ -2598,18 +2600,25 @@
         if (!confirm(`确定要删除 CDK: ${code} 吗？`)) return;
       }
       try {
-        const res = await fetch(`/api/admin/cdks/${code}`, {
+        const res = await fetch(`/api/admin/cdks/${encodeURIComponent(code)}`, {
           method: 'DELETE',
           headers: { 'X-Admin-Password': '' }
         });
+        if (res.status === 401 || res.status === 403) {
+          showToast('登录态已失效，请重新登录', 'error');
+          setTimeout(() => location.reload(), 1200);
+          return;
+        }
         const data = await res.json();
         if (data.success) {
-          showToast('CDK 已删除', 'success');
+          showToast(data.message || 'CDK 已删除', 'success');
           loadCdks();
           loadStats();
+        } else {
+          showToast(data.message || '删除失败', 'error');
         }
       } catch (e) {
-        showToast('删除失败', 'error');
+        showToast('删除请求异常', 'error');
       }
     }
 

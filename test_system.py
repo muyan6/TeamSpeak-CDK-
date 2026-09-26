@@ -1625,6 +1625,160 @@ class TestTeamSpeakManager(unittest.TestCase):
         self.assertTrue(used)
         self.assertIsNotNone(rec)
 
+    def test_comprehensive_audit_fixes(self):
+        """全面测试审阅修复：CDK软硬两段删除、体验卡预约防泄漏、Aliyun编码与SRV端口清洗"""
+        import json
+        from dns_service import dns_service, AliyunDnsProvider, CloudflareDnsProvider, TencentDnsProvider
+        from fastapi.testclient import TestClient
+        import app as ts_app
+        client = TestClient(ts_app.app)
+
+        # 1. CDK 两阶段删除 (软删除禁用 -> 物理彻底清除)
+        cdk_two_stage = database.create_cdks(count=1, cdk_type="teamspeak")[0]
+        # 首次删除：置为 disabled
+        self.assertTrue(database.delete_cdk(cdk_two_stage))
+        cdk_info = database.get_cdk(cdk_two_stage)
+        self.assertIsNotNone(cdk_info)
+        self.assertEqual(cdk_info["status"], "disabled")
+        # 再次删除：物理彻底清除
+        self.assertTrue(database.delete_cdk(cdk_two_stage))
+        self.assertIsNone(database.get_cdk(cdk_two_stage))
+        # 第三次删除：不存在返回 False
+        self.assertFalse(database.delete_cdk(cdk_two_stage))
+
+        # 2. 体验卡音乐机器人输入校验前置，失败时不产生残留预占
+        trial_bot_cdk = database.create_cdks(count=1, cdk_type="music_bot", duration_months=1, is_trial=1)[0]
+        bad_req = {
+            "cdk": trial_bot_cdk,
+            "name": "TestBot",
+            "serverAddress": "192.0.2.77:9987",
+            "nickname": "MusicBot",
+            "webUsername": "a",  # 太短，非法
+            "webPassword": "password123"
+        }
+        resp = client.post("/api/redeem-bot", json=bad_req)
+        self.assertEqual(resp.status_code, 400)
+        self.assertIn("长度必须为 3 到 32", resp.json()["message"])
+        # CDK 必须未被锁定，仍为 unused
+        self.assertEqual(database.get_cdk(trial_bot_cdk)["status"], "unused")
+        # 体验服务器记录表中不得残留 pending 预占
+        has_trial, _ = database.has_server_used_trial("192.0.2.77", 9987)
+        self.assertFalse(has_trial)
+
+        # 3. 体验卡对称式解析匹配测试
+        direct_ip_cdk = database.create_cdks(count=1, cdk_type="teamspeak", is_trial=1)[0]
+        database.record_trial_server(
+            addr="198.51.100.88",
+            port=9987,
+            cdk_code=direct_ip_cdk,
+            cdk_type="teamspeak",
+            target_id="test-sym-1"
+        )
+        # 用域名形式去预占（mock normalize_server_target 模拟域名解析至该 IP）
+        mock_norm = ("ts.symtest.com:9987", "ts.symtest.com", 9987, "198.51.100.88", "198.51.100.88:9987")
+        with patch("database.normalize_server_target", return_value=mock_norm):
+            ok_res, _ = database.reserve_trial_server("ts.symtest.com", 9987, "DUMMY-CDK", "teamspeak")
+            self.assertFalse(ok_res, "应当识别出解析后的 IP 已被使用过体验卡并拦截预占")
+
+        # 4. Aliyun POP API 请求 URL 中的 RFC 3986 %20 编码验证
+        with patch("urllib.request.urlopen") as mock_urlopen:
+            mock_resp = MagicMock()
+            mock_resp.read.return_value = json.dumps({"DomainName": "example.com", "DomainId": "123"}).encode("utf-8")
+            mock_urlopen.return_value.__enter__.return_value = mock_resp
+
+            AliyunDnsProvider._request("AddDomainRecord", "test_id", "test_secret", {
+                "Value": "0 5 60001 node1.example.com"
+            })
+            call_req = mock_urlopen.call_args[0][0]
+            url = call_req.full_url
+            self.assertIn("0%205%2060001%20node1.example.com", url)
+            self.assertNotIn("0+5+60001+node1.example.com", url)
+
+        # 5. create_ts_srv_record 自动清洗意外携带的端口号
+        dummy_dns_cfg = {
+            "dns_enabled": True,
+            "dns_provider": "cloudflare",
+            "dns_root_domain": "example.com",
+            "dns_target_host": "node1.example.com:9987",
+            "dns_cf_token": "token",
+            "dns_cf_zone_id": "zone"
+        }
+        with patch.object(CloudflareDnsProvider, "create_srv_record", return_value=(True, "rec-id", "ts.example.com", None)) as mock_cf_create:
+            ok, _, _, _ = dns_service.create_ts_srv_record("subtest", "fallback.host", 9987, dns_cfg=dummy_dns_cfg)
+            self.assertTrue(ok)
+            passed_target = mock_cf_create.call_args[0][4]
+            self.assertEqual(passed_target, "node1.example.com")
+
+        # 6. Tencent delete_record 遇到非数字 RecordId 时安全返回错误而不是抛出未捕获异常
+        ok_tc, err_tc = TencentDnsProvider.delete_record("sec_id", "sec_key", "example.com", "invalid-id-xyz")
+        self.assertFalse(ok_tc)
+        self.assertIn("非法", err_tc)
+
+        # 7. 管理员删除机器人实例时正确解绑 CDK
+        bot_cdk = database.create_cdks(count=1, cdk_type="music_bot")[0]
+        bot_id = "test-bot-del-unbind"
+        database.create_bot_instance(
+            bot_id=bot_id,
+            name="DelBot",
+            server_address="127.0.0.1",
+            server_port=9987,
+            nickname="MusicBot",
+            cdk_code=bot_cdk
+        )
+        database.bind_cdk_bot(bot_cdk, bot_id)
+        self.assertEqual(database.get_cdk(bot_cdk)["status"], "used")
+
+        with patch.object(music_bot_client, "delete_bot", return_value=(True, {})):
+            admin_headers = {"X-Admin-Password": database.get_admin_password()}
+            del_resp = client.post(f"/api/admin/bots/{bot_id}/action", json={"action": "delete"}, headers=admin_headers)
+            self.assertEqual(del_resp.status_code, 200)
+            self.assertTrue(del_resp.json()["success"])
+
+        # CDK 应被解绑并重置为 unused
+        cdk_after = database.get_cdk(bot_cdk)
+        self.assertEqual(cdk_after["status"], "unused")
+        self.assertIsNone(cdk_after["bot_id"])
+
+    def test_renew_instance_trial_ip_check(self):
+        """测试 TeamSpeak 实例使用体验卡续费时严格受 IP 体验限制与预占保护"""
+        from fastapi.testclient import TestClient
+        import app as ts_app
+        client = TestClient(ts_app.app)
+
+        inst_id = 301
+        owner_cdk = database.create_cdks(count=1, cdk_type="teamspeak")[0]
+        database.create_instance(
+            instance_id=inst_id,
+            name="ts301",
+            container_name="ts-teamspeak-301",
+            dir_path="/data/teamspeak/ts301",
+            voice_port=60301,
+            file_port=20301,
+            query_port=30301,
+            tsdns_port=40301,
+            admin_token="tok-301",
+            cdk_code=owner_cdk,
+            duration_months=1,
+            expire_at="2020-01-01 00:00:00",
+            status="running",
+        )
+        database.bind_cdk_instance(owner_cdk, inst_id)
+
+        # 模拟该 IP 之前已领取过体验卡
+        test_ip = "203.0.113.195"
+        prior_trial_cdk = database.create_cdks(count=1, cdk_type="teamspeak", is_trial=1)[0]
+        database.record_trial_server("dummy.com", 9987, prior_trial_cdk, "teamspeak", target_id="prior-inst", client_ip=test_ip)
+
+        new_trial_cdk = database.create_cdks(count=1, cdk_type="teamspeak", is_trial=1)[0]
+        # 发送续费请求，开启 TRUST_PROXY_HEADERS 并带上 X-Forwarded-For 模拟用户真实公网 IP
+        with patch.object(ts_app.config, "TRUST_PROXY_HEADERS", True):
+            headers = {"X-Forwarded-For": test_ip}
+            resp = client.post("/api/renew-instance", json={"cdk": new_trial_cdk, "instance_id": inst_id}, headers=headers)
+            self.assertEqual(resp.status_code, 400)
+            self.assertIn("近期已兑换过 TeamSpeak 体验服务器", resp.json()["message"])
+            # CDK 必须未被核销，仍处于 unused
+            self.assertEqual(database.get_cdk(new_trial_cdk)["status"], "unused")
+
 
 if __name__ == "__main__":
     unittest.main()

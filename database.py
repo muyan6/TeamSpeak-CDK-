@@ -640,21 +640,21 @@ def get_all_cdks() -> List[Dict[str, Any]]:
 
 def delete_cdk(code: str) -> bool:
     """
-    删除 CDK。
-    注意：刻意保留 instances/bot_instances 上的 cdk_code 引用，以便 CDK 被误删后
-    仍能通过绑定关系自愈恢复（restore_*_cdk 依赖该引用），因此这里不做级联清空。
+    删除/吊销 CDK。
+    初次删除时将 status 置为 'disabled'（软删除/吊销），保留审计痕迹并防止前台自愈复活；
+    若该 CDK 已经处于 'disabled' 状态，则执行物理清理（彻底删除记录）。
     """
     clean = (code or "").strip()
     with get_connection() as conn:
         cursor = conn.cursor()
-        # 改为「吊销」而非物理删除：
-        # 1) 保留审计痕迹，避免卡密在统计中凭空消失；
-        # 2) 阻止 restore_*_cdk 自愈逻辑把已删除的卡密重新复活；
-        # 3) 前台再次输入该 CDK 时会明确收到「已被系统禁用」而不是「无效」。
-        cursor.execute(
-            "UPDATE cdks SET status = 'disabled' WHERE code = ? AND status != 'disabled'",
-            (clean,)
-        )
+        cursor.execute("SELECT status FROM cdks WHERE code = ?", (clean,))
+        row = cursor.fetchone()
+        if not row:
+            return False
+        if row["status"] != "disabled":
+            cursor.execute("UPDATE cdks SET status = 'disabled' WHERE code = ?", (clean,))
+        else:
+            cursor.execute("DELETE FROM cdks WHERE code = ?", (clean,))
         conn.commit()
         return cursor.rowcount > 0
 
@@ -837,9 +837,13 @@ def reserve_trial_server(
             (stale_pending_before,)
         )
         cursor.execute(
-            "SELECT * FROM trial_server_records WHERE server_key = ? "
-            "OR (? IS NOT NULL AND resolved_key = ?)",
-            (server_key, resolved_key, resolved_key)
+            """
+            SELECT * FROM trial_server_records 
+            WHERE server_key = ? 
+               OR (resolved_key IS NOT NULL AND resolved_key = ?)
+               OR (? IS NOT NULL AND (server_key = ? OR resolved_key = ?))
+            """,
+            (server_key, server_key, resolved_key, resolved_key, resolved_key)
         )
         existing = cursor.fetchone()
         if existing:

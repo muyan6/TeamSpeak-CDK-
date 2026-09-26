@@ -1369,6 +1369,17 @@ def redeem_bot_instance(req: RedeemBotRequest, request: Request):
     except (TypeError, ValueError, OSError) as e:
         return JSONResponse(status_code=400, content={"success": False, "message": f"服务器地址或端口无效: {e}"})
 
+    # 校验用户输入的后台账号密码（若提供）
+    web_username = (req.webUsername or "").strip()
+    web_password = (req.webPassword or "").strip()
+    if web_username or web_password:
+        if not web_username or len(web_username) < 3 or len(web_username) > 32:
+            return JSONResponse(status_code=400, content={"success": False, "message": "后台账号用户名长度必须为 3 到 32 个字符"})
+        if not re.match(r"^[a-zA-Z0-9_\-\.@]+$", web_username):
+            return JSONResponse(status_code=400, content={"success": False, "message": "用户名包含非法字符，仅支持字母、数字、下划线、短横线与点"})
+        if not web_password or len(web_password) < 8:
+            return JSONResponse(status_code=400, content={"success": False, "message": "后台账号密码长度不能少于 8 位"})
+
     claimed_cdk = claim_cdk(code, "music_bot")
     if not claimed_cdk:
         return claim_error_response(code, "music_bot")
@@ -1387,20 +1398,6 @@ def redeem_bot_instance(req: RedeemBotRequest, request: Request):
                 "success": False,
                 "message": "该服务器已使用过体验卡，每个服务器只能使用一次体验卡，请联系退款"
             })
-
-    # 校验用户输入的后台账号密码（若提供）
-    web_username = (req.webUsername or "").strip()
-    web_password = (req.webPassword or "").strip()
-    if web_username or web_password:
-        if not web_username or len(web_username) < 3 or len(web_username) > 32:
-            release_cdk_claim(code)
-            return JSONResponse(status_code=400, content={"success": False, "message": "后台账号用户名长度必须为 3 到 32 个字符"})
-        if not re.match(r"^[a-zA-Z0-9_\-\.@]+$", web_username):
-            release_cdk_claim(code)
-            return JSONResponse(status_code=400, content={"success": False, "message": "用户名包含非法字符，仅支持字母、数字、下划线、短横线与点"})
-        if not web_password or len(web_password) < 8:
-            release_cdk_claim(code)
-            return JSONResponse(status_code=400, content={"success": False, "message": "后台账号密码长度不能少于 8 位"})
 
     # 调用远程音乐机器人 API 创建实例
     try:
@@ -1691,7 +1688,8 @@ def renew_bot_endpoint(req: RenewBotRequest, request: Request):
                 cdk_code=code,
                 cdk_type="music_bot",
                 target_id=req.bot_id,
-                raw_input=f"{bot['server_address']}:{bot['server_port']}"
+                raw_input=f"{bot['server_address']}:{bot['server_port']}",
+                client_ip=real_client_ip
             )
         except Exception as e:
             update_bot_instance_expiry(req.bot_id, bot["expire_at"])
@@ -1764,19 +1762,39 @@ def renew_instance_endpoint(req: RenewInstanceRequest, request: Request):
     cdk_info = claimed_cdk
 
     client_host = get_public_host(request)
+    real_client_ip = get_real_client_ip(request)
 
     # 体验卡续费检测
     is_trial = cdk_info.get("is_trial", 0)
     trial_reserved = False
+    ip_trial_reserved = False
     # 指纹地址必须与开通时 record_trial_server 写入的保持一致（绑定过域名就用域名，
     # 否则同一台机器会因为「域名」与「Host 头」两个不同 key 而被误判为可用，绕过防刷）。
     trial_target_addr = instance.get("subdomain") or client_host
     if is_trial:
+        has_used, trial_rec = has_ip_used_teamspeak_trial(real_client_ip)
+        if has_used:
+            release_cdk_claim(code)
+            return JSONResponse(status_code=400, content={
+                "success": False,
+                "message": f"您的 IP ({real_client_ip}) 近期已兑换过 TeamSpeak 体验服务器（CDK: {trial_rec.get('cdk_code', '')}），7 天内限体验 1 次！"
+            })
+        ip_reserved_ok, _ = reserve_trial_client_ip(real_client_ip, code, "teamspeak")
+        if not ip_reserved_ok:
+            release_cdk_claim(code)
+            return JSONResponse(status_code=400, content={
+                "success": False,
+                "message": "该客户端近期已领取过体验服务器，7 天内限体验 1 次！"
+            })
+        ip_trial_reserved = True
+
         trial_reserved, rec = reserve_trial_server(
             trial_target_addr, instance["voice_port"], code, "teamspeak",
             raw_input=f"{trial_target_addr}:{instance['voice_port']}"
         )
         if not trial_reserved:
+            if ip_trial_reserved:
+                release_trial_client_ip(real_client_ip, code)
             release_cdk_claim(code)
             return JSONResponse(status_code=400, content={
                 "success": False,
@@ -1788,12 +1806,16 @@ def renew_instance_endpoint(req: RenewInstanceRequest, request: Request):
     if not renewed_inst:
         if trial_reserved:
             release_trial_reservation(trial_target_addr, instance["voice_port"], code)
+        if ip_trial_reserved:
+            release_trial_client_ip(real_client_ip, code)
         release_cdk_claim(code)
         return JSONResponse(status_code=500, content={"success": False, "message": "TeamSpeak 实例续费失败"})
     if not bind_cdk_instance(code, req.instance_id):
         update_instance_expiry(req.instance_id, instance["expire_at"])
         if trial_reserved:
             release_trial_reservation(trial_target_addr, instance["voice_port"], code)
+        if ip_trial_reserved:
+            release_trial_client_ip(real_client_ip, code)
         release_cdk_claim(code)
         return JSONResponse(status_code=500, content={"success": False, "message": "续费卡绑定失败"})
 
@@ -1805,13 +1827,17 @@ def renew_instance_endpoint(req: RenewInstanceRequest, request: Request):
                 cdk_code=code,
                 cdk_type="teamspeak",
                 target_id=str(req.instance_id),
-                raw_input=f"{trial_target_addr}:{instance['voice_port']}"
+                raw_input=f"{trial_target_addr}:{instance['voice_port']}",
+                client_ip=real_client_ip
             )
+            confirm_trial_client_ip(real_client_ip, code, target_id=str(req.instance_id))
         except Exception as e:
             update_instance_expiry(req.instance_id, instance["expire_at"])
             unbind_cdk_instance(code, req.instance_id)
             if trial_reserved:
                 release_trial_reservation(trial_target_addr, instance["voice_port"], code)
+            if ip_trial_reserved:
+                release_trial_client_ip(real_client_ip, code)
             return JSONResponse(status_code=500, content={"success": False, "message": f"体验记录失败: {e}"})
 
     # 尝试重新拉起/启动 TS 容器
@@ -2005,6 +2031,8 @@ def manage_admin_bot(bot_id: str, req: BotActionRequest, _: bool = Depends(verif
         if not ok:
             return JSONResponse(status_code=500, content={"success": False, "message": f"远程机器人删除失败: {res}"})
         delete_bot_instance(bot_id)
+        if bot.get("cdk_code"):
+            unbind_cdk_bot(bot["cdk_code"], bot_id)
         return {"success": True, "message": f"机器人 {bot['name']} 已删除"}
 
     else:
@@ -2290,8 +2318,12 @@ def _batch_bot_one(bot_id: str, action: str) -> Tuple[str, bool, str]:
             ok, res = music_bot_client.delete_bot(bot_id)
             if not ok:
                 return bot_id, False, str(res)
+            bot = get_bot_instance_by_id(bot_id)
+            cdk_code = bot.get("cdk_code") if bot else None
             if not delete_bot_instance(bot_id):
                 return bot_id, False, "远程已删除，但本地记录清理失败"
+            if cdk_code:
+                unbind_cdk_bot(cdk_code, bot_id)
             return bot_id, True, ""
         return bot_id, False, f"不支持的操作: {action}"
     except Exception as e:
@@ -2376,8 +2408,16 @@ def generate_cdks_api(req: GenerateCdksRequest, _: bool = Depends(verify_admin))
 
 @app.delete("/api/admin/cdks/{code}")
 def delete_cdk_api(code: str, _: bool = Depends(verify_admin)):
-    ok = delete_cdk(code)
-    return {"success": ok}
+    clean_code = (code or "").strip()
+    cdk = get_cdk(clean_code)
+    if not cdk:
+        return JSONResponse(status_code=404, content={"success": False, "message": "CDK 不存在"})
+    was_disabled = (cdk.get("status") == "disabled")
+    ok = delete_cdk(clean_code)
+    if not ok:
+        return JSONResponse(status_code=500, content={"success": False, "message": "删除 CDK 失败"})
+    action_desc = "已彻底清理并物理删除" if was_disabled else "已禁用/吊销"
+    return {"success": True, "message": f"CDK【{clean_code}】{action_desc}"}
 
 @app.post("/api/admin/cdks/batch-delete")
 def batch_delete_cdks_api(req: BatchDeleteCdksRequest, _: bool = Depends(verify_admin)):
