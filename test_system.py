@@ -1476,6 +1476,156 @@ class TestTeamSpeakManager(unittest.TestCase):
             self.assertEqual(val, "fallback_val")
         temp_mem_db.close()
 
+    def test_safe_host_candidate_with_port(self):
+        """
+        Host 头在非默认端口下形如 "example.com:12345"，旧实现会整串判非法并静默退化为 127.0.0.1，
+        导致对外连接地址、ts3server:// 链接与 SRV 目标全部指向本机。
+        """
+        import app as ts_app
+
+        self.assertEqual(ts_app._safe_host_candidate("ts.example.com:12345"), "ts.example.com")
+        self.assertEqual(ts_app._safe_host_candidate("1.2.3.4:12345"), "1.2.3.4")
+        self.assertEqual(ts_app._safe_host_candidate("[2001:db8::1]:12345"), "2001:db8::1")
+        self.assertEqual(ts_app._safe_host_candidate("ts.example.com"), "ts.example.com")
+        # 伪造/畸形 Host 仍必须被拒绝
+        self.assertIsNone(ts_app._safe_host_candidate("a.com/x"))
+        self.assertIsNone(ts_app._safe_host_candidate("a.com:99999"))
+        self.assertIsNone(ts_app._safe_host_candidate(""))
+        self.assertEqual(ts_app._safe_host_candidate("a.com, b.com:80"), "a.com")
+
+    def test_renew_requires_ownership_before_returning_credentials(self):
+        """
+        实例编号是连续自增整数，可被枚举。任何持有闲置 CDK 的人调用 /api/renew-instance
+        都不应拿到他人服务器的 admin_token / query_password。
+        """
+        try:
+            from fastapi.testclient import TestClient
+            import app as ts_app
+            client = TestClient(ts_app.app)
+        except Exception:
+            self.skipTest("FastAPI TestClient 依赖不可用")
+
+        owner_cdk = database.create_cdks(count=1, remark="owner", cdk_type="teamspeak", duration_months=1)[0]
+        database.create_instance(
+            instance_id=201,
+            name="ts201",
+            container_name="ts-teamspeak-201",
+            dir_path="/data/teamspeak/ts201",
+            voice_port=60201,
+            file_port=20201,
+            query_port=30201,
+            tsdns_port=40201,
+            admin_token="SECRET-TOKEN-VALUE",
+            query_password="SECRET-QUERY-PWD",
+            query_apikey="SECRET-API-KEY",
+            cdk_code=owner_cdk,
+            duration_months=1,
+            expire_at="2020-01-01 00:00:00",
+            status="running",
+        )
+        database.bind_cdk_instance(owner_cdk, 201)
+
+        # 攻击者用自己的闲置卡续费他人实例
+        attacker_cdk = database.create_cdks(count=1, remark="atk", cdk_type="teamspeak", duration_months=1)[0]
+        resp = client.post("/api/renew-instance", json={"cdk": attacker_cdk, "instance_id": 201})
+        self.assertEqual(resp.status_code, 200)
+        body = resp.json()
+        self.assertTrue(body["success"])
+        view = body["instance"]
+        self.assertNotIn("admin_token", view)
+        self.assertNotIn("query_password", view)
+        self.assertNotIn("query_apikey", view)
+        self.assertNotIn("dir_path", view)
+        self.assertTrue(view["has_admin_token"])
+        self.assertNotIn("SECRET-TOKEN-VALUE", resp.text)
+        self.assertNotIn("SECRET-QUERY-PWD", resp.text)
+
+        # 出示原始 CDK 时仍能拿回明文（正常用户不受影响）
+        renew_card = database.create_cdks(count=1, remark="renew", cdk_type="teamspeak", duration_months=1)[0]
+        ok_resp = client.post(
+            "/api/renew-instance",
+            json={"cdk": renew_card, "instance_id": 201, "owner_cdk": owner_cdk},
+        )
+        ok_body = ok_resp.json()
+        self.assertTrue(ok_body["success"])
+        self.assertEqual(ok_body["instance"]["admin_token"], "SECRET-TOKEN-VALUE")
+
+    def test_renew_bot_requires_ownership_before_returning_web_password(self):
+        """机器人续费同理：未出示原始 CDK 时不回传 web_password 明文。"""
+        try:
+            from fastapi.testclient import TestClient
+            import app as ts_app
+            client = TestClient(ts_app.app)
+        except Exception:
+            self.skipTest("FastAPI TestClient 依赖不可用")
+
+        owner_cdk = database.create_cdks(count=1, remark="botowner", cdk_type="music_bot", duration_months=1)[0]
+        database.create_bot_instance(
+            bot_id="bot-secret-777",
+            name="SecretBot",
+            server_address="1.2.3.4",
+            server_port=9987,
+            nickname="SB",
+            cdk_code=owner_cdk,
+            duration_months=1,
+            expire_at="2020-01-01 00:00:00",
+            web_username="victim",
+            web_password="VICTIM-WEB-PWD",
+        )
+        database.bind_cdk_bot(owner_cdk, "bot-secret-777")
+
+        attacker_cdk = database.create_cdks(count=1, remark="botatk", cdk_type="music_bot", duration_months=1)[0]
+        with patch.object(ts_app.music_bot_client, "start_bot", return_value=(True, "ok")):
+            resp = client.post("/api/renew-bot", json={"cdk": attacker_cdk, "bot_id": "bot-secret-777"})
+        body = resp.json()
+        self.assertTrue(body["success"])
+        self.assertNotIn("web_password", body["instance"])
+        self.assertTrue(body["instance"]["has_web_password"])
+        self.assertNotIn("VICTIM-WEB-PWD", resp.text)
+
+    def test_trial_fingerprint_consistent_between_redeem_and_renew(self):
+        """
+        体验卡指纹地址在「开通」与「续费」两条路径上必须一致：
+        实例绑定了域名时续费也必须按域名登记，否则同一台机器会因域名/Host 两个 key 而被判定为可用，绕过防刷。
+        """
+        from fastapi.testclient import TestClient
+        import app as ts_app
+
+        client = TestClient(ts_app.app)
+        owner_cdk = database.create_cdks(count=1, remark="trial-owner", cdk_type="teamspeak", duration_months=1)[0]
+        inst = database.create_instance(
+            instance_id=202,
+            name="ts202",
+            container_name="ts-teamspeak-202",
+            dir_path="/data/teamspeak/ts202",
+            voice_port=60202,
+            file_port=20202,
+            query_port=30202,
+            tsdns_port=40202,
+            admin_token="tok-202",
+            cdk_code=owner_cdk,
+            duration_months=1,
+            expire_at="2020-01-01 00:00:00",
+            status="running",
+            subdomain="room202.example.com",
+        )
+        database.update_instance_domain(202, "room202.example.com", "rec-202", domain_provider="cloudflare")
+        database.bind_cdk_instance(owner_cdk, 202)
+
+        trial_cdk = database.create_cdks(
+            count=1, remark="trial", cdk_type="teamspeak", duration_months=1, is_trial=1
+        )[0]
+        with patch.object(ts_app, "start_instance_container", return_value=True):
+            resp = client.post("/api/renew-instance", json={"cdk": trial_cdk, "instance_id": 202})
+        self.assertEqual(resp.status_code, 200)
+        self.assertTrue(resp.json()["success"])
+
+        # 指纹应以域名维度登记，而不是请求的 Host
+        used, rec = database.has_server_used_trial("room202.example.com", inst["voice_port"])
+        self.assertTrue(used)
+        self.assertIsNotNone(rec)
+
+
 if __name__ == "__main__":
     unittest.main()
 

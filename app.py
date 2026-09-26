@@ -272,10 +272,16 @@ class BotActionRequest(BaseModel):
 class RenewBotRequest(BaseModel):
     cdk: str = Field(min_length=1, max_length=128)
     bot_id: str = Field(min_length=1, max_length=128)
+    # 可选的所有权凭证：填入该实例「开通时的原始 CDK」。校验通过才回传凭据明文，
+    # 未提供/不匹配时只回传脱敏视图（见 _mask_bot_secrets）。
+    owner_cdk: Optional[str] = Field(default=None, max_length=128)
 
 class RenewInstanceRequest(BaseModel):
     cdk: str = Field(min_length=1, max_length=128)
     instance_id: int = Field(gt=0)
+    # 同 RenewBotRequest.owner_cdk：实例编号是连续自增整数，可被枚举，
+    # 因此必须额外用原始 CDK 证明所有权，才能拿回 admin_token / query_password。
+    owner_cdk: Optional[str] = Field(default=None, max_length=128)
 
 class BatchDeleteFilter(BaseModel):
     cdk_type: Literal["all", "teamspeak", "music_bot"] = "all"
@@ -547,12 +553,42 @@ def verify_admin(
 _HOST_HEADER_RE = re.compile(r"^[A-Za-z0-9._\-]+$")
 
 def _safe_host_candidate(value: str) -> Optional[str]:
-    """仅接受纯主机名/IP 形式（字母数字、点、下划线、短横线），拒绝带端口/路径/空格的伪造 Host。"""
+    """
+    仅接受纯主机名/IP 形式（字母数字、点、下划线、短横线），拒绝带路径/空格的伪造 Host。
+
+    注意：浏览器在非默认端口访问时 Host 头形如 "example.com:12345"、IPv6 则为 "[::1]:12345"。
+    旧实现直接把整串丢给正则，含冒号即判非法，于是所有「非 80/443 端口 + 域名访问」的部署
+    都会退化成 127.0.0.1，导致前台展示、ts3server:// 链接与 SRV 目标全部指向本机。
+    这里改为先剥离端口再校验主机名部分。
+    """
     host = (value or "").strip().split(",")[0].strip()
+    if not host or len(host) > 260:
+        return None
+
+    # IPv6 字面量：[::1] 或 [::1]:12345
+    if host.startswith("["):
+        end = host.find("]")
+        if end == -1:
+            return None
+        inner = host[1:end]
+        rest = host[end + 1:]
+        if rest and not rest.startswith(":"):
+            return None
+        try:
+            ipaddress.IPv6Address(inner)
+        except ValueError:
+            return None
+        return inner
+
+    # 剥离 ":port"（只允许一处冒号且端口合法，借此挡住 "host:port:junk" 与路径注入）
+    if ":" in host:
+        name, _, port = host.rpartition(":")
+        if not port.isdigit() or not (1 <= int(port) <= 65535):
+            return None
+        host = name
+
     if not host or len(host) > 253:
         return None
-    if host.startswith("[") and host.endswith("]"):
-        host = host[1:-1]
     if not _HOST_HEADER_RE.match(host):
         return None
     return host
@@ -1675,11 +1711,15 @@ def renew_bot_endpoint(req: RenewBotRequest, request: Request):
         renewed_bot["status"] = "stopped"
         start_desc = f"续费成功，但自动启动失败: {start_res}"
 
+    # 凭据只在请求方出示了该机器人「开通时的原始 CDK」时才回传明文；
+    # 否则一律脱敏，避免枚举 bot_id 就能顺走别人的 web_password。
+    owner_ok = _verify_bot_access(bot, req.owner_cdk) or _verify_bot_access(bot, code)
+    instance_view = renewed_bot if owner_ok else _mask_bot_secrets(renewed_bot)
     return {
         "success": True,
         "type": "music_bot",
         "message": f"🎉 续费成功！机器人有效期已顺延至: {renewed_bot['expire_at']}；{start_desc}",
-        "instance": renewed_bot,
+        "instance": instance_view,
         "bot_panel_url": get_bot_config()["bot_panel_url"]
     }
 
@@ -1728,10 +1768,13 @@ def renew_instance_endpoint(req: RenewInstanceRequest, request: Request):
     # 体验卡续费检测
     is_trial = cdk_info.get("is_trial", 0)
     trial_reserved = False
+    # 指纹地址必须与开通时 record_trial_server 写入的保持一致（绑定过域名就用域名，
+    # 否则同一台机器会因为「域名」与「Host 头」两个不同 key 而被误判为可用，绕过防刷）。
+    trial_target_addr = instance.get("subdomain") or client_host
     if is_trial:
         trial_reserved, rec = reserve_trial_server(
-            client_host, instance["voice_port"], code, "teamspeak",
-            raw_input=f"{client_host}:{instance['voice_port']}"
+            trial_target_addr, instance["voice_port"], code, "teamspeak",
+            raw_input=f"{trial_target_addr}:{instance['voice_port']}"
         )
         if not trial_reserved:
             release_cdk_claim(code)
@@ -1744,31 +1787,31 @@ def renew_instance_endpoint(req: RenewInstanceRequest, request: Request):
     renewed_inst = renew_instance(req.instance_id, add_m)
     if not renewed_inst:
         if trial_reserved:
-            release_trial_reservation(client_host, instance["voice_port"], code)
+            release_trial_reservation(trial_target_addr, instance["voice_port"], code)
         release_cdk_claim(code)
         return JSONResponse(status_code=500, content={"success": False, "message": "TeamSpeak 实例续费失败"})
     if not bind_cdk_instance(code, req.instance_id):
         update_instance_expiry(req.instance_id, instance["expire_at"])
         if trial_reserved:
-            release_trial_reservation(client_host, instance["voice_port"], code)
+            release_trial_reservation(trial_target_addr, instance["voice_port"], code)
         release_cdk_claim(code)
         return JSONResponse(status_code=500, content={"success": False, "message": "续费卡绑定失败"})
 
     if is_trial:
         try:
             record_trial_server(
-                addr=client_host,
+                addr=trial_target_addr,
                 port=instance["voice_port"],
                 cdk_code=code,
                 cdk_type="teamspeak",
                 target_id=str(req.instance_id),
-                raw_input=f"{client_host}:{instance['voice_port']}"
+                raw_input=f"{trial_target_addr}:{instance['voice_port']}"
             )
         except Exception as e:
             update_instance_expiry(req.instance_id, instance["expire_at"])
             unbind_cdk_instance(code, req.instance_id)
             if trial_reserved:
-                release_trial_reservation(client_host, instance["voice_port"], code)
+                release_trial_reservation(trial_target_addr, instance["voice_port"], code)
             return JSONResponse(status_code=500, content={"success": False, "message": f"体验记录失败: {e}"})
 
     # 尝试重新拉起/启动 TS 容器
@@ -1783,12 +1826,20 @@ def renew_instance_endpoint(req: RenewInstanceRequest, request: Request):
         start_desc = "续费成功，但实例自动启动失败"
 
     renewed_inst["public_host"] = client_host
+    renewed_inst["has_domain"] = bool(renewed_inst.get("subdomain"))
+
+    # 凭据只在请求方出示了该实例「开通时的原始 CDK」时才回传明文；
+    # 否则走脱敏视图，堵住「拿着任意一张闲置 CDK 枚举 instance_id 窃取他人服务器凭据」。
+    owner_ok = _verify_instance_access(instance, req.owner_cdk) or _verify_instance_access(instance, code)
+    instance_view = dict(renewed_inst) if owner_ok else _mask_instance_secrets(renewed_inst)
+    instance_view.pop("dir_path", None)
+    instance_view.pop("domain_record_id", None)
 
     return {
         "success": True,
         "type": "teamspeak",
         "message": f"🎉 续费成功！TeamSpeak 服务器有效期已顺延至: {renewed_inst['expire_at']}；{start_desc}",
-        "instance": renewed_inst
+        "instance": instance_view
     }
 
 # --- 管理员 API ---
@@ -1813,6 +1864,38 @@ def get_system_status(_: bool = Depends(verify_admin)):
         "data_base_dir": config.DATA_BASE_DIR,
         "bot_panel_url": get_bot_config()["bot_panel_url"]
     }
+
+def _verify_instance_access(instance: Dict[str, Any], access_cdk: Optional[str]) -> bool:
+    """
+    核对调用方是否持有该 TS 实例「开通时的原始 CDK」。
+
+    实例编号是连续自增的整数（1、2、3…），任何持有闲置 CDK 的人都可以枚举
+    /api/renew-instance 的 instance_id，从而在响应体里拿到别人服务器的
+    admin_token / query_password。这里要求出示能力凭证，与
+    /api/bot-instances/{id}/action 的既有模型保持一致。
+    """
+    code = (access_cdk or "").strip().upper()
+    if not code:
+        return False
+    bound = (instance.get("cdk_code") or "").strip().upper()
+    if bound:
+        return code == bound
+    # 兼容早期没有 instances.cdk_code 的数据：回退查 cdks 表的绑定关系
+    info = get_cdk(code)
+    return bool(info) and info.get("instance_id") == instance.get("id")
+
+
+def _verify_bot_access(bot: Dict[str, Any], access_cdk: Optional[str]) -> bool:
+    """核对调用方是否持有该机器人「开通时的原始 CDK」（理由同 _verify_instance_access）。"""
+    code = (access_cdk or "").strip().upper()
+    if not code:
+        return False
+    bound = (bot.get("cdk_code") or "").strip().upper()
+    if bound:
+        return code == bound
+    info = get_cdk(code)
+    return bool(info) and (info.get("bot_id") or "") == (bot.get("bot_id") or "")
+
 
 def _mask_instance_secrets(inst: Dict[str, Any]) -> Dict[str, Any]:
     """

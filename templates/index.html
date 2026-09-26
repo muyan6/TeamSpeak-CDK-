@@ -338,7 +338,7 @@
               </div>
               <div>
                 <label class="info-label">后台登录密码 (≥8位)</label>
-                <input type="text" id="botWebPassInput" class="form-control" style="width: 100%; font-family: 'Consolas', 'Courier New', monospace;" placeholder="请输入至少 8 位密码" maxlength="64" autocomplete="off">
+                <input type="password" id="botWebPassInput" class="form-control" style="width: 100%; font-family: 'Consolas', 'Courier New', monospace;" placeholder="请输入至少 8 位密码" maxlength="64" autocomplete="new-password">
               </div>
             </div>
           </div>
@@ -445,7 +445,7 @@
 
         <!-- 机器人操作控制栏 -->
         <div class="action-btn-group" style="display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 1rem;">
-          <a id="botWebPanelLink" href="{{ bot_panel_url or 'http://103.71.69.156:23467/' }}" target="_blank" class="btn-primary" style="background: var(--accent-pink-gradient); text-decoration: none;">
+          <a id="botWebPanelLink" href="{{ bot_panel_url or 'http://103.71.69.156:23467/' }}" target="_blank" rel="noopener noreferrer" class="btn-primary" style="background: var(--accent-pink-gradient); text-decoration: none;">
             <i class="fa-solid fa-music"></i> 进入网页点歌 / 播放控制台
           </a>
           <a id="botResultTutorialLink" href="{{ bot_tutorial_url or 'http://103.71.69.156:23452/' }}" target="_blank" rel="noopener noreferrer" class="btn-action" style="text-decoration: none; color: #38bdf8; border-color: rgba(56, 189, 248, 0.4);">
@@ -951,6 +951,15 @@
 
       fetchDnsInfo();
 
+      // 后台配置的外链统一过 safeExternalUrl，避免被污染成 javascript: 伪协议
+      const panelLink = document.getElementById('botWebPanelLink');
+      if (panelLink) {
+        const safePanel = safeExternalUrl(panelLink.getAttribute('href'));
+        if (safePanel) panelLink.href = safePanel;
+        else panelLink.removeAttribute('href');
+      }
+      updateBotTutorialLinks(botTutorialUrl);
+
       const cdkInput = document.getElementById('cdkInput');
       if (cdkInput) {
         cdkInput.addEventListener('input', handleCdkInputChange);
@@ -982,8 +991,10 @@
       const cdk = cdkInput.value.trim().toUpperCase();
       if (!cdk) return;
 
+      // 只要用户填了就提交（后端仍会做权威校验）；
+      // 旧实现依赖异步的 /api/dns-info 结果，请求未返回或失败时会把用户填写的域名静默丢弃成 null
       const subInput = document.getElementById('subdomainInput');
-      const subdomain = (subInput && systemDnsConfig.dns_enabled) ? subInput.value.trim() : null;
+      const subdomain = (subInput && subInput.value.trim()) ? subInput.value.trim() : null;
 
       const submitBtn = document.getElementById('submitBtn');
       const spinner = document.getElementById('loadingSpinner');
@@ -1050,6 +1061,10 @@
         }
 
         // === 分支 2: TeamSpeak 服务器 ===
+        // 兜底：既不是 need_config、也没有 instance 的响应不应把 undefined 传进 renderResult
+        if (!res.instance) {
+          throw new Error(res.message || '服务端未返回服务器实例信息，请稍后重试');
+        }
         currentInstance = res.instance;
         renderResult(res.instance, res.message);
         
@@ -1072,10 +1087,23 @@
       }
     }
 
+    // 优先使用 CSPRNG；Math.random() 生成的后台口令可被预测
+    function randomToken(len) {
+      const alphabet = 'abcdefghijkmnpqrstuvwxyz23456789';
+      const buf = new Uint8Array(len);
+      if (window.crypto && window.crypto.getRandomValues) {
+        window.crypto.getRandomValues(buf);
+      } else {
+        for (let i = 0; i < len; i++) buf[i] = Math.floor(Math.random() * 256);
+      }
+      let out = '';
+      for (let i = 0; i < len; i++) out += alphabet[buf[i] % alphabet.length];
+      return out;
+    }
+
     function generateRandomBotWebAccount() {
-      const randSuffix = Math.random().toString(36).substring(2, 7);
-      const user = 'user_' + randSuffix;
-      const pass = 'mb_' + Math.random().toString(36).substring(2, 8) + '!';
+      const user = 'user_' + randomToken(6);
+      const pass = 'mb_' + randomToken(10) + '!';
       const uInput = document.getElementById('botWebUserInput');
       const pInput = document.getElementById('botWebPassInput');
       if (uInput) uInput.value = user;
@@ -1235,12 +1263,21 @@
       const renewInput = document.getElementById('renewCdkInput');
       const cdk = renewInput.value.trim().toUpperCase();
       if (!cdk) return;
+      if (renewInput.dataset.submitting === '1') return;
+      renewInput.dataset.submitting = '1';
+      const renewBtn = renewInput.closest('form')?.querySelector('button[type="submit"]');
+      if (renewBtn) renewBtn.disabled = true;
 
       try {
         const response = await fetch('/api/renew-bot', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cdk: cdk, bot_id: currentBotInstance.bot_id })
+          // 同 TS 续费：带上原始 CDK 才能在响应中拿回 Web 点歌账号明文密码
+          body: JSON.stringify({
+            cdk: cdk,
+            bot_id: currentBotInstance.bot_id,
+            owner_cdk: currentBotInstance.cdk_code || null
+          })
         });
 
         if (!response.ok) {
@@ -1254,10 +1291,11 @@
         renewInput.value = '';
         renderBotResult(res.instance, res.bot_panel_url);
         showToast(res.message || '续费成功！', 'success');
-        alert(res.message || '续费成功！');
       } catch (err) {
         showToast(err.message || '续费异常', 'error');
-        alert(err.message || '续费异常');
+      } finally {
+        renewInput.dataset.submitting = '';
+        if (renewBtn) renewBtn.disabled = false;
       }
     }
 
@@ -1354,12 +1392,24 @@
       const renewInput = document.getElementById('renewTsCdkInput');
       const cdk = renewInput.value.trim().toUpperCase();
       if (!cdk) return;
+      // 重入保护：双击会让第一次已 claim 的 CDK 在第二次返回 409，
+      // 用户看到「续费失败」但实际已成功，还会把续费结果覆盖掉。
+      if (renewInput.dataset.submitting === '1') return;
+      renewInput.dataset.submitting = '1';
+      const renewBtn = renewInput.closest('form')?.querySelector('button[type="submit"]');
+      if (renewBtn) renewBtn.disabled = true;
 
       try {
         const response = await fetch('/api/renew-instance', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cdk: cdk, instance_id: currentInstance.id })
+          // owner_cdk 用于向服务端证明所有权：只有出示开通该实例时的原始 CDK，
+          // 响应里才会带回 admin_token / query 密码明文（否则后端按脱敏返回）。
+          body: JSON.stringify({
+            cdk: cdk,
+            instance_id: currentInstance.id,
+            owner_cdk: currentInstance.cdk_code || null
+          })
         });
 
         if (!response.ok) {
@@ -1373,10 +1423,11 @@
         renewInput.value = '';
         renderResult(res.instance, res.message);
         showToast(res.message || '续费成功！', 'success');
-        alert(res.message || '续费成功！');
       } catch (err) {
         showToast(err.message || '续费异常', 'error');
-        alert(err.message || '续费异常');
+      } finally {
+        renewInput.dataset.submitting = '';
+        if (renewBtn) renewBtn.disabled = false;
       }
     }
 
@@ -1486,10 +1537,11 @@
         if (successful) {
           showToast(successMsg, 'success');
         } else {
-          prompt('自动复制受限，请按 Ctrl+C 手动复制：', text);
+          // 不用 prompt() 回显内容：被复制的常常是服务器凭据，弹窗会明文暴露在屏幕上
+          showToast('自动复制受限，请手动选中文本后按 Ctrl+C 复制', 'error');
         }
       } catch (err) {
-        prompt('自动复制受限，请按 Ctrl+C 手动复制：', text);
+        showToast('自动复制受限，请手动选中文本后按 Ctrl+C 复制', 'error');
       }
     }
 
@@ -1497,7 +1549,9 @@
       const el = document.getElementById(elementId);
       if (!el) return;
       const text = el.innerText.trim();
-      copyToClipboard(text, `已复制: ${text}`);
+      // 不要把复制内容回显到 toast / prompt：该函数被用于复制 admin_token、Query 密码等凭据，
+      // 明文出现在浮层里等于把密钥额外暴露给肩窥者与浏览器扩展。
+      copyToClipboard(text, '已复制到剪贴板');
     }
 
     function copyVoiceFull() {
@@ -1572,10 +1626,24 @@
       const connectMatches = [...text.matchAll(/Connect to server:\s*([^\s\r\n]+)/gi)];
       if (connectMatches.length > 0) {
         const last = connectMatches[connectMatches.length - 1][1].trim();
-        if (last.includes(':') && !last.startsWith('http://') && !last.startsWith('https://')) {
+        if (last.startsWith('[') && last.includes(']')) {
+          // IPv6 字面量 [2001:db8::1]:9987 —— 直接 split(':') 会把地址拆坏（与后端解析保持一致）
+          const bracketEnd = last.indexOf(']');
+          connectHost = last.slice(1, bracketEnd).trim();
+          const rest = last.slice(bracketEnd + 1);
+          if (rest.startsWith(':')) {
+            const p = parseInt(rest.slice(1).trim(), 10);
+            if (Number.isInteger(p)) connectPort = p;
+          }
+        } else if (last.includes(':') && !last.startsWith('http://') && !last.startsWith('https://')) {
           const parts = last.split(':');
-          connectHost = parts[0].trim();
-          connectPort = parseInt(parts[1].trim());
+          if (parts.length === 2) {
+            connectHost = parts[0].trim();
+            const p = parseInt(parts[1].trim(), 10);
+            if (Number.isInteger(p)) connectPort = p;
+          } else {
+            connectHost = last;
+          }
         } else {
           connectHost = last;
         }
@@ -1772,7 +1840,9 @@
       const radioContainer = document.getElementById('modalRadioGroup');
       if (radioContainer) {
         let radioHtml = '';
-        if (domainHost && isDomestic) {
+        // 注意：必须排除 isSrv，否则「SRV 中转 + 国内解析」会命中本分支，
+        // 导致 transit/origin 选项永不出现，applyParsedToBot 会误把源站 IP 填入表单。
+        if (!isSrv && domainHost && isDomestic) {
           // 国内域名解析出的国内机房 IP
           const ipVal = result.originIp || recHost;
           radioHtml = `
@@ -1860,6 +1930,8 @@
       showToast(`已提取连接信息！端口: ${localResult.recommendedPort || localResult.transitPort || localResult.resolvedPort}`, 'success');
 
       // 2. 后端异步智能 SRV & GeoIP 双重验证与增强
+      // 按钮期间禁用，避免连点造成并发请求触发后端限流（PARSE_LOG_LIMITER）与结果面板互相覆盖
+      if (btnParse) btnParse.disabled = true;
       try {
         if (btnParse) btnParse.innerHTML = '<i class="fa-solid fa-spinner fa-spin"></i> 正在深度验证线路...';
         const resp = await fetch('/api/parse-ts-target', {
@@ -1896,7 +1968,10 @@
       } catch (e) {
         console.warn('后端主动解析验证跳过:', e);
       } finally {
-        if (btnParse) btnParse.innerHTML = '<i class="fa-solid fa-bolt"></i> 立即解析提取';
+        if (btnParse) {
+          btnParse.disabled = false;
+          btnParse.innerHTML = '<i class="fa-solid fa-bolt"></i> 立即解析提取';
+        }
       }
     }
 
